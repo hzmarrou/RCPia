@@ -12,6 +12,23 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    services:
+      # Same image as local development: the standard postgres image has no pgvector.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: rcpia
+          POSTGRES_PASSWORD: rcpia
+          POSTGRES_DB: rcpia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rcpia -d rcpia"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://rcpia:rcpia@localhost:5432/rcpia_test
     steps:
       - uses: actions/checkout@v5
 
