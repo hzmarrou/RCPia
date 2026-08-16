@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     blob_provider: Literal["local", "azure"] = "local"
     local_blob_root: str = "/data/blobs"
+    azure_storage_connection_string: str = ""
+    azure_storage_container: str = "rcpia"
 
     parser_provider: Literal["llamaparse", "liteparse"] = "llamaparse"
     llamaparse_api_key: str = ""

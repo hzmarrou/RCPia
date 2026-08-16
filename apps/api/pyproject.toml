@@ -17,6 +17,11 @@ dependencies = [
     "argon2-cffi>=25.1.0",
 ]
 
+[project.optional-dependencies]
+# Only needed when BLOB_PROVIDER=azure. A local or on-premises deployment does not
+# install it, which is why the adapter imports the SDK lazily.
+azure = ["azure-storage-blob>=12.23"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -25,6 +30,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "pytest-xdist>=3.8.0",
+    "azure-storage-blob>=12.30.0",
 ]
 
 [build-system]

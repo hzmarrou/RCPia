@@ -88,6 +88,24 @@ https://<web-host>/activate#token=<token>
 Login failures are throttled on two independent budgets — per account and per client
 address — counting failures only, so successful logins never consume quota.
 
+## Blob storage
+
+Dossiers, PPS packages, and Pi session logs live in blob storage; PostgreSQL holds their
+keys and checksums. `BLOB_PROVIDER` selects the backend — `local` (a directory under
+`LOCAL_BLOB_ROOT`) or `azure` (Azure Blob Storage, which needs the `azure` extra:
+`uv sync --extra azure`).
+
+Both backends return the same `BlobInfo` (key, size, content type, SHA-256) and raise the
+same `BlobNotFound`, so nothing above the adapter knows which one is configured.
+
+Two rules the adapter enforces:
+
+- **Blobs are immutable.** Azure uploads use `overwrite=False`, matching the append-only
+  rule in the clinical tables: a correction writes a new key.
+- **Keys never come from filenames.** `rcpia.storage.keys` builds them from case and
+  document identifiers; the uploaded filename is kept in the database as data, not used
+  as a path.
+
 ## Jobs
 
 The queue is PostgreSQL — no Redis or message broker in v1. `rcpia.jobs.service` provides
