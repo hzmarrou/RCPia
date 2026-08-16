@@ -62,8 +62,9 @@ The PPS itself stays this concise. RCPia additionally produces, outside the six 
 - `examples/pps-example-01.md` — PPS for dossier 01
 - `examples/pps-example-02.md` — PPS for dossier 01, second variant
 
-One example is human-written and the other machine-generated; which is which is recorded
-in the commit that added them once confirmed.
+One example is human-written and the other machine-generated. **Which is which is not yet
+confirmed** — pending the treating clinician's answer. Until then, treat both as valid
+targets for the output format, and do not treat either as the quality benchmark.
 
 ## Dossier input fields to extract
 

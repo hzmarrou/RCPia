@@ -16,9 +16,11 @@ none of them are appropriate for production as written.
 `PARSER_PROVIDER=llamaparse` sends each uploaded dossier to LlamaParse Cloud, outside the
 hospital network and likely outside Morocco. Accepted for the MVP.
 
-Consequence: **only de-identified or synthetic dossiers may be uploaded** while this
-remains true. The parser adapter keeps `liteparse` as the local option precisely so a
-production deployment can parse inside the hospital.
+Consequence: **only de-identified or simulated dossiers may be uploaded** while this
+remains true. Simulated dossiers may carry invented patient names — that is fine, since no
+real person is identified. Real patient names must not be uploaded. The parser adapter
+keeps `liteparse` as the local option precisely so a production deployment can parse
+inside the hospital.
 
 ### 2. No de-identification pass before storage
 
@@ -26,8 +28,10 @@ Parsed text is stored verbatim in `document_chunks.text` and in
 `extracted_facts.source_excerpt`, because provenance requires quoting the source. Whatever
 identifiers a dossier contains will therefore land in PostgreSQL.
 
-Consequence: the database inherits the sensitivity of whatever is uploaded. A production
-build needs either a de-identification step at parse time, or an internal database.
+Consequence: the database inherits the sensitivity of whatever is uploaded. Simulated
+names from simulated dossiers will therefore appear in stored chunks and excerpts, which is
+acceptable because they identify nobody. A production build needs either a
+de-identification step at parse time, or an internal database.
 
 ### 3. Patients are identified by dossier number, sex, and age
 
