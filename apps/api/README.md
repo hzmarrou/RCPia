@@ -53,6 +53,29 @@ COMMIT;
 Any such purge must also remove the corresponding blobs and be recorded outside the
 purged tables.
 
+## Authentication
+
+RCPia is invite-only: there is no public sign-up path. Accounts exist only where an
+administrator issued an invitation, with one exception — the first administrator, who is
+created by a command:
+
+```bash
+uv run python -m rcpia.auth.bootstrap "CHU Mohammed VI" admin@example.org
+# password read from RCPIA_BOOTSTRAP_PASSWORD, or prompted
+```
+
+Endpoints: `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`,
+`POST /auth/invitations` (admin), `GET /auth/invitations/{token}`,
+`DELETE /auth/invitations/{id}` (admin), `POST /auth/activate`.
+
+Sessions are server-side rows in `auth_sessions`, referenced by an httpOnly cookie.
+Revocation is therefore immediate: signing out or deactivating a user invalidates existing
+sessions on the next request. Only SHA-256 digests of session and invitation tokens are
+stored; passwords use Argon2id with a 12-character minimum.
+
+Roles are `admin`, `uploader`, `viewer`. Routes opt into protection explicitly via
+`require_role(...)` — anything not behind such a dependency is public.
+
 ## Jobs
 
 The queue is PostgreSQL — no Redis or message broker in v1. `rcpia.jobs.service` provides
@@ -71,3 +94,8 @@ Installing behind a mirror (see the root README) makes uv rewrite those entries 
 mirror URL — if a dependency change does that, rewrite them back to `pypi.org/simple`
 before committing, and never commit a `[[tool.uv.index]]` block pointing at an internal
 mirror.
+
+`uv add` does both of those things when `UV_DEFAULT_INDEX` is set, every time. After
+adding a dependency behind the mirror, remove the `[[tool.uv.index]]` block from
+`pyproject.toml` and rewrite the lockfile URLs back before committing. Use
+`uv run --frozen ...` for everything else, which never re-locks.

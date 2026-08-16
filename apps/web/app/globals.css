@@ -6,6 +6,9 @@
   --border: #d9dce3;
   --warn-bg: #fff5e6;
   --warn-fg: #7a4b00;
+  /* Missing information is shown in red, uncertain or conflicting in amber. */
+  --danger-bg: #fdecec;
+  --danger-fg: #93231f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -16,6 +19,8 @@
     --border: #2b3038;
     --warn-bg: #2e2312;
     --warn-fg: #f0c37a;
+    --danger-bg: #2f1616;
+    --danger-fg: #f3a09b;
   }
 }
 
@@ -43,4 +48,64 @@ main {
   max-width: 60rem;
   margin: 0 auto;
   padding: 2rem 1.25rem;
+}
+
+a {
+  color: inherit;
+}
+
+.panel {
+  max-width: 32rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.925rem;
+}
+
+.error {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-fg);
+  border-radius: 0.375rem;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.925rem;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 1.5rem 0;
+}
+
+label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+input {
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+button {
+  align-self: flex-start;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--fg);
+  color: var(--bg);
+  font: inherit;
+  cursor: pointer;
+}
+
+button[disabled] {
+  opacity: 0.6;
+  cursor: progress;
 }

@@ -193,6 +193,31 @@ class Invitation(TimestampMixin, Base):
     )
 
 
+class AuthSession(TimestampMixin, Base):
+    """A logged-in session.
+
+    Sessions are server-side rather than self-contained tokens, so an account can be
+    revoked immediately — signing out, or an administrator disabling a user, takes effect
+    on the next request instead of when a token happens to expire. Only the hash of the
+    session token is stored, so a database leak does not hand over live sessions.
+    """
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user_agent: Mapped[str | None] = mapped_column(String(400))
+    ip_address: Mapped[str | None] = mapped_column(String(64))
+
+    __table_args__ = (Index("ix_auth_sessions_user_id", "user_id"),)
+
+
 class Case(TimestampMixin, Base):
     __tablename__ = "cases"
 
