@@ -53,6 +53,17 @@ COMMIT;
 Any such purge must also remove the corresponding blobs and be recorded outside the
 purged tables.
 
+## Jobs
+
+The queue is PostgreSQL — no Redis or message broker in v1. `rcpia.jobs.service` provides
+`enqueue`, `claim_next`, `complete`, `fail`, `cancel`, `wait_for_user`, and `resume`;
+`rcpia.jobs.worker.Worker` polls, dispatches to registered handlers, and records outcomes.
+
+Claiming uses `FOR UPDATE SKIP LOCKED`, so several workers poll the same table and each
+job goes to exactly one of them. A claim takes a lease (15 minutes by default); if the
+worker dies, the lease expires and another worker reclaims the job. Failures retry with
+exponential backoff up to `max_attempts`, keeping the error message on every attempt.
+
 ## Lockfile and private registries
 
 `uv.lock` records `https://pypi.org/simple` as the source registry so it stays portable.

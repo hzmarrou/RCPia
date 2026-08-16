@@ -119,6 +119,28 @@ def migrated_database() -> Iterator[str]:
 
 
 @pytest.fixture
+async def session_factory(
+    migrated_database: str,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Committing sessions, for tests that need several concurrent connections.
+
+    The rollback-per-test trick used by `session` cannot express concurrency, so these
+    tests commit for real. The ephemeral database is dropped at the end of the session,
+    so leftover rows do not leak between runs.
+    """
+    engine = create_async_engine(migrated_database)
+    try:
+        # Committed rows would otherwise leak into the next test. TRUNCATE cascades from
+        # organizations to every clinical table, and does not fire the row-level
+        # append-only triggers.
+        async with engine.begin() as connection:
+            await connection.execute(sa.text("TRUNCATE organizations CASCADE"))
+        yield async_sessionmaker(engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
 async def session(migrated_database: str) -> AsyncIterator[AsyncSession]:
     """Session wrapped in a transaction that is rolled back after each test."""
     engine = create_async_engine(migrated_database)

@@ -450,9 +450,18 @@ class AnalysisJob(TimestampMixin, Base):
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     error_message: Mapped[str | None] = mapped_column(Text)
+
+    # Claiming: a worker takes a job by moving it to `running` under a lease. If the
+    # worker dies, the lease expires and the job becomes claimable again.
     claimed_by: Mapped[str | None] = mapped_column(String(200))
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Retry backoff: a queued job is invisible to workers until this moment.
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -463,8 +472,12 @@ class AnalysisJob(TimestampMixin, Base):
             ondelete="RESTRICT",
             name="fk_analysis_jobs_case_same_organization",
         ),
+        CheckConstraint("attempts >= 0", name="attempts_are_not_negative"),
+        CheckConstraint("max_attempts >= 1", name="max_attempts_allows_one_run"),
         Index("ix_analysis_jobs_status_created_at", "status", "created_at"),
         Index("ix_analysis_jobs_case_id_created_at", "case_id", "created_at"),
+        # The claim query filters on exactly this pair.
+        Index("ix_analysis_jobs_status_available_at", "status", "available_at"),
     )
 
 
