@@ -450,11 +450,18 @@ class AnalysisJob(TimestampMixin, Base):
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default=text("3")
+    )
     error_message: Mapped[str | None] = mapped_column(Text)
 
     # Claiming: a worker takes a job by moving it to `running` under a lease. If the
     # worker dies, the lease expires and the job becomes claimable again.
+    #
+    # `claim_token` is the fencing token: it is regenerated on every claim, and every
+    # subsequent transition must present it. A worker whose lease expired and whose job
+    # was reclaimed therefore cannot overwrite the newer run's result.
+    claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     claimed_by: Mapped[str | None] = mapped_column(String(200))
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -476,8 +483,17 @@ class AnalysisJob(TimestampMixin, Base):
         CheckConstraint("max_attempts >= 1", name="max_attempts_allows_one_run"),
         Index("ix_analysis_jobs_status_created_at", "status", "created_at"),
         Index("ix_analysis_jobs_case_id_created_at", "case_id", "created_at"),
+        CheckConstraint(
+            "attempts <= max_attempts", name="attempts_do_not_exceed_max_attempts"
+        ),
         # The claim query filters on exactly this pair.
         Index("ix_analysis_jobs_status_available_at", "status", "available_at"),
+        # ... and on this one for the expired-lease branch.
+        Index(
+            "ix_analysis_jobs_running_lease_expires_at",
+            "lease_expires_at",
+            postgresql_where=text("status = 'running'"),
+        ),
     )
 
 
