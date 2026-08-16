@@ -23,7 +23,7 @@ if config.config_file_name is not None:
 # A caller (e.g. the test harness) may set the URL programmatically; otherwise it
 # comes from application settings.
 if not config.get_main_option("sqlalchemy.url", None):
-    config.set_main_option("sqlalchemy.url", get_settings().sync_database_url)
+    config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 target_metadata = Base.metadata
 

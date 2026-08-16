@@ -1,19 +1,22 @@
 """Test fixtures.
 
 Database tests run against a real PostgreSQL instance — the schema uses PostgreSQL
-enums, JSONB, and check constraints, so SQLite would not prove anything. The test
-database is created if absent and migrated with Alembic, which also verifies that
-migrations apply cleanly to an empty database.
+enums, JSONB, check constraints, and triggers, so SQLite would prove nothing.
 
-Point the tests at a server with TEST_DATABASE_URL, e.g.:
+Each test session creates its **own ephemeral database** and drops it afterwards, so
+concurrent runs (including `pytest -n auto`) never share state and the suite never
+touches a database it did not create. `TEST_DATABASE_URL` names the server and a base
+database whose name must end in `_test`; the ephemeral databases derive from it:
 
     TEST_DATABASE_URL=postgresql+psycopg://rcpia:rcpia@localhost:5433/rcpia_test
+    -> rcpia_test_gw0_4f21ac93
 """
 
 import asyncio
 import os
 import sys
-from collections.abc import AsyncIterator
+import uuid
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
@@ -29,69 +32,90 @@ if sys.platform == "win32":
 
 API_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://rcpia:rcpia@localhost:5432/rcpia_test"
+# PostgreSQL identifiers are limited to 63 bytes.
+MAX_DATABASE_NAME_LENGTH = 63
 
 
-def test_database_url() -> str:
-    """Return the test database URL, refusing anything that is not clearly a test database.
+def base_test_database_url() -> str:
+    """Return the configured test URL, refusing anything not clearly a test database.
 
-    The session fixture drops and recreates the whole schema. A mistyped
-    TEST_DATABASE_URL pointing at a development or clinical database would destroy
-    it, so the name must end in `_test`.
+    Ephemeral databases are created from this name, and dropped at the end of the
+    session. The `_test` suffix keeps a mistyped URL from producing throwaway databases
+    next to a production one.
     """
     url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
     database = sa.make_url(url).database
     if not database or not database.endswith("_test"):
         raise RuntimeError(
-            f"Refusing to run destructive database tests against {database!r}. "
+            f"Refusing to run database tests against {database!r}. "
             "TEST_DATABASE_URL must name a database ending in '_test'."
         )
     return url
 
 
-def _ensure_database_exists(url: str) -> None:
-    target = sa.make_url(url)
-    server = target.set(database="postgres")
-    engine = sa.create_engine(server, isolation_level="AUTOCOMMIT")
+def _ephemeral_database_url(base_url: str) -> str:
+    """Derive a unique database name for this session (and this xdist worker)."""
+    base = sa.make_url(base_url)
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    suffix = f"_{worker}_{uuid.uuid4().hex[:8]}"
+    name = f"{base.database}{suffix}"[-MAX_DATABASE_NAME_LENGTH:]
+    # str(URL) masks the password; render explicitly so the URL stays usable.
+    return base.set(database=name).render_as_string(hide_password=False)
+
+
+def _server_engine(url: str) -> sa.Engine:
+    """Engine bound to the maintenance database, for CREATE/DROP DATABASE."""
+    return sa.create_engine(
+        sa.make_url(url).set(database="postgres"), isolation_level="AUTOCOMMIT"
+    )
+
+
+def _create_database(url: str) -> None:
+    name = sa.make_url(url).database
+    engine = _server_engine(url)
     try:
         with engine.connect() as connection:
-            exists = connection.execute(
-                sa.text("SELECT 1 FROM pg_database WHERE datname = :name"),
-                {"name": target.database},
-            ).scalar()
-            if not exists:
-                connection.execute(sa.text(f'CREATE DATABASE "{target.database}"'))
+            connection.execute(sa.text(f'CREATE DATABASE "{name}"'))
     finally:
         engine.dispose()
 
 
-def _reset_schema(url: str) -> None:
-    """Drop everything, including enum types a bare `downgrade base` would miss."""
-    engine = sa.create_engine(url, isolation_level="AUTOCOMMIT")
+def _drop_database(url: str) -> None:
+    name = sa.make_url(url).database
+    engine = _server_engine(url)
     try:
         with engine.connect() as connection:
-            connection.execute(sa.text("DROP SCHEMA public CASCADE"))
-            connection.execute(sa.text("CREATE SCHEMA public"))
+            connection.execute(
+                sa.text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": name},
+            )
+            connection.execute(sa.text(f'DROP DATABASE IF EXISTS "{name}"'))
     finally:
         engine.dispose()
 
 
 @pytest.fixture(scope="session")
-def migrated_database() -> str:
-    url = test_database_url()
-    _ensure_database_exists(url)
-    _reset_schema(url)
+def migrated_database() -> Iterator[str]:
+    url = _ephemeral_database_url(base_test_database_url())
+    _create_database(url)
 
     alembic_config = Config(str(API_ROOT / "alembic.ini"))
     alembic_config.set_main_option("script_location", str(API_ROOT / "alembic"))
     alembic_config.set_main_option("sqlalchemy.url", url)
 
-    # Round-tripping proves the migration applies to an empty database and that
-    # downgrade cleans up completely — a leftover enum type would break the second
-    # upgrade with DuplicateObject.
-    command.upgrade(alembic_config, "head")
-    command.downgrade(alembic_config, "base")
-    command.upgrade(alembic_config, "head")
-    return url
+    try:
+        # Round-tripping proves the migration applies to an empty database and that
+        # downgrade cleans up completely — a leftover enum type, trigger, or function
+        # would break the second upgrade.
+        command.upgrade(alembic_config, "head")
+        command.downgrade(alembic_config, "base")
+        command.upgrade(alembic_config, "head")
+        yield url
+    finally:
+        _drop_database(url)
 
 
 @pytest.fixture

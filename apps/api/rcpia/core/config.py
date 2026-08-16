@@ -29,11 +29,6 @@ class Settings(BaseSettings):
 
     auth_secret: str = "change-me"
 
-    @property
-    def sync_database_url(self) -> str:
-        """URL for tooling that needs a blocking driver (Alembic, admin tasks)."""
-        return self.database_url
-
 
 @lru_cache
 def get_settings() -> Settings:

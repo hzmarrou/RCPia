@@ -32,4 +32,31 @@ point the suite at a server with `TEST_DATABASE_URL`:
 TEST_DATABASE_URL=postgresql+psycopg://rcpia:rcpia@localhost:5433/rcpia_test uv run pytest
 ```
 
-Use the port the Compose stack publishes (`POSTGRES_PORT`, default 5432).
+Use the port the Compose stack publishes (`POSTGRES_PORT`, default 5432). Each run creates
+its own ephemeral database derived from that name (`rcpia_test_gw0_4f21ac93`) and drops it
+afterwards, so `pytest -n auto` is safe and no existing database is ever touched.
+
+## Append-only clinical records
+
+`extracted_facts`, `case_ledger_versions`, and `audit_events` reject `UPDATE` and `DELETE`
+through the `rcpia_deny_mutation()` trigger. Corrections are new rows superseding old ones.
+
+Lawful erasure is still possible, but only as a deliberate, audited purge:
+
+```sql
+BEGIN;
+SET LOCAL rcpia.allow_purge = 'on';   -- permits DELETE, never UPDATE
+DELETE FROM extracted_facts WHERE case_id = '...';
+COMMIT;
+```
+
+Any such purge must also remove the corresponding blobs and be recorded outside the
+purged tables.
+
+## Lockfile and private registries
+
+`uv.lock` records `https://pypi.org/simple` as the source registry so it stays portable.
+Installing behind a mirror (see the root README) makes uv rewrite those entries to the
+mirror URL — if a dependency change does that, rewrite them back to `pypi.org/simple`
+before committing, and never commit a `[[tool.uv.index]]` block pointing at an internal
+mirror.

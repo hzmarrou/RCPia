@@ -1,8 +1,8 @@
 """initial core schema
 
-Revision ID: 2f6f56fc5bb9
+Revision ID: 1f3108b3c94f
 Revises: 
-Create Date: 2026-08-16 16:55:10.504629
+Create Date: 2026-08-16 17:58:56.366254
 """
 
 from collections.abc import Sequence
@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = '2f6f56fc5bb9'
+revision: str = '1f3108b3c94f'
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -38,26 +38,29 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('fk_users_organization_id_organizations'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_users')),
-    sa.UniqueConstraint('email', name=op.f('uq_users_email'))
+    sa.UniqueConstraint('email', name=op.f('uq_users_email')),
+    sa.UniqueConstraint('id', 'organization_id', name='uq_users_id_organization')
     )
     op.create_table('cases',
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('organization_id', sa.UUID(), nullable=False),
-    sa.Column('created_by_user_id', sa.UUID(), nullable=True),
+    sa.Column('organization_id', sa.Uuid(), nullable=False),
+    sa.Column('created_by_user_id', sa.Uuid(), nullable=True),
     sa.Column('reference', sa.String(length=100), nullable=False),
     sa.Column('cancer_type', sa.Enum('prostate', 'bladder', name='cancer_type'), nullable=False),
     sa.Column('clinical_question', sa.Text(), nullable=True),
     sa.Column('status', sa.Enum('draft', 'parsing', 'ready_for_review', 'analyzing', 'completed', 'blocked', name='case_status'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['created_by_user_id'], ['users.id'], name=op.f('fk_cases_created_by_user_id_users'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('fk_cases_organization_id_organizations'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['created_by_user_id', 'organization_id'], ['users.id', 'users.organization_id'], name='fk_cases_creator_same_organization', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('fk_cases_organization_id_organizations'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_cases')),
+    sa.UniqueConstraint('id', 'organization_id', name='uq_cases_id_organization'),
     sa.UniqueConstraint('organization_id', 'reference', name='uq_cases_org_reference')
     )
+    op.create_index('ix_cases_organization_id_created_at', 'cases', ['organization_id', 'created_at'], unique=False)
     op.create_table('invitations',
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('organization_id', sa.UUID(), nullable=False),
+    sa.Column('organization_id', sa.Uuid(), nullable=False),
     sa.Column('email', sa.String(length=320), nullable=False),
     # `user_role` is created with the users table above; reuse it here.
     sa.Column('role', postgresql.ENUM('admin', 'uploader', 'viewer', name='user_role', create_type=False), nullable=False),
@@ -65,17 +68,18 @@ def upgrade() -> None:
     sa.Column('status', sa.Enum('pending', 'accepted', 'revoked', 'expired', name='invitation_status'), nullable=False),
     sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('accepted_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('invited_by_user_id', sa.UUID(), nullable=True),
+    sa.Column('invited_by_user_id', sa.Uuid(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['invited_by_user_id'], ['users.id'], name=op.f('fk_invitations_invited_by_user_id_users'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('fk_invitations_organization_id_organizations'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['invited_by_user_id', 'organization_id'], ['users.id', 'users.organization_id'], name='fk_invitations_inviter_same_organization', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('fk_invitations_organization_id_organizations'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_invitations')),
     sa.UniqueConstraint('token_hash', name=op.f('uq_invitations_token_hash'))
     )
     op.create_index('ix_invitations_email', 'invitations', ['email'], unique=False)
     op.create_table('analysis_jobs',
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('case_id', sa.UUID(), nullable=False),
+    sa.Column('case_id', sa.Uuid(), nullable=False),
+    sa.Column('organization_id', sa.Uuid(), nullable=False),
     sa.Column('job_type', sa.String(length=100), nullable=False),
     sa.Column('status', sa.Enum('queued', 'running', 'waiting_for_user', 'failed', 'completed', 'cancelled', name='job_status'), nullable=False),
     sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
@@ -86,45 +90,49 @@ def upgrade() -> None:
     sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['case_id'], ['cases.id'], name=op.f('fk_analysis_jobs_case_id_cases'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['case_id', 'organization_id'], ['cases.id', 'cases.organization_id'], name='fk_analysis_jobs_case_same_organization', ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_analysis_jobs'))
     )
+    op.create_index('ix_analysis_jobs_case_id_created_at', 'analysis_jobs', ['case_id', 'created_at'], unique=False)
     op.create_index('ix_analysis_jobs_status_created_at', 'analysis_jobs', ['status', 'created_at'], unique=False)
     op.create_table('audit_events',
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('organization_id', sa.UUID(), nullable=True),
-    sa.Column('case_id', sa.UUID(), nullable=True),
-    sa.Column('actor_user_id', sa.UUID(), nullable=True),
+    sa.Column('organization_id', sa.Uuid(), nullable=False),
+    sa.Column('case_id', sa.Uuid(), nullable=True),
+    sa.Column('actor_user_id', sa.Uuid(), nullable=True),
     sa.Column('event_type', sa.String(length=100), nullable=False),
     sa.Column('entity_type', sa.String(length=100), nullable=True),
     sa.Column('entity_id', sa.UUID(), nullable=True),
     sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['actor_user_id'], ['users.id'], name=op.f('fk_audit_events_actor_user_id_users'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['case_id'], ['cases.id'], name=op.f('fk_audit_events_case_id_cases'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('fk_audit_events_organization_id_organizations'), ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['actor_user_id', 'organization_id'], ['users.id', 'users.organization_id'], name='fk_audit_events_actor_same_organization', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['case_id', 'organization_id'], ['cases.id', 'cases.organization_id'], name='fk_audit_events_case_same_organization', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['organization_id'], ['organizations.id'], name=op.f('fk_audit_events_organization_id_organizations'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_audit_events'))
     )
     op.create_index('ix_audit_events_case_id_created_at', 'audit_events', ['case_id', 'created_at'], unique=False)
+    op.create_index('ix_audit_events_organization_id_created_at', 'audit_events', ['organization_id', 'created_at'], unique=False)
     op.create_table('case_ledger_versions',
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('case_id', sa.UUID(), nullable=False),
+    sa.Column('case_id', sa.Uuid(), nullable=False),
+    sa.Column('organization_id', sa.Uuid(), nullable=False),
     sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('ledger', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('missing_fields', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('uncertain_fields', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('change_reason', sa.Text(), nullable=True),
-    sa.Column('created_by_user_id', sa.UUID(), nullable=True),
+    sa.Column('created_by_user_id', sa.Uuid(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['case_id'], ['cases.id'], name=op.f('fk_case_ledger_versions_case_id_cases'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['created_by_user_id'], ['users.id'], name=op.f('fk_case_ledger_versions_created_by_user_id_users'), ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['case_id', 'organization_id'], ['cases.id', 'cases.organization_id'], name='fk_case_ledger_versions_case_same_organization', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['created_by_user_id', 'organization_id'], ['users.id', 'users.organization_id'], name='fk_case_ledger_versions_author_same_organization', ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_case_ledger_versions')),
     sa.UniqueConstraint('case_id', 'version', name='uq_case_ledger_versions_case_version')
     )
     op.create_table('uploaded_documents',
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('case_id', sa.UUID(), nullable=False),
-    sa.Column('uploaded_by_user_id', sa.UUID(), nullable=True),
+    sa.Column('case_id', sa.Uuid(), nullable=False),
+    sa.Column('organization_id', sa.Uuid(), nullable=False),
+    sa.Column('uploaded_by_user_id', sa.Uuid(), nullable=True),
     sa.Column('blob_key', sa.String(length=500), nullable=False),
     sa.Column('original_filename', sa.String(length=400), nullable=False),
     sa.Column('content_type', sa.String(length=200), nullable=False),
@@ -135,11 +143,13 @@ def upgrade() -> None:
     sa.Column('parser_provider_version', sa.String(length=50), nullable=True),
     sa.Column('parse_warnings', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['case_id'], ['cases.id'], name=op.f('fk_uploaded_documents_case_id_cases'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['uploaded_by_user_id'], ['users.id'], name=op.f('fk_uploaded_documents_uploaded_by_user_id_users'), ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['case_id', 'organization_id'], ['cases.id', 'cases.organization_id'], name='fk_uploaded_documents_case_same_organization', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['uploaded_by_user_id', 'organization_id'], ['users.id', 'users.organization_id'], name='fk_uploaded_documents_uploader_same_organization', ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_uploaded_documents')),
-    sa.UniqueConstraint('blob_key', name=op.f('uq_uploaded_documents_blob_key'))
+    sa.UniqueConstraint('blob_key', name=op.f('uq_uploaded_documents_blob_key')),
+    sa.UniqueConstraint('id', 'case_id', name='uq_uploaded_documents_id_case')
     )
+    op.create_index('ix_uploaded_documents_case_id', 'uploaded_documents', ['case_id'], unique=False)
     op.create_table('document_chunks',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('document_id', sa.UUID(), nullable=False),
@@ -150,51 +160,95 @@ def upgrade() -> None:
     sa.Column('bbox', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('block_type', sa.Enum('paragraph', 'table', 'heading', 'image', 'unknown', name='block_type'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['document_id'], ['uploaded_documents.id'], name=op.f('fk_document_chunks_document_id_uploaded_documents'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['document_id'], ['uploaded_documents.id'], name=op.f('fk_document_chunks_document_id_uploaded_documents'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_document_chunks')),
-    sa.UniqueConstraint('document_id', 'ordinal', name='uq_document_chunks_document_ordinal')
+    sa.UniqueConstraint('document_id', 'ordinal', name='uq_document_chunks_document_ordinal'),
+    sa.UniqueConstraint('id', 'document_id', name='uq_document_chunks_id_document')
     )
     op.create_table('extracted_facts',
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('case_id', sa.UUID(), nullable=False),
+    sa.Column('case_id', sa.Uuid(), nullable=False),
+    sa.Column('organization_id', sa.Uuid(), nullable=False),
     sa.Column('fact_type', sa.String(length=100), nullable=False),
     sa.Column('value', sa.Text(), nullable=True),
     sa.Column('unit', sa.String(length=50), nullable=True),
     sa.Column('observed_date', sa.DateTime(timezone=True), nullable=True),
     sa.Column('status', sa.Enum('confirmed', 'inferred', 'uncertain', 'conflicting', 'missing', name='fact_status'), nullable=False),
     sa.Column('origin', sa.Enum('machine', 'human', name='fact_origin'), nullable=False),
-    sa.Column('source_document_id', sa.UUID(), nullable=True),
-    sa.Column('source_chunk_id', sa.UUID(), nullable=True),
+    sa.Column('source_document_id', sa.Uuid(), nullable=True),
+    sa.Column('source_chunk_id', sa.Uuid(), nullable=True),
     sa.Column('source_excerpt', sa.Text(), nullable=True),
-    sa.Column('supersedes_fact_id', sa.UUID(), nullable=True),
-    sa.Column('recorded_by_user_id', sa.UUID(), nullable=True),
+    sa.Column('supersedes_fact_id', sa.Uuid(), nullable=True),
+    sa.Column('recorded_by_user_id', sa.Uuid(), nullable=True),
     sa.Column('note', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("origin <> 'human' OR recorded_by_user_id IS NOT NULL", name=op.f('ck_extracted_facts_human_facts_have_an_author')),
     sa.CheckConstraint("status = 'missing' OR origin = 'human' OR (source_document_id IS NOT NULL AND source_chunk_id IS NOT NULL AND source_excerpt IS NOT NULL)", name=op.f('ck_extracted_facts_machine_facts_are_traceable')),
-    sa.ForeignKeyConstraint(['case_id'], ['cases.id'], name=op.f('fk_extracted_facts_case_id_cases'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['recorded_by_user_id'], ['users.id'], name=op.f('fk_extracted_facts_recorded_by_user_id_users'), ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['source_chunk_id'], ['document_chunks.id'], name=op.f('fk_extracted_facts_source_chunk_id_document_chunks'), ondelete='RESTRICT'),
-    sa.ForeignKeyConstraint(['source_document_id'], ['uploaded_documents.id'], name=op.f('fk_extracted_facts_source_document_id_uploaded_documents'), ondelete='RESTRICT'),
-    sa.ForeignKeyConstraint(['supersedes_fact_id'], ['extracted_facts.id'], name=op.f('fk_extracted_facts_supersedes_fact_id_extracted_facts'), ondelete='RESTRICT'),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_extracted_facts'))
+    sa.CheckConstraint('supersedes_fact_id IS NULL OR note IS NOT NULL', name=op.f('ck_extracted_facts_corrections_state_a_reason')),
+    sa.ForeignKeyConstraint(['case_id', 'organization_id'], ['cases.id', 'cases.organization_id'], name='fk_extracted_facts_case_same_organization', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['recorded_by_user_id', 'organization_id'], ['users.id', 'users.organization_id'], name='fk_extracted_facts_recorder_same_organization', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['source_chunk_id', 'source_document_id'], ['document_chunks.id', 'document_chunks.document_id'], name='fk_extracted_facts_source_chunk_same_document', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['source_document_id', 'case_id'], ['uploaded_documents.id', 'uploaded_documents.case_id'], name='fk_extracted_facts_source_document_same_case', ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['supersedes_fact_id', 'case_id', 'fact_type'], ['extracted_facts.id', 'extracted_facts.case_id', 'extracted_facts.fact_type'], name='fk_extracted_facts_supersedes_same_case_and_type', ondelete='RESTRICT'),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_extracted_facts')),
+    sa.UniqueConstraint('id', 'case_id', 'fact_type', name='uq_extracted_facts_id_case_fact_type')
     )
     op.create_index('ix_extracted_facts_case_id_fact_type', 'extracted_facts', ['case_id', 'fact_type'], unique=False)
+    op.create_index('uq_extracted_facts_supersedes_fact_id', 'extracted_facts', ['supersedes_fact_id'], unique=True, postgresql_where=sa.text('supersedes_fact_id IS NOT NULL'))
     # ### end Alembic commands ###
+
+    # Clinical records are append-only: corrections are new rows, never rewrites.
+    # Lawful erasure is possible, but only as a deliberate purge that opts in with
+    # `SET LOCAL rcpia.allow_purge = 'on'` inside an audited transaction.
+    op.execute(
+        """
+        CREATE FUNCTION rcpia_deny_mutation() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_OP = 'DELETE'
+               AND current_setting('rcpia.allow_purge', true) = 'on' THEN
+                RETURN OLD;
+            END IF;
+            RAISE EXCEPTION
+                '% on % is not permitted: clinical records are append-only',
+                TG_OP, TG_TABLE_NAME
+                USING ERRCODE = 'restrict_violation';
+        END;
+        $$;
+        """
+    )
+    for table in ("extracted_facts", "case_ledger_versions", "audit_events"):
+        op.execute(
+            f"""
+            CREATE TRIGGER {table}_append_only
+            BEFORE UPDATE OR DELETE ON {table}
+            FOR EACH ROW EXECUTE FUNCTION rcpia_deny_mutation();
+            """
+        )
 
 
 def downgrade() -> None:
+    for table in ("extracted_facts", "case_ledger_versions", "audit_events"):
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_append_only ON {table}")
+    op.execute("DROP FUNCTION IF EXISTS rcpia_deny_mutation()")
+
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index('uq_extracted_facts_supersedes_fact_id', table_name='extracted_facts', postgresql_where=sa.text('supersedes_fact_id IS NOT NULL'))
     op.drop_index('ix_extracted_facts_case_id_fact_type', table_name='extracted_facts')
     op.drop_table('extracted_facts')
     op.drop_table('document_chunks')
+    op.drop_index('ix_uploaded_documents_case_id', table_name='uploaded_documents')
     op.drop_table('uploaded_documents')
     op.drop_table('case_ledger_versions')
+    op.drop_index('ix_audit_events_organization_id_created_at', table_name='audit_events')
     op.drop_index('ix_audit_events_case_id_created_at', table_name='audit_events')
     op.drop_table('audit_events')
     op.drop_index('ix_analysis_jobs_status_created_at', table_name='analysis_jobs')
+    op.drop_index('ix_analysis_jobs_case_id_created_at', table_name='analysis_jobs')
     op.drop_table('analysis_jobs')
     op.drop_index('ix_invitations_email', table_name='invitations')
     op.drop_table('invitations')
+    op.drop_index('ix_cases_organization_id_created_at', table_name='cases')
     op.drop_table('cases')
     op.drop_table('users')
     op.drop_table('organizations')
