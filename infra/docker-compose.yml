@@ -1,0 +1,70 @@
+# RCPia v1 local runtime.
+# Run from the repository root:  docker compose -f infra/docker-compose.yml up
+name: rcpia
+
+services:
+  postgres:
+    # pgvector image, not plain postgres:16 — the standard image lacks the extension.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: rcpia
+      POSTGRES_PASSWORD: rcpia
+      POSTGRES_DB: rcpia
+    ports:
+      # Override POSTGRES_PORT if another PostgreSQL already owns 5432 on the host.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rcpia -d rcpia"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ../apps/api
+      args:
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-https://pypi.org/simple}
+    environment:
+      APP_ENV: local
+      DATABASE_URL: postgresql+psycopg://rcpia:rcpia@postgres:5432/rcpia
+      BLOB_PROVIDER: local
+      LOCAL_BLOB_ROOT: /data/blobs
+      PARSER_PROVIDER: llamaparse
+      LLAMAPARSE_API_KEY: ${LLAMAPARSE_API_KEY:-}
+      PI_BIN: pi
+      AGENTS_ROOT: /app/agents
+      AUTH_SECRET: ${AUTH_SECRET:-change-me}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data/blobs:/data/blobs
+      - ../agents:/app/agents:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  web:
+    build:
+      context: ../apps/web
+      args:
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      API_INTERNAL_BASE_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

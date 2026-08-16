@@ -1,0 +1,49 @@
+# --- Environment ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+.pnpm-store/
+*.tsbuildinfo
+.playwright/
+playwright-report/
+test-results/
+
+# --- Runtime data (never commit patient data) ---
+data/*
+!data/.gitkeep
+sessions/
+tasks/
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- Agent tooling (machine-local state) ---
+.claude/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

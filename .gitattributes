@@ -1,0 +1,8 @@
+# Normalize to LF in the repository. Containers and CI run on Linux, where CRLF in
+# Dockerfiles, shell scripts, and config files breaks at runtime.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.pdf binary
+*.docx binary
