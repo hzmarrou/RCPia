@@ -7,6 +7,7 @@ without pretending we have verified Azure itself. End-to-end Azure verification 
 with the deployment work in Phase 14.
 """
 
+import asyncio
 import json
 import time
 import uuid
@@ -20,6 +21,7 @@ from rcpia.core.config import Settings
 from rcpia.storage import keys
 from rcpia.storage.azure_blob import CHECKSUM_METADATA_KEY, AzureBlobStore
 from rcpia.storage.base import (
+    BlobAlreadyExists,
     BlobNotFound,
     InvalidKey,
     StorageError,
@@ -135,38 +137,118 @@ async def test_exists_and_delete(store: LocalBlobStore) -> None:
 async def test_nested_keys_create_their_directories(store: LocalBlobStore, tmp_path: Path) -> None:
     await store.put_bytes("cases/a/b/c/deep.pdf", PDF, "application/pdf")
 
-    assert (tmp_path / "cases/a/b/c/deep.pdf").exists()
+    assert (tmp_path / "objects/cases/a/b/c/deep.pdf/data").exists()
 
 
-async def test_no_partial_file_is_left_behind(store: LocalBlobStore, tmp_path: Path) -> None:
+async def test_staging_is_empty_after_a_successful_write(
+    store: LocalBlobStore, tmp_path: Path
+) -> None:
     await store.put_bytes("cases/abc/dossiers/four.pdf", PDF, "application/pdf")
 
-    assert list(tmp_path.rglob("*.partial")) == []
+    staging = tmp_path / ".staging"
+    assert not staging.exists() or list(staging.glob("*")) == []
 
 
-async def test_metadata_sidecar_is_readable_json(store: LocalBlobStore, tmp_path: Path) -> None:
+async def test_metadata_is_readable_json(store: LocalBlobStore, tmp_path: Path) -> None:
     await store.put_bytes("cases/abc/dossiers/five.pdf", PDF, "application/pdf")
 
-    sidecar = tmp_path / "cases/abc/dossiers/five.pdf.meta.json"
-    metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+    metadata = json.loads(
+        (tmp_path / "objects/cases/abc/dossiers/five.pdf/meta.json").read_text(encoding="utf-8")
+    )
 
     assert metadata["checksum_sha256"] == checksum(PDF)
     assert metadata["content_type"] == "application/pdf"
     assert metadata["size_bytes"] == len(PDF)
 
 
-async def test_stat_falls_back_when_metadata_is_missing(
+async def test_stat_falls_back_when_metadata_is_unreadable(
     store: LocalBlobStore, tmp_path: Path
 ) -> None:
-    """A file put there by hand still describes itself honestly."""
+    """Corrupt metadata must not be reported as fact."""
     key = "cases/abc/dossiers/six.pdf"
     await store.put_bytes(key, PDF, "application/pdf")
-    (tmp_path / f"{key}.meta.json").unlink()
+    (tmp_path / f"objects/{key}/meta.json").write_text("{not json", encoding="utf-8")
 
     info = await store.stat(key)
 
     assert info.checksum_sha256 == checksum(PDF), "recomputed, not invented"
     assert info.content_type == "application/octet-stream"
+
+
+# --------------------------------------------------------------------------------------
+# Immutability and atomicity
+# --------------------------------------------------------------------------------------
+
+
+async def test_local_blobs_cannot_be_overwritten(store: LocalBlobStore) -> None:
+    """A stored dossier is evidence. Writing the key again must be refused."""
+    key = "cases/abc/dossiers/immutable.pdf"
+    await store.put_bytes(key, PDF, "application/pdf")
+
+    with pytest.raises(BlobAlreadyExists):
+        await store.put_bytes(key, b"replacement bytes", "application/pdf")
+
+    assert await store.get_bytes(key) == PDF
+
+
+async def test_concurrent_writes_of_one_key_produce_a_single_winner(
+    store: LocalBlobStore,
+) -> None:
+    key = "cases/abc/dossiers/raced.pdf"
+
+    async def attempt(payload: bytes) -> bool:
+        try:
+            await store.put_bytes(key, payload, "application/pdf")
+            return True
+        except BlobAlreadyExists:
+            return False
+
+    outcomes = await asyncio.gather(*(attempt(f"body-{n}".encode()) for n in range(8)))
+
+    assert sum(outcomes) == 1, "exactly one concurrent write may win"
+    stored = await store.get_bytes(key)
+    assert (await store.stat(key)).checksum_sha256 == checksum(stored), "body matches metadata"
+
+
+async def test_body_and_metadata_are_published_together(
+    store: LocalBlobStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails mid-way must leave nothing behind — not a body described by
+    someone else's metadata."""
+    key = "cases/abc/dossiers/interrupted.pdf"
+
+    original_dumps = json.dumps
+
+    def explode(*args: Any, **kwargs: Any) -> str:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(json, "dumps", explode)
+    with pytest.raises(OSError, match="disk full"):
+        await store.put_bytes(key, PDF, "application/pdf")
+    monkeypatch.setattr(json, "dumps", original_dumps)
+
+    assert not await store.exists(key)
+    assert list((tmp_path / ".staging").glob("*")) == [], "staging is cleaned up"
+
+    # The key is still free, and a later write is complete and consistent.
+    info = await store.put_bytes(key, PDF, "application/pdf")
+    assert info.checksum_sha256 == checksum(await store.get_bytes(key))
+
+
+async def test_a_key_ending_in_meta_json_does_not_corrupt_its_neighbour(
+    store: LocalBlobStore,
+) -> None:
+    """Metadata lives inside each blob's own directory, so these are unrelated blobs."""
+    await store.put_bytes("cases/abc/a", PDF, "application/pdf")
+    await store.put_bytes(
+        "cases/abc/a.meta.json", b'{"attacker": "controlled"}', "application/json"
+    )
+
+    info = await store.stat("cases/abc/a")
+
+    assert info.content_type == "application/pdf"
+    assert info.checksum_sha256 == checksum(PDF)
+    assert await store.get_bytes("cases/abc/a") == PDF
 
 
 # --------------------------------------------------------------------------------------
@@ -241,6 +323,20 @@ def test_unsafe_agent_names_are_refused() -> None:
         keys.pi_session_key(CASE_ID, "../escape", uuid.uuid4())
 
 
+@pytest.mark.parametrize("extension", ["pdƒ", "١٢٣", "much-too-long-extension", "p/df", ""])
+def test_pps_key_refuses_extensions_that_would_not_survive_key_validation(
+    extension: str,
+) -> None:
+    with pytest.raises(ValueError):
+        keys.pps_key(CASE_ID, uuid.uuid4(), extension)
+
+
+def test_key_validation_rejects_a_trailing_newline() -> None:
+    """`match` would have accepted this; `fullmatch` does not."""
+    with pytest.raises(InvalidKey):
+        validate_key("cases/abc/dossiers/one.pdf\n")
+
+
 # --------------------------------------------------------------------------------------
 # Provider selection
 # --------------------------------------------------------------------------------------
@@ -263,6 +359,15 @@ def test_provider_is_chosen_by_configuration(tmp_path: Path) -> None:
 def test_azure_provider_without_a_connection_string_fails_loudly() -> None:
     with pytest.raises(StorageError, match="AZURE_STORAGE_CONNECTION_STRING"):
         build_blob_store(Settings(blob_provider="azure"))
+
+
+def test_default_auth_secret_is_refused_outside_development() -> None:
+    """Signed download URLs are only as good as AUTH_SECRET, whose default is public."""
+    with pytest.raises(ValueError, match="AUTH_SECRET"):
+        Settings(app_env="production")
+
+    # Development is allowed to run with the placeholder.
+    assert Settings(app_env="local").auth_secret == "change-me"
 
 
 # --------------------------------------------------------------------------------------
@@ -368,15 +473,17 @@ async def test_azure_put_records_content_type_and_checksum(
 async def test_azure_blobs_are_immutable(
     azure_store: tuple[AzureBlobStore, FakeContainerClient],
 ) -> None:
-    """A correction must write a new key, never overwrite a stored dossier."""
-    from azure.core.exceptions import ResourceExistsError
+    """A correction must write a new key, never overwrite a stored dossier.
 
+    The refusal surfaces as the shared BlobAlreadyExists, not as an SDK exception, so
+    callers can handle both backends the same way.
+    """
     store, container = azure_store
     key = "cases/abc/dossiers/ten.pdf"
     await store.put_bytes(key, PDF, "application/pdf")
 
     assert container.upload_calls[0]["overwrite"] is False
-    with pytest.raises(ResourceExistsError):
+    with pytest.raises(BlobAlreadyExists):
         await store.put_bytes(key, b"different bytes", "application/pdf")
 
 
@@ -419,6 +526,26 @@ async def test_azure_delete_is_idempotent(
     await store.delete(key)
 
     assert not await store.exists(key)
+
+
+async def test_azure_client_can_actually_be_constructed() -> None:
+    """The adapter needs the SDK's async transport, which lives behind the [aio] extra.
+
+    Without it, `_container_client()` raises ImportError at the first real call — a
+    failure the fake client cannot reveal. No network traffic happens here.
+    """
+    pytest.importorskip("azure.storage.blob.aio", reason="azure extra not installed")
+
+    store = AzureBlobStore(
+        "DefaultEndpointsProtocol=https;AccountName=devstoreaccount1;"
+        "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;"
+        "EndpointSuffix=core.windows.net",
+        "rcpia",
+    )
+
+    container = store._container_client()
+    async with container:
+        assert container.container_name == "rcpia"
 
 
 async def test_azure_signed_url_is_a_read_only_sas(

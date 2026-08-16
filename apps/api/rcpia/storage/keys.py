@@ -24,7 +24,7 @@ SAFE_AGENT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,49}$")
 def _extension(filename: str) -> str:
     """Keep only a recognizable extension, and only its shape — never the name."""
     extension = posixpath.splitext(filename)[1].lower()
-    return extension if SAFE_EXTENSION.match(extension) else ""
+    return extension if SAFE_EXTENSION.fullmatch(extension) else ""
 
 
 def dossier_key(case_id: uuid.UUID, document_id: uuid.UUID, original_filename: str) -> str:
@@ -39,7 +39,9 @@ def pi_session_key(case_id: uuid.UUID, agent_name: str, run_id: uuid.UUID) -> st
 
 
 def pps_key(case_id: uuid.UUID, package_id: uuid.UUID, extension: str = "pdf") -> str:
-    normalized = extension.lstrip(".").lower()
-    if not normalized.isalnum():
+    normalized = f".{extension.lstrip('.').lower()}"
+    # The same bounded ASCII rule as dossier extensions: str.isalnum() would accept
+    # Unicode digits and letters that validate_key then rejects downstream.
+    if not SAFE_EXTENSION.fullmatch(normalized):
         raise ValueError(f"Unsafe extension for a blob key: {extension!r}")
-    return f"cases/{case_id}/pps/{package_id}.{normalized}"
+    return f"cases/{case_id}/pps/{package_id}{normalized}"

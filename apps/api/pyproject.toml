@@ -20,7 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 # Only needed when BLOB_PROVIDER=azure. A local or on-premises deployment does not
 # install it, which is why the adapter imports the SDK lazily.
-azure = ["azure-storage-blob>=12.23"]
+# The [aio] extra pulls in aiohttp; without it the async client raises ImportError at
+# construction time, so the plain package is not enough for this adapter.
+azure = ["azure-storage-blob[aio]>=12.23"]
 
 [dependency-groups]
 dev = [
@@ -30,7 +32,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "pytest-xdist>=3.8.0",
-    "azure-storage-blob>=12.30.0",
+    "azure-storage-blob[aio]>=12.30.0",
 ]
 
 [build-system]

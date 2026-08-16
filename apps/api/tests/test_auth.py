@@ -623,6 +623,7 @@ async def test_logout_deletes_the_cookie_with_the_attributes_it_was_set_with(
 
     deployed = Settings(
         app_env="staging",
+        auth_secret="a-real-secret-for-this-test",
         session_cookie_domain=".rcpia.example.org",
         session_cookie_samesite="none",
     )

@@ -10,7 +10,14 @@ dossier only to hash it would defeat the point of `stat()`.
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from rcpia.storage.base import BlobInfo, BlobNotFound, StorageError, checksum, validate_key
+from rcpia.storage.base import (
+    BlobAlreadyExists,
+    BlobInfo,
+    BlobNotFound,
+    StorageError,
+    checksum,
+    validate_key,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from azure.storage.blob.aio import ContainerClient
@@ -40,19 +47,24 @@ class AzureBlobStore:
         return service.get_container_client(self._container)
 
     async def put_bytes(self, key: str, content: bytes, content_type: str) -> BlobInfo:
+        from azure.core.exceptions import ResourceExistsError
         from azure.storage.blob import ContentSettings
 
         validate_key(key)
         digest = checksum(content)
 
         async with self._container_client() as container:
-            await container.upload_blob(
-                name=key,
-                data=content,
-                overwrite=False,  # blobs are immutable; a correction gets a new key
-                content_settings=ContentSettings(content_type=content_type),
-                metadata={CHECKSUM_METADATA_KEY: digest},
-            )
+            try:
+                await container.upload_blob(
+                    name=key,
+                    data=content,
+                    overwrite=False,  # blobs are immutable; a correction gets a new key
+                    content_settings=ContentSettings(content_type=content_type),
+                    metadata={CHECKSUM_METADATA_KEY: digest},
+                )
+            except ResourceExistsError as exc:
+                # Callers handle storage errors, never SDK types.
+                raise BlobAlreadyExists(key) from exc
 
         return BlobInfo(
             key=key, size_bytes=len(content), content_type=content_type, checksum_sha256=digest

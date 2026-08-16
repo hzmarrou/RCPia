@@ -28,6 +28,14 @@ class BlobNotFound(StorageError):
     """No blob exists for the requested key."""
 
 
+class BlobAlreadyExists(StorageError):
+    """A blob already exists for this key.
+
+    Blobs are immutable, so this is the expected answer to a repeated write rather than
+    an unexpected failure: a correction gets a new key.
+    """
+
+
 class InvalidKey(StorageError):
     """The key is empty, malformed, or attempts to escape the store."""
 
@@ -53,7 +61,8 @@ def validate_key(key: str) -> str:
     blob path that could ever be influenced by a filename from a dossier. Path traversal
     is rejected here, once, rather than being each backend's problem.
     """
-    if not key or not KEY_PATTERN.match(key):
+    # fullmatch, not match: `match` would accept a trailing newline.
+    if not key or not KEY_PATTERN.fullmatch(key):
         raise InvalidKey(f"Invalid blob key: {key!r}")
     if key.startswith("/") or key.endswith("/"):
         raise InvalidKey(f"Invalid blob key: {key!r}")

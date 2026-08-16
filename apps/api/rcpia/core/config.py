@@ -1,9 +1,12 @@
 """Application configuration, sourced from environment variables."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_AUTH_SECRET = "change-me"
 
 
 class Settings(BaseSettings):
@@ -29,7 +32,21 @@ class Settings(BaseSettings):
     pi_bin: str = "pi"
     agents_root: str = "/app/agents"
 
-    auth_secret: str = "change-me"
+    auth_secret: str = DEFAULT_AUTH_SECRET
+
+    @model_validator(mode="after")
+    def reject_default_secret_outside_development(self) -> Self:
+        """AUTH_SECRET signs sessions and local download URLs.
+
+        Its default is published in .env.example and in this repository, so leaving it in
+        place anywhere real would let anyone mint valid signatures. Refuse to start.
+        """
+        if self.app_env not in ("local", "test") and self.auth_secret == DEFAULT_AUTH_SECRET:
+            raise ValueError(
+                f"AUTH_SECRET is still the default value with APP_ENV={self.app_env}. "
+                "Set a unique secret before running outside development."
+            )
+        return self
 
     # Session cookie topology. Locally the web app and API share `localhost`, so a
     # host-only cookie works. A deployment putting them on sibling hostnames must either

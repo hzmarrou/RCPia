@@ -1,20 +1,36 @@
 """Local filesystem blob store, for development and on-premises deployments.
 
-Content and metadata are written as two files per key: the bytes themselves, and a
-sidecar `.meta.json` holding content type and checksum. A sidecar rather than an
-extended attribute, because those do not survive Windows, Docker volumes, or a copy.
+Each blob is a **directory** containing its body and its metadata:
+
+    <root>/objects/<key>/data
+    <root>/objects/<key>/meta.json
+
+That layout buys two properties a plain file plus a sidecar cannot:
+
+- **Body and metadata become visible together.** Both are written into a staging
+  directory and published with a single rename, so a reader never sees new bytes
+  described by stale metadata.
+- **Metadata cannot collide with a blob.** With sidecars, a blob legitimately named
+  `a.meta.json` overwrites the metadata of blob `a`. Here every key owns its directory.
+
+Publication is `rename(staging, object_dir)`, which fails when the destination exists and
+is non-empty — so a second write of the same key is refused rather than silently
+overwriting a stored dossier, on both POSIX and Windows.
 """
 
 import hashlib
 import hmac
 import json
+import shutil
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
 import anyio.to_thread
 
 from rcpia.storage.base import (
+    BlobAlreadyExists,
     BlobInfo,
     BlobNotFound,
     InvalidKey,
@@ -22,32 +38,38 @@ from rcpia.storage.base import (
     validate_key,
 )
 
-METADATA_SUFFIX = ".meta.json"
+OBJECTS_DIRNAME = "objects"
+STAGING_DIRNAME = ".staging"
+BODY_FILENAME = "data"
+METADATA_FILENAME = "meta.json"
 
 
 class LocalBlobStore:
-    """Files under `root`. Keys map to relative paths beneath it."""
+    """Blob directories under `root`."""
 
     def __init__(self, root: str | Path, *, signing_secret: str) -> None:
         self.root = Path(root).resolve()
+        self._objects = self.root / OBJECTS_DIRNAME
+        self._staging = self.root / STAGING_DIRNAME
         self._signing_secret = signing_secret
 
     # ---------------------------------------------------------------- paths
 
-    def _paths(self, key: str) -> tuple[Path, Path]:
+    def _object_dir(self, key: str) -> Path:
         validate_key(key)
-        target = (self.root / key).resolve()
-        # Belt and braces: validate_key already rejects traversal, but a symlink inside
-        # the root could still point outside it.
-        if not target.is_relative_to(self.root):
+        target = (self._objects / key).resolve()
+        # validate_key already rejects traversal; this also catches a symlink component
+        # pointing outside the store.
+        if not target.is_relative_to(self._objects.resolve()):
             raise InvalidKey(f"Blob key escapes the storage root: {key!r}")
-        return target, target.with_name(target.name + METADATA_SUFFIX)
+        return target
 
     # ---------------------------------------------------------------- writes
 
     def _write(self, key: str, content: bytes, content_type: str) -> BlobInfo:
-        path, meta_path = self._paths(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        object_dir = self._object_dir(key)
+        if (object_dir / BODY_FILENAME).exists():
+            raise BlobAlreadyExists(key)
 
         info = BlobInfo(
             key=key,
@@ -55,21 +77,33 @@ class LocalBlobStore:
             content_type=content_type,
             checksum_sha256=checksum(content),
         )
-        # Write to a temporary name first: a crash mid-write must not leave a truncated
-        # dossier that looks complete.
-        temporary = path.with_name(path.name + ".partial")
-        temporary.write_bytes(content)
-        temporary.replace(path)
-        meta_path.write_text(
-            json.dumps(
-                {
-                    "content_type": info.content_type,
-                    "checksum_sha256": info.checksum_sha256,
-                    "size_bytes": info.size_bytes,
-                }
-            ),
-            encoding="utf-8",
-        )
+
+        # A unique staging directory per write: two concurrent writers never share one.
+        staging = self._staging / uuid.uuid4().hex
+        staging.mkdir(parents=True)
+        try:
+            (staging / BODY_FILENAME).write_bytes(content)
+            (staging / METADATA_FILENAME).write_text(
+                json.dumps(
+                    {
+                        "content_type": info.content_type,
+                        "checksum_sha256": info.checksum_sha256,
+                        "size_bytes": info.size_bytes,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            object_dir.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                # One atomic step publishes body and metadata together, and refuses to
+                # replace an existing blob.
+                staging.rename(object_dir)
+            except OSError as exc:
+                raise BlobAlreadyExists(key) from exc
+        finally:
+            # A successful rename leaves nothing to clean up; a failure must not leak.
+            shutil.rmtree(staging, ignore_errors=True)
+
         return info
 
     async def put_bytes(self, key: str, content: bytes, content_type: str) -> BlobInfo:
@@ -78,51 +112,52 @@ class LocalBlobStore:
     # ---------------------------------------------------------------- reads
 
     def _read(self, key: str) -> bytes:
-        path, _ = self._paths(key)
         try:
-            return path.read_bytes()
-        except FileNotFoundError as exc:
+            return (self._object_dir(key) / BODY_FILENAME).read_bytes()
+        except (FileNotFoundError, NotADirectoryError) as exc:
             raise BlobNotFound(key) from exc
 
     async def get_bytes(self, key: str) -> bytes:
         return await anyio.to_thread.run_sync(self._read, key)
 
     def _stat(self, key: str) -> BlobInfo:
-        path, meta_path = self._paths(key)
-        if not path.exists():
+        object_dir = self._object_dir(key)
+        body = object_dir / BODY_FILENAME
+        if not body.exists():
             raise BlobNotFound(key)
+
         try:
-            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            # A blob written by something other than this store: describe what is there
-            # rather than failing, but recompute the checksum instead of inventing one.
-            content = path.read_bytes()
+            metadata = json.loads((object_dir / METADATA_FILENAME).read_text(encoding="utf-8"))
+            return BlobInfo(
+                key=key,
+                size_bytes=int(metadata["size_bytes"]),
+                content_type=str(metadata["content_type"]),
+                checksum_sha256=str(metadata["checksum_sha256"]),
+            )
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError):
+            # Unreadable metadata: describe the bytes that are actually there rather
+            # than reporting something that was never true.
+            content = body.read_bytes()
             return BlobInfo(
                 key=key,
                 size_bytes=len(content),
                 content_type="application/octet-stream",
                 checksum_sha256=checksum(content),
             )
-        return BlobInfo(
-            key=key,
-            size_bytes=int(metadata["size_bytes"]),
-            content_type=str(metadata["content_type"]),
-            checksum_sha256=str(metadata["checksum_sha256"]),
-        )
 
     async def stat(self, key: str) -> BlobInfo:
         return await anyio.to_thread.run_sync(self._stat, key)
 
+    def _exists(self, key: str) -> bool:
+        return (self._object_dir(key) / BODY_FILENAME).exists()
+
     async def exists(self, key: str) -> bool:
-        path, _ = self._paths(key)
-        return await anyio.to_thread.run_sync(path.exists)
+        return await anyio.to_thread.run_sync(self._exists, key)
 
     # ---------------------------------------------------------------- delete
 
     def _delete(self, key: str) -> None:
-        path, meta_path = self._paths(key)
-        meta_path.unlink(missing_ok=True)
-        path.unlink(missing_ok=True)
+        shutil.rmtree(self._object_dir(key), ignore_errors=True)
 
     async def delete(self, key: str) -> None:
         await anyio.to_thread.run_sync(self._delete, key)
