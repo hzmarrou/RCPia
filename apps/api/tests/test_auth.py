@@ -5,17 +5,20 @@ a session can be revoked immediately, and clinical routes refuse callers without
 right role.
 """
 
+import asyncio
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from rcpia.auth import security, service
+from rcpia.auth import security, service, throttle
 from rcpia.auth.models import SESSION_COOKIE_NAME
-from rcpia.auth.throttle import LOGIN_ATTEMPT_LIMIT, login_limiter
+from rcpia.auth.throttle import ACCOUNT_ATTEMPT_LIMIT, CLIENT_ATTEMPT_LIMIT
 from rcpia.core.db import get_session
 from rcpia.core.models import (
     AuthSession,
@@ -32,10 +35,10 @@ PASSWORD = "correct-horse-battery-staple"
 
 @pytest.fixture(autouse=True)
 def reset_login_throttle():
-    """The limiter is process-global; tests would otherwise throttle each other."""
-    login_limiter.reset()
+    """The limiters are process-global; tests would otherwise throttle each other."""
+    throttle.reset_all()
     yield
-    login_limiter.reset()
+    throttle.reset_all()
 
 
 @pytest.fixture
@@ -310,33 +313,90 @@ async def test_activation_normalizes_whitespace_in_the_name(
     assert response.json()["full_name"] == "Dr Spaces"
 
 
-async def test_revocation_during_activation_cannot_produce_an_account(
+async def test_revocation_racing_activation_produces_one_outcome(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    """The invitation is consumed by one conditional UPDATE, so revoke and activate
-    cannot both succeed."""
+    """Genuinely concurrent, on separate committed connections.
+
+    Exactly one of the two must win, and the results must agree: an account exists only
+    if activation succeeded, and the invitation ends accepted or revoked accordingly.
+    """
     admin, _ = await make_admin(session_factory)
     await login(client, admin.email)
     issued = (
         await client.post("/auth/invitations", json={"email": "race@example.org"})
     ).json()
 
-    async with session_factory() as session:
-        await service.revoke_invitation(
-            session, uuid.UUID(issued["id"]), organization_id=admin.organization_id
-        )
-        await session.commit()
+    async def try_activate() -> bool:
+        async with session_factory() as session:
+            try:
+                await service.activate_invitation(
+                    session, token=issued["token"], password=PASSWORD
+                )
+                await session.commit()
+                return True
+            except (service.InvalidInvitation, IntegrityError):
+                await session.rollback()
+                return False
+
+    async def try_revoke() -> bool:
+        async with session_factory() as session:
+            try:
+                await service.revoke_invitation(
+                    session, uuid.UUID(issued["id"]), organization_id=admin.organization_id
+                )
+                await session.commit()
+                return True
+            except (service.InvalidInvitation, IntegrityError):
+                await session.rollback()
+                return False
+
+    activated, revoked = await asyncio.gather(try_activate(), try_revoke())
+
+    assert activated != revoked, "exactly one of activation and revocation must win"
 
     async with session_factory() as session:
-        with pytest.raises(service.InvalidInvitation):
-            await service.activate_invitation(
-                session, token=issued["token"], password=PASSWORD
-            )
-        await session.rollback()
+        account = await session.scalar(sa.select(User).where(User.email == "race@example.org"))
+        invitation = await session.get(Invitation, uuid.UUID(issued["id"]))
+        assert invitation is not None
 
+        if activated:
+            assert account is not None
+            assert invitation.status is InvitationStatus.accepted
+        else:
+            assert account is None, "a revoked invitation must not leave an account behind"
+            assert invitation.status is InvitationStatus.revoked
+
+
+async def test_repeated_racing_activations_create_at_most_one_account(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    admin, _ = await make_admin(session_factory)
+    await login(client, admin.email)
+    issued = (
+        await client.post("/auth/invitations", json={"email": "double@example.org"})
+    ).json()
+
+    async def try_activate() -> bool:
+        async with session_factory() as session:
+            try:
+                await service.activate_invitation(
+                    session, token=issued["token"], password=PASSWORD
+                )
+                await session.commit()
+                return True
+            except (service.InvalidInvitation, IntegrityError):
+                await session.rollback()
+                return False
+
+    outcomes = await asyncio.gather(*(try_activate() for _ in range(4)))
+
+    assert sum(outcomes) == 1, "only one concurrent activation may succeed"
     async with session_factory() as session:
-        created = await session.scalar(sa.select(User).where(User.email == "race@example.org"))
-        assert created is None
+        accounts = (
+            await session.execute(sa.select(User).where(User.email == "double@example.org"))
+        ).scalars().all()
+        assert len(accounts) == 1
 
 
 async def test_activation_rejects_a_weak_password(
@@ -392,6 +452,18 @@ async def test_invitation_material_is_not_cached_or_referred(
 
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
+
+
+async def test_failed_auth_responses_also_carry_the_headers(client: AsyncClient) -> None:
+    """Error paths raise instead of returning, which used to drop these headers."""
+    failed_login = await login(client, "ghost@example.org")
+    failed_activation = await client.post(
+        "/auth/activate", json={"token": security.generate_token(), "password": PASSWORD}
+    )
+
+    for response in (failed_login, failed_activation):
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["referrer-policy"] == "no-referrer"
 
 
 async def test_admin_cannot_revoke_another_organizations_invitation(
@@ -541,21 +613,75 @@ async def test_logout_works_without_a_valid_session(client: AsyncClient) -> None
     assert "rcpia_session=" in response.headers.get("set-cookie", "")
 
 
+async def test_logout_deletes_the_cookie_with_the_attributes_it_was_set_with(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], monkeypatch
+) -> None:
+    """A browser matches deletion by name, domain, and path. A domain-scoped cookie
+    deleted without its domain simply stays."""
+    from rcpia.auth import routes as auth_routes
+    from rcpia.core.config import Settings
+
+    deployed = Settings(
+        app_env="staging",
+        session_cookie_domain=".rcpia.example.org",
+        session_cookie_samesite="none",
+    )
+    monkeypatch.setattr(auth_routes, "get_settings", lambda: deployed)
+
+    admin, _ = await make_admin(session_factory)
+    login_response = await login(client, admin.email)
+    set_cookie = login_response.headers["set-cookie"].lower()
+    assert "domain=.rcpia.example.org" in set_cookie
+
+    logout_response = await client.post("/auth/logout")
+
+    deletion = logout_response.headers["set-cookie"].lower()
+    assert "domain=.rcpia.example.org" in deletion
+    assert "path=/" in deletion
+    assert "samesite=none" in deletion
+    assert "secure" in deletion
+
+
 async def test_login_is_throttled_after_repeated_failures(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     admin, _ = await make_admin(session_factory)
 
-    for _ in range(LOGIN_ATTEMPT_LIMIT):
+    for _ in range(ACCOUNT_ATTEMPT_LIMIT):
         assert (await login(client, admin.email, "wrong-password-here")).status_code == 401
 
     throttled = await login(client, admin.email, "wrong-password-here")
 
     assert throttled.status_code == 429
     assert throttled.headers["retry-after"]
-    # The correct password is refused too: the throttle protects the account, not the
-    # guess. It is scoped to this address, so other users are unaffected.
+    # The correct password is refused too: the budget protects the account, not the guess.
     assert (await login(client, admin.email)).status_code == 429
+
+
+async def test_successful_logins_never_consume_the_budget(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Only failures count, so an active user cannot lock themselves out by working."""
+    admin, _ = await make_admin(session_factory)
+
+    for attempt in range(ACCOUNT_ATTEMPT_LIMIT + 5):
+        response = await login(client, admin.email)
+        assert response.status_code == 200, f"login {attempt + 1} was refused"
+
+
+async def test_a_successful_login_clears_earlier_failures(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    admin, _ = await make_admin(session_factory)
+
+    for _ in range(ACCOUNT_ATTEMPT_LIMIT - 1):
+        await login(client, admin.email, "wrong-password-here")
+
+    assert (await login(client, admin.email)).status_code == 200
+
+    # The budget is back to full: the typo streak is forgiven once the user gets in.
+    for _ in range(ACCOUNT_ATTEMPT_LIMIT - 1):
+        assert (await login(client, admin.email, "wrong-password-here")).status_code == 401
 
 
 async def test_throttling_is_scoped_per_account(
@@ -564,10 +690,43 @@ async def test_throttling_is_scoped_per_account(
     victim, _ = await make_admin(session_factory)
     other, _ = await make_admin(session_factory)
 
-    for _ in range(LOGIN_ATTEMPT_LIMIT + 1):
+    for _ in range(ACCOUNT_ATTEMPT_LIMIT + 1):
         await login(client, victim.email, "wrong-password-here")
 
     assert (await login(client, other.email)).status_code == 200
+
+
+async def test_one_client_cannot_spray_many_accounts(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A per-account budget alone lets one host try every address in turn."""
+    for attempt in range(CLIENT_ATTEMPT_LIMIT):
+        response = await login(client, f"nobody-{attempt}@example.org", "guessing")
+        assert response.status_code == 401
+
+    blocked = await login(client, "nobody-final@example.org", "guessing")
+    assert blocked.status_code == 429
+
+
+async def test_throttle_memory_is_bounded() -> None:
+    """Random addresses must not grow the table without limit."""
+    limiter = throttle.RateLimiter(limit=5, window_seconds=300.0, max_keys=50)
+
+    for index in range(500):
+        limiter.record_failure(f"account-{index}@example.org")
+
+    assert len(limiter._failures) <= 50
+
+
+def test_throttle_forgets_keys_once_their_window_passes() -> None:
+    limiter = throttle.RateLimiter(limit=5, window_seconds=0.05, max_keys=50)
+    limiter.record_failure("someone@example.org")
+    assert len(limiter._failures) == 1
+
+    time.sleep(0.06)
+    limiter.ensure_allowed("unrelated@example.org")
+
+    assert limiter._failures == {}
 
 
 # --------------------------------------------------------------------------------------

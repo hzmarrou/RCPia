@@ -73,8 +73,20 @@ Revocation is therefore immediate: signing out or deactivating a user invalidate
 sessions on the next request. Only SHA-256 digests of session and invitation tokens are
 stored; passwords use Argon2id with a 12-character minimum.
 
-Roles are `admin`, `uploader`, `viewer`. Routes opt into protection explicitly via
-`require_role(...)` — anything not behind such a dependency is public.
+Roles are `admin`, `uploader`, `viewer`. Clinical routers are built with
+`protected_router(...)` so every route inherits the role check, and
+`tests/test_route_protection.py` fails the build if any route is neither protected nor on
+an explicit public allowlist.
+
+Invitation links put the token in the URL **fragment**, which browsers never send to a
+server:
+
+```text
+https://<web-host>/activate#token=<token>
+```
+
+Login failures are throttled on two independent budgets — per account and per client
+address — counting failures only, so successful logins never consume quota.
 
 ## Jobs
 

@@ -4,7 +4,9 @@ RCPia prepares *provisional* RCP/MDT-style outputs for urological oncology cases
 It does not replace a human RCP. PostgreSQL is the clinical source of truth.
 """
 
-from fastapi import FastAPI
+from collections.abc import Callable
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from rcpia.auth.routes import router as auth_router
@@ -31,6 +33,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def no_store_for_auth(request: Request, call_next: Callable) -> Response:
+    """Keep credential material out of caches and referrers.
+
+    Applied as middleware rather than per route because headers set on an injected
+    Response are lost when the handler raises: a failed login or a rejected invitation
+    would otherwise answer without these headers, which are exactly the responses whose
+    URLs and bodies should not be retained.
+    """
+    response: Response = await call_next(request)
+    if request.url.path.startswith("/auth"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 app.include_router(auth_router)

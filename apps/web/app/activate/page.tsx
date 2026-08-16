@@ -5,21 +5,36 @@ import { Suspense, useEffect, useState } from "react";
 
 import { activate } from "@/lib/auth";
 
+/**
+ * Read the invitation token from the URL fragment.
+ *
+ * Invitation links use `#token=…` rather than `?token=…`: a fragment is never sent to
+ * any server, so the token stays out of web-server and proxy access logs. It is cleared
+ * from the address bar as soon as it has been read.
+ */
+function useInvitationToken(queryFallback: string | null): string {
+  const [token, setToken] = useState("");
+
+  useEffect(() => {
+    const fromFragment = new URLSearchParams(window.location.hash.slice(1)).get("token");
+    const found = fromFragment ?? queryFallback ?? "";
+    if (found) {
+      setToken(found);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [queryFallback]);
+
+  return token;
+}
+
 function ActivationForm() {
   const router = useRouter();
-  const [token] = useState(useSearchParams().get("token") ?? "");
+  // Older links may still carry ?token=; accept them, then scrub the address bar.
+  const token = useInvitationToken(useSearchParams().get("token"));
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    // The token arrives in the link, but it should not linger in the address bar,
-    // browser history, or any referrer sent to the next page.
-    if (token && window.location.search) {
-      window.history.replaceState(null, "", window.location.pathname);
-    }
-  }, [token]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,7 +54,8 @@ function ActivationForm() {
   if (!token) {
     return (
       <p className="error" role="alert">
-        Lien d&apos;activation incomplet. Utilisez le lien reçu de votre administrateur.
+        Lien d&apos;activation incomplet ou déjà utilisé dans cet onglet. Ouvrez à nouveau
+        le lien reçu de votre administrateur.
       </p>
     );
   }

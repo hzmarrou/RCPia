@@ -63,7 +63,8 @@ class ActivationRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    # Bounded like the activation password: an unbounded field is free Argon2 work.
+    password: str = Field(max_length=1024)
 
 
 class UserRead(BaseModel):
