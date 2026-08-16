@@ -32,7 +32,20 @@ DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://rcpia:rcpia@localhost:5432/rcp
 
 
 def test_database_url() -> str:
-    return os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
+    """Return the test database URL, refusing anything that is not clearly a test database.
+
+    The session fixture drops and recreates the whole schema. A mistyped
+    TEST_DATABASE_URL pointing at a development or clinical database would destroy
+    it, so the name must end in `_test`.
+    """
+    url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
+    database = sa.make_url(url).database
+    if not database or not database.endswith("_test"):
+        raise RuntimeError(
+            f"Refusing to run destructive database tests against {database!r}. "
+            "TEST_DATABASE_URL must name a database ending in '_test'."
+        )
+    return url
 
 
 def _ensure_database_exists(url: str) -> None:
