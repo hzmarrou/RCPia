@@ -7,7 +7,7 @@ The database tables (`users`, `invitations`, `auth_sessions`) live in
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from rcpia.core.models import UserRole
 
@@ -39,10 +39,26 @@ class InvitationIssued(InvitationRead):
     token: str
 
 
+class InvitationLookup(BaseModel):
+    """Tokens travel in request bodies, never in URLs, so they stay out of browser
+    history, proxy logs, and referrer headers."""
+
+    token: str = Field(min_length=16, max_length=200)
+
+
 class ActivationRequest(BaseModel):
-    token: str
-    password: str = Field(min_length=12)
-    full_name: str | None = None
+    token: str = Field(min_length=16, max_length=200)
+    password: str = Field(min_length=12, max_length=1024)
+    # Bounded to the database column width, so an over-long name is a 422 and not a 500.
+    full_name: str | None = Field(default=None, max_length=200)
+
+    @field_validator("full_name")
+    @classmethod
+    def strip_full_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = " ".join(value.split())
+        return stripped or None
 
 
 class LoginRequest(BaseModel):

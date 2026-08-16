@@ -3,6 +3,30 @@
 Short record of decisions that are not derivable from the code or the design spec.
 Newest first.
 
+## 2026-08-16 — Session cookie topology must be decided before deployment
+
+Locally the web app and the API both answer on `localhost`, so a host-only session cookie
+set by the API is visible to the Next.js server. That does **not** survive a deployment
+where the two get separate hostnames.
+
+Before deploying, pick one:
+
+1. **Same-origin reverse proxy (preferred).** One public hostname; `/api/*` is proxied to
+   the API container. The cookie stays host-only and no cross-site rules apply.
+2. **Shared parent domain.** `web.example.org` and `api.example.org` with
+   `SESSION_COOKIE_DOMAIN=.example.org`. Requires `SameSite=None; Secure` for
+   browser-initiated cross-site calls, which is a weaker position.
+
+`SESSION_COOKIE_DOMAIN` and `SESSION_COOKIE_SAMESITE` exist so the choice is
+configuration, not a code change. Phase 14 (Azure Container Apps) must resolve it.
+
+## 2026-08-16 — Login throttling is per-process for the MVP
+
+`rcpia.auth.throttle` counts attempts in process memory: ten per address per five minutes.
+With one API container that is accurate. Running several replicas under-counts by the
+number of replicas, so a shared counter (PostgreSQL, or the reverse proxy) is required
+before the API is scaled out.
+
 ## 2026-08-16 — RCPia is a web application, not a mobile app
 
 `docs/RCPia-FMPM.md` (the project brief) describes *"une application mobile déployée sur

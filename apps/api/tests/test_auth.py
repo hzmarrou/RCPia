@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rcpia.auth import security, service
 from rcpia.auth.models import SESSION_COOKIE_NAME
+from rcpia.auth.throttle import LOGIN_ATTEMPT_LIMIT, login_limiter
 from rcpia.core.db import get_session
 from rcpia.core.models import (
     AuthSession,
@@ -27,6 +28,14 @@ from rcpia.core.models import (
 from rcpia.main import app
 
 PASSWORD = "correct-horse-battery-staple"
+
+
+@pytest.fixture(autouse=True)
+def reset_login_throttle():
+    """The limiter is process-global; tests would otherwise throttle each other."""
+    login_limiter.reset()
+    yield
+    login_limiter.reset()
 
 
 @pytest.fixture
@@ -264,6 +273,72 @@ async def test_invitation_cannot_be_used_twice(
     assert second.status_code == 400
 
 
+async def test_activation_rejects_an_over_long_name(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """The column is VARCHAR(200); an over-long name is a validation error, not a 500."""
+    admin, _ = await make_admin(session_factory)
+    await login(client, admin.email)
+    issued = (
+        await client.post("/auth/invitations", json={"email": "long@example.org"})
+    ).json()
+
+    response = await client.post(
+        "/auth/activate",
+        json={"token": issued["token"], "password": PASSWORD, "full_name": "x" * 201},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_activation_normalizes_whitespace_in_the_name(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    admin, _ = await make_admin(session_factory)
+    await login(client, admin.email)
+    issued = (
+        await client.post("/auth/invitations", json={"email": "spaces@example.org"})
+    ).json()
+    await client.post("/auth/logout")
+
+    response = await client.post(
+        "/auth/activate",
+        json={"token": issued["token"], "password": PASSWORD, "full_name": "  Dr   Spaces  "},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["full_name"] == "Dr Spaces"
+
+
+async def test_revocation_during_activation_cannot_produce_an_account(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """The invitation is consumed by one conditional UPDATE, so revoke and activate
+    cannot both succeed."""
+    admin, _ = await make_admin(session_factory)
+    await login(client, admin.email)
+    issued = (
+        await client.post("/auth/invitations", json={"email": "race@example.org"})
+    ).json()
+
+    async with session_factory() as session:
+        await service.revoke_invitation(
+            session, uuid.UUID(issued["id"]), organization_id=admin.organization_id
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        with pytest.raises(service.InvalidInvitation):
+            await service.activate_invitation(
+                session, token=issued["token"], password=PASSWORD
+            )
+        await session.rollback()
+
+    async with session_factory() as session:
+        created = await session.scalar(sa.select(User).where(User.email == "race@example.org"))
+        assert created is None
+
+
 async def test_activation_rejects_a_weak_password(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -289,7 +364,9 @@ async def test_invitation_lookup_shows_who_it_is_for(
         await client.post("/auth/invitations", json={"email": "lookup@example.org"})
     ).json()
 
-    response = await client.get(f"/auth/invitations/{issued['token']}")
+    response = await client.post(
+        "/auth/invitations/lookup", json={"token": issued["token"]}
+    )
 
     assert response.status_code == 200
     assert response.json()["email"] == "lookup@example.org"
@@ -297,7 +374,47 @@ async def test_invitation_lookup_shows_who_it_is_for(
 
 
 async def test_unknown_invitation_lookup_is_not_found(client: AsyncClient) -> None:
-    assert (await client.get(f"/auth/invitations/{security.generate_token()}")).status_code == 404
+    response = await client.post(
+        "/auth/invitations/lookup", json={"token": security.generate_token()}
+    )
+    assert response.status_code == 404
+
+
+async def test_invitation_material_is_not_cached_or_referred(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Tokens travel in bodies; responses carrying them must not be cached or leak a
+    referrer to whatever page the user visits next."""
+    admin, _ = await make_admin(session_factory)
+    await login(client, admin.email)
+
+    response = await client.post("/auth/invitations", json={"email": "cache@example.org"})
+
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+
+
+async def test_admin_cannot_revoke_another_organizations_invitation(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Tenancy: an id alone must never be enough to act on another organization's data."""
+    victim_admin, _ = await make_admin(session_factory)
+    await login(client, victim_admin.email)
+    victim_invitation = (
+        await client.post("/auth/invitations", json={"email": "victim@example.org"})
+    ).json()
+    await client.post("/auth/logout")
+
+    attacker_admin, _ = await make_admin(session_factory)
+    await login(client, attacker_admin.email)
+
+    response = await client.delete(f"/auth/invitations/{victim_invitation['id']}")
+
+    assert response.status_code == 404
+    async with session_factory() as session:
+        untouched = await session.get(Invitation, uuid.UUID(victim_invitation["id"]))
+        assert untouched is not None
+        assert untouched.status is InvitationStatus.pending, "the invitation still works"
 
 
 # --------------------------------------------------------------------------------------
@@ -412,6 +529,45 @@ async def test_deactivating_a_user_kills_live_sessions(
 async def test_forged_session_cookie_is_rejected(client: AsyncClient) -> None:
     client.cookies.set(SESSION_COOKIE_NAME, security.generate_token())
     assert (await client.get("/auth/me")).status_code == 401
+
+
+async def test_logout_works_without_a_valid_session(client: AsyncClient) -> None:
+    """Someone holding a stale cookie still needs a way to be rid of it."""
+    client.cookies.set(SESSION_COOKIE_NAME, security.generate_token())
+
+    response = await client.post("/auth/logout")
+
+    assert response.status_code == 204
+    assert "rcpia_session=" in response.headers.get("set-cookie", "")
+
+
+async def test_login_is_throttled_after_repeated_failures(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    admin, _ = await make_admin(session_factory)
+
+    for _ in range(LOGIN_ATTEMPT_LIMIT):
+        assert (await login(client, admin.email, "wrong-password-here")).status_code == 401
+
+    throttled = await login(client, admin.email, "wrong-password-here")
+
+    assert throttled.status_code == 429
+    assert throttled.headers["retry-after"]
+    # The correct password is refused too: the throttle protects the account, not the
+    # guess. It is scoped to this address, so other users are unaffected.
+    assert (await login(client, admin.email)).status_code == 429
+
+
+async def test_throttling_is_scoped_per_account(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    victim, _ = await make_admin(session_factory)
+    other, _ = await make_admin(session_factory)
+
+    for _ in range(LOGIN_ATTEMPT_LIMIT + 1):
+        await login(client, victim.email, "wrong-password-here")
+
+    assert (await login(client, other.email)).status_code == 200
 
 
 # --------------------------------------------------------------------------------------

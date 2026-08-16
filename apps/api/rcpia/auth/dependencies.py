@@ -1,13 +1,17 @@
 """FastAPI dependencies for authentication and role checks.
 
-Clinical routes depend on `require_role(...)`. Anything not behind one of these
-dependencies is public, so new routers must opt in explicitly.
+Route protection is opt-in, which is fail-open by nature: a new router that forgets its
+dependency is public. Two things guard against that. Clinical routers are built with
+`protected_router(...)`, which attaches the role check to every route in the router
+rather than to each function, and `tests/test_route_protection.py` walks the live
+application and fails if any route outside an explicit public allowlist has no
+authentication dependency.
 """
 
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from typing import Annotated, Any
 
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.auth import service
@@ -62,6 +66,21 @@ RequireUploader = Annotated[User, Depends(require_role(UserRole.admin, UserRole.
 RequireViewer = Annotated[
     User, Depends(require_role(UserRole.admin, UserRole.uploader, UserRole.viewer))
 ]
+
+
+def protected_router(
+    *roles: UserRole, prefix: str = "", tags: Sequence[str] | None = None
+) -> APIRouter:
+    """Build a router whose every route requires one of `roles`.
+
+    Preferred over decorating each endpoint: a route added later inherits the protection
+    instead of silently being public.
+    """
+    if not roles:
+        raise ValueError("A protected router must name at least one role")
+    return APIRouter(
+        prefix=prefix, tags=list(tags or []), dependencies=[Depends(require_role(*roles))]
+    )
 
 
 def client_ip(request: Request) -> str | None:

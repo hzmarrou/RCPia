@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   title: "RCPia",
   description:
     "Provisional RCP preparation support for urological oncology cases. All outputs require human review.",
+  // Invitation links carry a token; never hand it to the next site in a Referer header.
+  referrer: "no-referrer",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

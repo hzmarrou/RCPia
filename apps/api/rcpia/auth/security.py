@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import secrets
 
+import anyio.to_thread
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
@@ -39,6 +40,16 @@ def verify_password(password: str, password_hash: str | None) -> bool:
         return _hasher.verify(password_hash, password)
     except (VerifyMismatchError, InvalidHashError):
         return False
+
+
+async def hash_password_async(password: str) -> str:
+    """Argon2 is deliberately slow, so it must not run on the event loop."""
+    validate_password(password)
+    return await anyio.to_thread.run_sync(_hasher.hash, password)
+
+
+async def verify_password_async(password: str, password_hash: str | None) -> bool:
+    return await anyio.to_thread.run_sync(verify_password, password, password_hash)
 
 
 def needs_rehash(password_hash: str) -> bool:

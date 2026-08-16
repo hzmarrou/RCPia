@@ -17,6 +17,10 @@ import sys
 
 import sqlalchemy as sa
 
+if sys.platform == "win32":
+    # psycopg's async driver cannot run on Windows' default ProactorEventLoop.
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from rcpia.auth import security
 from rcpia.core.db import get_session_factory
 from rcpia.core.models import Organization, User, UserRole

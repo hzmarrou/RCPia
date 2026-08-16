@@ -88,40 +88,74 @@ async def read_invitation(session: AsyncSession, token: str) -> Invitation:
 async def activate_invitation(
     session: AsyncSession, *, token: str, password: str, full_name: str | None = None
 ) -> User:
-    """Turn an invitation into an account. This is the only way a user is created."""
-    invitation = await read_invitation(session, token)
+    """Turn an invitation into an account. This is the only way a user is created.
 
-    existing_user = await session.scalar(sa.select(User).where(User.email == invitation.email))
+    The invitation is consumed by a single conditional UPDATE, so a revocation arriving
+    at the same moment either wins or loses cleanly — it cannot slip between a read and
+    a later write and leave a revoked invitation with an account attached to it.
+    """
+    # Hash before consuming the invitation: it is the slow step, and doing it first keeps
+    # the window between consuming and inserting the user as short as possible.
+    password_hash = await security.hash_password_async(password)
+
+    consumed = (
+        await session.execute(
+            sa.update(Invitation)
+            .where(
+                Invitation.token_hash == security.hash_token(token),
+                Invitation.status == InvitationStatus.pending,
+                Invitation.expires_at > _now(),
+            )
+            .values(status=InvitationStatus.accepted, accepted_at=_now())
+            .returning(Invitation)
+        )
+    ).scalar_one_or_none()
+
+    if consumed is None:
+        raise InvalidInvitation(
+            "Invitation is not usable: unknown, already used, revoked, or expired"
+        )
+
+    existing_user = await session.scalar(sa.select(User).where(User.email == consumed.email))
     if existing_user is not None:
-        raise EmailAlreadyRegistered(f"{invitation.email} already has an account")
+        raise EmailAlreadyRegistered(f"{consumed.email} already has an account")
 
     user = User(
-        organization_id=invitation.organization_id,
-        email=invitation.email,
+        organization_id=consumed.organization_id,
+        email=consumed.email,
         full_name=full_name,
-        role=invitation.role,
-        password_hash=security.hash_password(password),
+        role=consumed.role,
+        password_hash=password_hash,
         is_active=True,
     )
     session.add(user)
-
-    invitation.status = InvitationStatus.accepted
-    invitation.accepted_at = _now()
     await session.flush()
     return user
 
 
-async def revoke_invitation(session: AsyncSession, invitation_id: uuid.UUID) -> None:
+async def revoke_invitation(
+    session: AsyncSession, invitation_id: uuid.UUID, *, organization_id: uuid.UUID
+) -> None:
+    """Revoke an invitation belonging to the caller's own organization.
+
+    The organization is part of the predicate, not merely checked beforehand: an
+    administrator must not be able to touch another organization's invitations, and an
+    unscoped id is exactly how that goes wrong.
+    """
     result = cast(
         sa.CursorResult[Any],
         await session.execute(
             sa.update(Invitation)
-            .where(Invitation.id == invitation_id, Invitation.status == InvitationStatus.pending)
+            .where(
+                Invitation.id == invitation_id,
+                Invitation.organization_id == organization_id,
+                Invitation.status == InvitationStatus.pending,
+            )
             .values(status=InvitationStatus.revoked)
         ),
     )
     if not result.rowcount:
-        raise InvalidInvitation("No pending invitation with that id")
+        raise InvalidInvitation("No pending invitation with that id in this organization")
 
 
 async def authenticate(session: AsyncSession, *, email: str, password: str) -> User:
@@ -130,7 +164,7 @@ async def authenticate(session: AsyncSession, *, email: str, password: str) -> U
         sa.select(User).where(User.email == security.normalize_email(email))
     )
 
-    if not security.verify_password(password, user.password_hash if user else None):
+    if not await security.verify_password_async(password, user.password_hash if user else None):
         raise InvalidCredentials("Invalid email or password")
 
     assert user is not None  # verify_password only succeeds for a real hash
@@ -138,7 +172,7 @@ async def authenticate(session: AsyncSession, *, email: str, password: str) -> U
         raise InvalidCredentials("Invalid email or password")
 
     if security.needs_rehash(user.password_hash or ""):
-        user.password_hash = security.hash_password(password)
+        user.password_hash = await security.hash_password_async(password)
         await session.flush()
 
     return user
@@ -186,7 +220,8 @@ async def resolve_session(session: AsyncSession, token: str) -> tuple[AuthSessio
     if not user.is_active:
         return None
 
-    auth_session.last_seen_at = _now()
+    # `last_seen_at` is deliberately not touched here: read-only requests do not commit,
+    # so the write would be rolled back anyway. It records when the session was opened.
     return auth_session, user
 
 

@@ -79,3 +79,57 @@ export async function fetchCurrentUser(
   }
   return (await response.json()) as CurrentUser;
 }
+
+export type Access =
+  | { state: "authorized"; user: CurrentUser }
+  | { state: "unauthenticated" }
+  | { state: "forbidden" };
+
+/**
+ * Ask the API whether this session may use the dashboard.
+ *
+ * Deliberately not "fetch the user, then check their role here": the API owns
+ * authorization, and duplicating the rule in the frontend is how the two drift apart.
+ * A viewer must be refused by the same 403 that protects the data.
+ */
+export async function fetchDashboardAccess(
+  baseUrl: string,
+  cookieHeader: string,
+): Promise<Access> {
+  const response = await fetch(`${baseUrl}/auth/dashboard`, {
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    return { state: "unauthenticated" };
+  }
+  if (response.status === 403) {
+    return { state: "forbidden" };
+  }
+  if (!response.ok) {
+    throw new AuthError(`Unexpected status ${response.status} from /auth/dashboard`);
+  }
+  return { state: "authorized", user: (await response.json()) as CurrentUser };
+}
+
+export type InvitationSummary = {
+  id: string;
+  email: string;
+  role: Role;
+  expires_at: string;
+};
+
+/** Look an invitation up by token. POST, so the token stays out of the URL. */
+export async function lookupInvitation(token: string): Promise<InvitationSummary> {
+  const response = await fetch(`${API_BASE_URL}/auth/invitations/lookup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+
+  if (!response.ok) {
+    throw new AuthError(await readError(response, "Invitation introuvable ou expirée"));
+  }
+  return (await response.json()) as InvitationSummary;
+}

@@ -21,11 +21,13 @@ from rcpia.auth.models import (
     ActivationRequest,
     InvitationCreate,
     InvitationIssued,
+    InvitationLookup,
     InvitationRead,
     LoginRequest,
     UserRead,
 )
 from rcpia.auth.security import WeakPasswordError
+from rcpia.auth.throttle import RateLimitExceeded, login_limiter
 from rcpia.core.config import get_settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -38,20 +40,42 @@ def _set_session_cookie(response: Response, token: str, max_age_seconds: int) ->
         token,
         max_age=max_age_seconds,
         httponly=True,
-        samesite="lax",
+        samesite=settings.session_cookie_samesite,
         # Plain HTTP is only tolerable on a developer machine.
         secure=settings.app_env != "local",
+        # Unset locally (host-only cookie). In a deployment where the web app and API
+        # sit on sibling hostnames, set SESSION_COOKIE_DOMAIN to their shared parent.
+        domain=settings.session_cookie_domain or None,
         path="/",
     )
+
+
+def _no_store(response: Response) -> None:
+    """Keep invitation and session material out of shared caches and referrers."""
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+
+def _throttle(request: Request, identifier: str) -> None:
+    ip = client_ip(request) or "unknown"
+    try:
+        login_limiter.check(f"{ip}:{identifier}")
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many attempts. Try again later.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
 
 
 @router.post(
     "/invitations", response_model=InvitationIssued, status_code=status.HTTP_201_CREATED
 )
 async def create_invitation(
-    payload: InvitationCreate, session: SessionDep, admin: RequireAdmin
+    payload: InvitationCreate, response: Response, session: SessionDep, admin: RequireAdmin
 ) -> InvitationIssued:
     """Issue an invitation for the administrator's own organization."""
+    _no_store(response)
     try:
         invitation, token = await service.create_invitation(
             session,
@@ -73,11 +97,18 @@ async def create_invitation(
     )
 
 
-@router.get("/invitations/{token}", response_model=InvitationRead)
-async def read_invitation(token: str, session: SessionDep) -> InvitationRead:
-    """Let the activation page show who the invitation is for before a password is set."""
+@router.post("/invitations/lookup", response_model=InvitationRead)
+async def read_invitation(
+    payload: InvitationLookup, response: Response, session: SessionDep
+) -> InvitationRead:
+    """Let the activation page show who the invitation is for before a password is set.
+
+    A POST rather than a GET so the token stays in the request body: tokens in URLs end
+    up in browser history, proxy logs, and referrer headers.
+    """
+    _no_store(response)
     try:
-        invitation = await service.read_invitation(session, token)
+        invitation = await service.read_invitation(session, payload.token)
     except service.InvalidInvitation as exc:
         await session.commit()
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
@@ -90,7 +121,9 @@ async def revoke_invitation(
     invitation_id: uuid.UUID, session: SessionDep, admin: RequireAdmin
 ) -> None:
     try:
-        await service.revoke_invitation(session, invitation_id)
+        await service.revoke_invitation(
+            session, invitation_id, organization_id=admin.organization_id
+        )
     except service.InvalidInvitation as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     await session.commit()
@@ -101,6 +134,8 @@ async def activate(
     payload: ActivationRequest, response: Response, request: Request, session: SessionDep
 ) -> UserRead:
     """Create an account from an invitation and log the new user straight in."""
+    _no_store(response)
+    _throttle(request, "activate")
     try:
         user = await service.activate_invitation(
             session,
@@ -132,6 +167,8 @@ async def activate(
 async def login(
     payload: LoginRequest, response: Response, request: Request, session: SessionDep
 ) -> UserRead:
+    _no_store(response)
+    _throttle(request, payload.email.lower())
     try:
         user = await service.authenticate(
             session, email=payload.email, password=payload.password
@@ -153,9 +190,12 @@ async def login(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(
-    request: Request, response: Response, session: SessionDep, user: CurrentUser
-) -> None:
+async def logout(request: Request, response: Response, session: SessionDep) -> None:
+    """Always clears the cookie, whatever state the session is in.
+
+    Deliberately unauthenticated: someone holding an expired or forged cookie still needs
+    a way to get rid of it, and refusing them with a 401 would leave it in place.
+    """
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token:
         await service.end_session(session, token)
@@ -164,7 +204,8 @@ async def logout(
 
 
 @router.get("/me", response_model=UserRead)
-async def me(user: CurrentUser) -> UserRead:
+async def me(user: CurrentUser, response: Response) -> UserRead:
+    _no_store(response)
     return UserRead.model_validate(user)
 
 

@@ -29,6 +29,17 @@ class Settings(BaseSettings):
 
     auth_secret: str = "change-me"
 
+    # Session cookie topology. Locally the web app and API share `localhost`, so a
+    # host-only cookie works. A deployment putting them on sibling hostnames must either
+    # serve both through one origin (reverse proxy) or set the shared parent domain here.
+    session_cookie_domain: str = ""
+    session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+
+    @property
+    def docs_enabled(self) -> bool:
+        """API documentation describes every endpoint; keep it off outside development."""
+        return self.app_env == "local"
+
 
 @lru_cache
 def get_settings() -> Settings:

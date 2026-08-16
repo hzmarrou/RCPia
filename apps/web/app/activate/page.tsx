@@ -1,17 +1,25 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 import { activate } from "@/lib/auth";
 
 function ActivationForm() {
   const router = useRouter();
-  const token = useSearchParams().get("token") ?? "";
+  const [token] = useState(useSearchParams().get("token") ?? "");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    // The token arrives in the link, but it should not linger in the address bar,
+    // browser history, or any referrer sent to the next page.
+    if (token && window.location.search) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [token]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
