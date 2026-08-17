@@ -128,6 +128,9 @@ def test_a_prostate_case_missing_its_psa_is_declared_not_blocked() -> None:
                 "age": "63 ans",
                 "psa_total": None,
                 "histology": "Adénocarcinome",
+                # Present, so the PSA is the only gap under test. Without a Gleason the
+                # case cannot be risk-stratified at all and blocks for that reason.
+                "gleason": "7 (3+4)",
             }
         ),
         cancer_type=CancerType.prostate,
@@ -135,6 +138,18 @@ def test_a_prostate_case_missing_its_psa_is_declared_not_blocked() -> None:
 
     assert "psa_total" in report.missing_keys
     assert report.can_run_analysis is True, "a PSA gap is a limitation, not a barrier"
+
+
+def test_a_prostate_case_without_a_gleason_cannot_be_risk_stratified() -> None:
+    """Gleason decides surveillance versus active treatment as squarely as muscle invasion
+    decides conservative treatment versus cystectomy."""
+    report = assess(
+        entries_from({"histology": "Adénocarcinome acinaire", "gleason": None}),
+        cancer_type=CancerType.prostate,
+    )
+
+    assert report.can_run_analysis is False
+    assert any(issue.key == "gleason" for issue in report.blocking)
 
 
 def test_the_blocking_list_stays_short() -> None:

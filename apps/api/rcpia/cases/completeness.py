@@ -23,7 +23,10 @@ BLOCKING_FIELDS: dict[CancerType, tuple[str, ...]] = {
     # Muscle invasion decides between conservative treatment and cystectomy; renal
     # function decides whether cisplatin can even be considered.
     CancerType.bladder: ("histology", "muscle_invasion"),
-    CancerType.prostate: ("histology",),
+    # Gleason decides between surveillance and active treatment as squarely as muscle
+    # invasion decides between conservative treatment and cystectomy. Without it a
+    # prostate case cannot be risk-stratified, so no safe provisional proposal exists.
+    CancerType.prostate: ("histology", "gleason"),
 }
 
 

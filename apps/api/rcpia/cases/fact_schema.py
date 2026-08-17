@@ -70,7 +70,15 @@ BOTH = (PROSTATE, BLADDER)
 FIELDS: tuple[FactField, ...] = (
     # ---------------------------------------------------------------- identity
     FactField("dossier_reference", ("dossier",), FactCategory.identity),
-    FactField("sex", ("sexe",), FactCategory.identity, required_for=BOTH),
+    # Not required. Twelve of fifteen real dossiers omit it — prostate forms leave it
+    # implicit, and most bladder forms simply do not record it. Requiring a field that
+    # nearly every real dossier lacks paints a complete dossier red and buries the gaps
+    # that matter, which is the failure this module's docstring warns about.
+    #
+    # Deliberately not inferred from the cancer type either: a prostate diagnosis does not
+    # make a patient male, and encoding that assumption would misgender trans and
+    # non-binary patients. Absent stays absent.
+    FactField("sex", ("sexe",), FactCategory.identity),
     FactField("age", ("age", "âge"), FactCategory.identity, unit="ans", required_for=BOTH),
     FactField("rcp_organ", ("rcp urologie", "organe"), FactCategory.identity),
     # ---------------------------------------------------------------- social
@@ -212,8 +220,55 @@ FIELDS: tuple[FactField, ...] = (
     FactField(
         "histology", ("type histologique",), FactCategory.pathology, required_for=BOTH
     ),
-    FactField("ptnm", ("ptnm",), FactCategory.pathology, required_for=BOTH),
-    FactField("grade", ("grade",), FactCategory.pathology, required_for=BOTH),
+    # Applicable to both — a prostatectomy specimen is staged — but only required for
+    # bladder. None of the eight real prostate dossiers records a TNM at all: those cases
+    # are characterised by Gleason, ISUP, PSA and PIRADS, and requiring a pTNM manufactured
+    # a missing field on every one of them.
+    FactField("ptnm", ("ptnm",), FactCategory.pathology, required_for=(BLADDER,)),
+    # Likewise `Grade`: prostate grades with Gleason and ISUP below, and 8/8 real prostate
+    # dossiers reported their grade missing while the value sat in the text.
+    FactField("grade", ("grade",), FactCategory.pathology, required_for=(BLADDER,)),
+    FactField(
+        "gleason", ("gleason", "score de gleason"), FactCategory.pathology,
+        cancer_types=(PROSTATE,), required_for=(PROSTATE,),
+    ),
+    FactField(
+        "isup", ("isup", "groupe isup"), FactCategory.pathology,
+        cancer_types=(PROSTATE,), required_for=(PROSTATE,),
+    ),
+    # Biopsy burden: how much of the gland is involved, and where. Core staging inputs
+    # that were being read and discarded.
+    FactField(
+        "cores_total", ("nombre de carottes totales",), FactCategory.pathology,
+        cancer_types=(PROSTATE,),
+    ),
+    FactField(
+        "cores_positive", ("nombre de carottes positives",), FactCategory.pathology,
+        cancer_types=(PROSTATE,),
+    ),
+    FactField(
+        "cores_site", ("siège des carottes positives", "siege des carottes positives"),
+        FactCategory.pathology, cancer_types=(PROSTATE,),
+    ),
+    # Invasion flags, written as bare acronyms in the dossiers.
+    FactField(
+        "perineural_invasion", ("pni",), FactCategory.pathology, cancer_types=(PROSTATE,)
+    ),
+    FactField(
+        "capsular_invasion", ("epc",), FactCategory.pathology, cancer_types=(PROSTATE,)
+    ),
+    FactField(
+        "vascular_invasion", ("vi",), FactCategory.pathology, cancer_types=(PROSTATE,)
+    ),
+    FactField(
+        "intraepithelial_neoplasia", ("pin",), FactCategory.pathology,
+        cancer_types=(PROSTATE,),
+    ),
+    FactField(
+        "margin_details",
+        ("précisions sur les marges", "precisions sur les marges"),
+        FactCategory.pathology,
+    ),
     FactField(
         "muscle_invasion", ("infiltration du muscle",), FactCategory.pathology,
         cancer_types=(BLADDER,), required_for=(BLADDER,),
