@@ -62,9 +62,38 @@ The PPS itself stays this concise. RCPia additionally produces, outside the six 
 - `examples/pps-example-01.md` — PPS for dossier 01
 - `examples/pps-example-02.md` — PPS for dossier 01, second variant
 
-One example is human-written and the other machine-generated. **Which is which is not yet
-confirmed** — pending the treating clinician's answer. Until then, treat both as valid
-targets for the output format, and do not treat either as the quality benchmark.
+One example is human-written and the other machine-generated. **Which is which is not
+confirmed**, and the clinician who would know has not been asked. Treat both as valid
+targets for the output *format*, and neither as a quality benchmark for content.
+
+### Inferred, not confirmed: 01 reads as human, 02 as machine
+
+Working conclusion for Phase 8, roughly 80% confidence, from the documents alone:
+
+- **01 contains a practice error of a kind a model does not make.** Its nutrition plan is
+  *albumine en IV* for repletion, which does not work and which guidelines say not to do —
+  and which is still prescribed in practice. 02 gives the oral-supplement-then-enteral
+  ladder with named products and targets, which is what a guideline-trained generator
+  writes.
+- **01 has a dangling reference that 02 resolves.** 01's *Précisions thérapeutiques* cites
+  5-FU-Cisplatine, a protocol absent from 01's own treatment list. It is item 3 in 02.
+  That is a human pasting a block from a template; a model would have reconciled it.
+- **01 skips the workup its own diagnosis demands** (`M1a (à confirmer)`, then straight to
+  cystoprostatectomy), where 02 enumerates PET-TDM, IRM and a full IHC panel. A room that
+  has decided records the decision; a generator enumerates the branches.
+- **02 covers every branch it is not taking**, with RECIST thresholds, RT fractionation and
+  a fallback regimen. That completeness is machine-shaped.
+- 01 has dropped spaces (`directeaprès`, `grade4`), and renders the same sentence twice
+  with different spacing — retyping, not one conversion pass.
+
+Both files carry the same PDF/Word conversion damage (02 splits `Extra-` / `hospitalier`
+across two tables at a page break), so that discriminates nothing.
+
+**What Phase 8 does with this.** Take the *format* from the union of both, since each drops
+sections the other keeps — 02 lost the decision précision in §2, 01 renders §6 as loose
+bold lines rather than a table. Take the *register* from 01: terse and decision-first, which
+is what this RCP actually records. Take content standards from neither. If the inference is
+backwards, only the register call changes.
 
 ## Dossier input fields to extract
 
