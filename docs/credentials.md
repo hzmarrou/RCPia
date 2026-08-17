@@ -53,24 +53,44 @@ Without this key the parser adapter is fully tested but never runs against a rea
 dossier. **Reminder:** with LlamaParse selected, uploaded dossiers leave the hospital
 network — only de-identified or simulated dossiers, per `docs/transparency/data-handling.md`.
 
-## 4. Pi agent runtime — needed at Phase 7
+## 4. Pi agent runtime — settled and verified
 
-Pi authenticates per provider. On this machine `~/.pi/agent/auth.json` already holds
-credentials for **`azure-openai-responses`** (default model `gpt-5.3-codex`) and
-**`openrouter`**, so interactive runs work today. The container will not have that file,
-so the same credential must reach it another way — `pi` accepts `--api-key`, and falls
-back to provider environment variables.
+RCPia uses its **own** Azure AI Foundry workspace (`rcpia`), deliberately not the
+developer laptop's global Pi configuration. Nothing reads `~/.pi/agent/auth.json`, which
+is what lets the worker container behave identically.
 
-| Item | What it is | How to get it |
+| Variable | Value | Notes |
 |---|---|---|
-| Provider decision | Which provider each specialist agent uses | Set per agent in `agents/<name>/.pi/settings.json`. Ours currently document `opencode-go` / `deepseek-v4-pro`; your Pi defaults to `azure-openai-responses` — **needs a decision before Phase 7** |
-| Provider API key | Key for whichever provider is chosen | Azure OpenAI: portal → your resource → *Keys and Endpoint*. OpenRouter: <https://openrouter.ai/keys> |
-| Azure OpenAI endpoint | Only for `azure-openai-responses` | Same portal page, e.g. `https://<resource>.openai.azure.com` |
-| `PI_BIN` | Path to the `pi` executable | Already `pi` on this machine (npm global). The container installs it |
+| `AZURE_OPENAI_BASE_URL` | `https://rcpia.services.ai.azure.com/openai/v1` | Pi reads **`BASE_URL`**, not `ENDPOINT` — the wrong name fails confusingly |
+| `AZURE_OPENAI_API_KEY` | from Foundry → Deployments → *API Key* | Passed to Pi as `--api-key`, never via a config file |
+| Model | the **deployment name**, e.g. `gpt-5.6-sol` | Azure routes by deployment. `gpt-5.6` alone does not exist |
 
-Two open questions for Phase 7, listed here so they are not forgotten: which provider and
-model each clinical agent should use, and whether the worker container receives the key as
-an environment variable or a mounted `auth.json`.
+Deployments available in the workspace: `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.6-terra`,
+`DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `Kimi-K2.6`, and `text-embedding-ada-002`
+(1536 dimensions, for Phase 6 retrieval).
+
+Verified working with a real call:
+
+```bash
+pi --provider azure-openai-responses --model gpt-5.6-sol --api-key "$AZURE_OPENAI_API_KEY" \
+   --no-skills --tools read --verbose -p "Reply with exactly: RCPIA-OK"
+# -> RCPIA-OK
+```
+
+Two warnings appear and are expected:
+
+- *`Model "gpt-5.6-sol" not found for provider "azure-openai-responses". Using custom
+  model id.`* — Pi has no built-in card for this deployment, so it passes the id through.
+  Harmless, but it means Pi cannot know the context window or pricing: token accounting
+  must come from the `usage` block in the JSONL session, not from Pi.
+- A warning naming an `openrouter` model — that leaks from the developer's **global**
+  settings. It is why the adapter passes `--provider` and `--model` explicitly instead of
+  relying on working-directory resolution.
+
+`AZURE_OPENAI_DEPLOYMENT_NAME_MAP` also exists (Pi looks up `model.id` in it). RCPia does
+not use it: naming the deployment directly in each agent's `settings.json` means the
+folder states exactly which deployment produced a clinical opinion, which is what an
+audit needs.
 
 ## 5. Azure deployment — needed at Phase 14
 
