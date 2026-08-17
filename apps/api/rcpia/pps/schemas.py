@@ -18,9 +18,20 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Section 2 records a decision the RCP has not yet taken. RCPia never fills it, and these
-# two strings — which the reference documents carry — must never appear in its output.
+# Section 2 records a decision the RCP has not yet taken, and section 6 records validation
+# that has not happened. These are the phrases the reference documents carry, and RCPia
+# must never *claim* either.
+#
+# The check applies to the fields RCPia authors, never to the whole rendered document. An
+# agent quoting a previous PPS, or a dossier containing one, may legitimately contain these
+# words; refusing to render the document because they appear somewhere in it would break a
+# valid case to prevent a claim nobody made. Agent prose cannot make the claim structurally
+# because the renderer escapes every structural line start it could use.
 FORBIDDEN_IN_GENERATED_OUTPUT = ("Statut : Décision prise", "Fiche validée : OUI")
+
+
+class DocumentAssertsADecision(Exception):
+    """The assembled document claims a decision or a validation. It must never."""
 
 PROVISIONAL_BANNER = (
     "DOCUMENT PROVISOIRE — préparé automatiquement par RCPia à partir du dossier déposé. "
@@ -161,7 +172,11 @@ class PpsDocument(Strict):
     case_reference: str
     cancer_type: str
     generated_on: date
+    # The version the lead agent actually read — not necessarily the newest.
     ledger_version: int
+    # Set when the case has moved on since: someone corrected a field after the analysis,
+    # so this opinion was formed on data that is no longer current.
+    superseded_by: int | None = None
     agent_run_ids: list[str] = Field(default_factory=list)
 
     banner: str = PROVISIONAL_BANNER
@@ -175,3 +190,26 @@ class PpsDocument(Strict):
     missing: list[MissingItem] = Field(default_factory=list)
     evidence: list[EvidenceEntry] = Field(default_factory=list)
     appendices: list[RationaleAppendix] = Field(default_factory=list)
+
+    def assert_provisional(self) -> None:
+        """Refuse to leave RCPia claiming a decision or a validation.
+
+        The generator hardcodes both, so this cannot fire today. It is here because the
+        cost of the two being wrong is a document a clinician can act on, and that is
+        worth making unreachable rather than merely unlikely.
+        """
+        if self.decision.taken:
+            raise DocumentAssertsADecision("decision.taken is True in a generated PPS")
+
+        authored = (self.decision.statement, self.framework.validated, self.banner)
+        for text in authored:
+            for forbidden in FORBIDDEN_IN_GENERATED_OUTPUT:
+                if forbidden in text:
+                    raise DocumentAssertsADecision(
+                        f"a generated field claims {forbidden!r}"
+                    )
+
+        if "[X] Non" not in self.framework.validated:
+            raise DocumentAssertsADecision(
+                "section 6 does not state the document is unvalidated"
+            )

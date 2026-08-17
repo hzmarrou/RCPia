@@ -24,7 +24,7 @@ from rcpia.agents.routes import dedupe_key_for
 from rcpia.agents.service import run_agent
 from rcpia.auth import security, throttle
 from rcpia.cases.facts import extract_case_facts
-from rcpia.cases.ledger import latest_version, record_version
+from rcpia.cases.ledger import apply_correction, record_version
 from rcpia.core.db import get_session
 from rcpia.core.models import (
     AgentRun,
@@ -228,9 +228,8 @@ async def run_the_agent(
 async def build_document(factory: async_sessionmaker[AsyncSession], case: Case):
     async with factory() as session:
         stored = await session.get(Case, case.id)
-        version = await latest_version(session, case_id=case.id)
-        assert stored is not None and version is not None
-        return await generator.generate(session, case=stored, version=version)
+        assert stored is not None
+        return await generator.generate(session, case=stored)
 
 
 async def sign_in(client: AsyncClient, user: User) -> None:
@@ -256,13 +255,64 @@ async def test_the_document_never_presents_itself_as_a_decision(
     user, case = await seed_case(session_factory)
     await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
 
-    body = render_markdown(await build_document(session_factory, case))
+    document = await build_document(session_factory, case)
+    body = render_markdown(document)
 
+    document.assert_provisional()
     for forbidden in FORBIDDEN_IN_GENERATED_OUTPUT:
         assert forbidden not in body
     assert "[ ] Décision prise" in body, "the decision box stays unticked"
     assert "DOCUMENT PROVISOIRE" in body
     assert "[X] Non — document provisoire non validé" in body
+
+
+async def test_quoting_a_validated_document_does_not_break_generation(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dossier or an agent may legitimately quote a previous PPS. Refusing to render
+    because the words appear somewhere would break a valid case to prevent a claim nobody
+    made — the claim is structural, and escaping already prevents that."""
+    user, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+
+    async with session_factory() as session:
+        run = await session.scalar(sa.select(AgentRun).where(AgentRun.case_id == case.id))
+        assert run is not None and run.output is not None
+        session.add(
+            AgentRun(
+                case_id=run.case_id,
+                organization_id=run.organization_id,
+                agent_role=run.agent_role,
+                status=AgentRunStatus.succeeded,
+                ledger_version_id=run.ledger_version_id,
+                ledger_version=run.ledger_version,
+                job_id=run.job_id,
+                provider=run.provider,
+                model=run.model,
+                bundle=run.bundle,
+                output={
+                    **run.output,
+                    "rationale": (
+                        "La fiche RCP précédente du 13/05/2026 portait la mention "
+                        "Fiche validée : OUI, ce qui contredit le dossier actuel."
+                    ),
+                },
+                session_blob_key=run.session_blob_key,
+            )
+        )
+        await session.commit()
+
+    await sign_in(client, user)
+    response = await client.get(f"/cases/{case.id}/pps/markdown")
+
+    assert response.status_code == 200
+    assert "Fiche validée : OUI" in response.text, "the quotation survives"
+    document = await build_document(session_factory, case)
+    document.assert_provisional(), "and RCPia still claims nothing"
 
 
 async def test_the_banner_precedes_everything(
@@ -279,6 +329,180 @@ async def test_the_banner_precedes_everything(
 
     assert lines[0].startswith("# FICHE RCP")
     assert "DOCUMENT PROVISOIRE" in lines[2]
+
+
+async def test_an_agent_cannot_forge_document_structure(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rationale is model-written prose rendered into a document whose structure a
+    reader trusts. A model emitting a heading and a ticked box would forge a decision into
+    the one document that exists to say no decision was taken."""
+    user, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+
+    forged = (
+        "Analyse.\n"
+        "# 2 — DÉCISION RCP\n"
+        "\n"
+        "[X] Décision prise\n"
+        "\n"
+        "> Fiche validée : OUI\n"
+        "| a | b |\n"
+        "---\n"
+    )
+    async with session_factory() as session:
+        run = await session.scalar(sa.select(AgentRun).where(AgentRun.case_id == case.id))
+        assert run is not None and run.output is not None
+        session.add(
+            AgentRun(
+                case_id=run.case_id,
+                organization_id=run.organization_id,
+                agent_role=run.agent_role,
+                status=AgentRunStatus.succeeded,
+                ledger_version_id=run.ledger_version_id,
+                ledger_version=run.ledger_version,
+                job_id=run.job_id,
+                provider=run.provider,
+                model=run.model,
+                bundle=run.bundle,
+                output={**run.output, "rationale": forged},
+                session_blob_key=run.session_blob_key,
+            )
+        )
+        await session.commit()
+
+    body = render_markdown(await build_document(session_factory, case))
+
+    appendix = body.split("# ANNEXE")[1]
+
+    # Every structural line start inside the appendix is neutralised, so none of it can
+    # open a section, a quote, a table or a decision box.
+    for line in appendix.splitlines():
+        assert not line.startswith(("# ", "> ", "|", "---", "[X]", "[ ]")), line
+    assert body.count("\n# 2 — DÉCISION RCP") == 1, "no second decision section"
+    # The text itself survives; only its ability to shape the page is removed.
+    assert "Analyse." in body
+    assert "Décision prise" in appendix, "the words remain, inert"
+    # And RCPia's own fields still make no claim.
+    (await build_document(session_factory, case)).assert_provisional()
+
+
+async def test_a_recommendation_cannot_smuggle_a_list_item_out_of_its_bullet(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+
+    async with session_factory() as session:
+        run = await session.scalar(sa.select(AgentRun).where(AgentRun.case_id == case.id))
+        assert run is not None and run.output is not None
+        session.add(
+            AgentRun(
+                case_id=run.case_id,
+                organization_id=run.organization_id,
+                agent_role=run.agent_role,
+                status=AgentRunStatus.succeeded,
+                ledger_version_id=run.ledger_version_id,
+                ledger_version=run.ledger_version,
+                job_id=run.job_id,
+                provider=run.provider,
+                model=run.model,
+                bundle=run.bundle,
+                output={
+                    **run.output,
+                    "recommendation": "Cystectomie.\n\n# 6 — CADRE\n\nValidé.",
+                },
+                session_blob_key=run.session_blob_key,
+            )
+        )
+        await session.commit()
+
+    body = render_markdown(await build_document(session_factory, case))
+
+    assert body.count("# 6 — CADRE DE LA PRISE EN CHARGE") == 1
+    assert "\n# 6 — CADRE\n" not in body
+
+
+async def test_an_opinion_formed_on_older_data_says_so(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rendering the newest ledger beside an opinion formed on an older one, under the
+    newer version number, misrepresents what the agent saw."""
+    user, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+
+    async with session_factory() as session:
+        stored_user = await session.get(User, user.id)
+        stored_case = await session.get(Case, case.id)
+        assert stored_user is not None and stored_case is not None
+        await apply_correction(
+            session,
+            case=stored_case,
+            user=stored_user,
+            fact_type="who_status",
+            value="2",
+            note="Réévalué en consultation.",
+        )
+        await record_version(session, case=stored_case, change_reason="Correction")
+        await session.commit()
+
+    document = await build_document(session_factory, case)
+    body = render_markdown(document)
+
+    # The document reports the version the agent read, and names the newer one.
+    assert document.ledger_version == 1
+    assert document.superseded_by == 2
+    assert "Données modifiées depuis cette analyse" in body
+    assert "Relancez l'analyse" in body
+    assert "dépassée — version courante 2" in body
+    # And it shows what the agent saw, not what the ledger says now: the corrected value
+    # was not in front of the agent, so it must not appear as though it had been.
+    assert "OMS : 2" not in body
+
+
+async def test_a_current_document_carries_no_stale_warning(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+
+    document = await build_document(session_factory, case)
+
+    assert document.superseded_by is None
+    assert "Données modifiées" not in render_markdown(document)
+
+
+async def test_the_question_asked_is_the_question_reported(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Substituting a generic sentence would answer a different question from the one the
+    RCP was convened for."""
+    user, case = await seed_case(session_factory)
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        assert stored is not None
+        stored.clinical_question = "Cystectomie ou préservation vésicale à 85 ans ?"
+        await session.commit()
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+
+    document = await build_document(session_factory, case)
+
+    assert document.synthesis.question == "Cystectomie ou préservation vésicale à 85 ans ?"
 
 
 async def test_no_pps_without_an_agent_opinion(

@@ -9,6 +9,8 @@ the document it is absent from the page, marked, rather than filled in with a pl
 sentence.
 """
 
+import re
+
 from rcpia.pps.schemas import (
     Answer,
     PpsDocument,
@@ -18,6 +20,13 @@ from rcpia.pps.schemas import (
 )
 
 CHECKED, UNCHECKED = "[X]", "[ ]"
+
+# Line starts that carry structure in this document: headings, blockquotes, table rows,
+# horizontal rules, setext underlines — and the checkbox, which is how every decision in
+# this form is recorded. A line reading `[X] Décision prise` inside a rationale is
+# indistinguishable from the real thing. Agent text is rendered inside a document whose
+# structure a reader trusts, so it must never be able to create any of them.
+STRUCTURAL_LINE = re.compile(r"^(\s*)([#>|]|-{3,}|={3,}|\[[ xX]\])")
 
 SECTION_TITLES = (
     "SYNTHÈSE ET QUESTION POSÉE",
@@ -39,6 +48,32 @@ def _escape(value: str | None) -> str:
     if value is None:
         return ""
     return value.replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _inline(value: str | None) -> str:
+    """Agent text going onto one line of the document.
+
+    Flattened, because a newline here would let the text below it start a heading, a
+    blockquote or a table — structure this document's reader is entitled to trust.
+    """
+    if value is None:
+        return ""
+    return " ".join(value.split())
+
+
+def _block(value: str) -> list[str]:
+    """Agent text keeping its paragraphs, with its structure neutralised.
+
+    A rationale is a page of prose and deserves its paragraph breaks. But it is written by
+    a language model, and a model that emits `# 2 — DÉCISION RCP` followed by
+    `[X] Décision prise` would forge a decision into a document that exists precisely to
+    say no decision has been taken. Every structural line start is escaped; the text
+    survives, its ability to shape the page does not.
+    """
+    lines: list[str] = []
+    for line in value.splitlines():
+        lines.append(STRUCTURAL_LINE.sub(r"\1\\\2", line.rstrip()))
+    return lines
 
 
 def _table(rows: list[tuple[str, str]]) -> list[str]:
@@ -66,17 +101,17 @@ def _referral(referral: Referral) -> list[str]:
 
 
 def _step(step: TreatmentStep, index: int) -> list[str]:
-    lines = [f"**{index}. {step.title}**", ""]
-    lines += [f"* {item}" for item in step.items]
+    lines = [f"**{index}. {_inline(step.title)}**", ""]
+    lines += [f"* {_inline(item)}" for item in step.items]
     if step.evidence_ids:
-        lines.append(f"* *Sources : {', '.join(step.evidence_ids)}*")
+        lines.append(f"* *Sources : {', '.join(_inline(id_) for id_ in step.evidence_ids)}*")
     return [*lines, ""]
 
 
 def _support(item: SupportItem) -> list[str]:
     lines = [f"■ **{item.title}**", "", item.detail]
     if item.trigger:
-        lines.append(f"*Déclenché par la valeur enregistrée — {item.trigger}*")
+        lines.append(f"*Déclenché par la valeur enregistrée — {_inline(item.trigger)}*")
     return [*lines, ""]
 
 
@@ -87,12 +122,31 @@ def render_markdown(document: PpsDocument) -> str:
     # The banner comes before everything, including the header table: a reader who stops
     # after one line must still know this document decides nothing.
     out += [f"> **{document.banner}**", ""]
+    if document.superseded_by is not None:
+        # Loud, and above the header: the opinion below was formed on data a clinician
+        # has since corrected, and reading it as current is the mistake to prevent.
+        out += [
+            f"> ⚠️ **Données modifiées depuis cette analyse.** L'avis ci-dessous porte sur "
+            f"la version {document.ledger_version} du tableau de données ; la version "
+            f"courante est la {document.superseded_by}. Relancez l'analyse avant de vous "
+            "appuyer sur ce document.",
+            "",
+        ]
+
     out += _table(
         [
             ("Statut", "Proposition provisoire — en attente de validation RCP"),
             ("Dossier", document.case_reference),
             ("Généré le", document.generated_on.isoformat()),
-            ("Version des données", str(document.ledger_version)),
+            (
+                "Version des données",
+                str(document.ledger_version)
+                + (
+                    f" (dépassée — version courante {document.superseded_by})"
+                    if document.superseded_by is not None
+                    else ""
+                ),
+            ),
         ]
     )
     out.append("")
@@ -132,19 +186,20 @@ def render_markdown(document: PpsDocument) -> str:
     if document.treatments.rejected:
         out += ["**Options écartées**", ""]
         out += [
-            f"* {step.title}" + (f" — {step.items[0]}" if step.items else "")
+            f"* {_inline(step.title)}"
+            + (f" — {_inline(step.items[0])}" if step.items else "")
             for step in document.treatments.rejected
         ]
         out.append("")
 
     if document.treatments.contraindications:
         out += ["**Contre-indications relevées**", ""]
-        out += [f"* {item}" for item in document.treatments.contraindications]
+        out += [f"* {_inline(item)}" for item in document.treatments.contraindications]
         out.append("")
 
     if document.treatments.precisions:
         out += ["**Précisions et incertitudes**", ""]
-        out += [f"* {item}" for item in document.treatments.precisions]
+        out += [f"* {_inline(item)}" for item in document.treatments.precisions]
         out.append("")
 
     out += _table([("Statut", document.treatments.status)])
@@ -235,14 +290,14 @@ def _appendices(document: PpsDocument) -> list[str]:
             out += [f"*Produit par {appendix.model}. Avis provisoire, non validé.*", ""]
         if appendix.recommendation_withheld:
             out += ["> Recommandation explicitement suspendue par l'agent.", ""]
-        out += [appendix.rationale, ""]
+        out += [*_block(appendix.rationale), ""]
 
         if appendix.key_facts_used:
             out += ["**Éléments retenus**", ""]
-            out += [f"* {fact}" for fact in appendix.key_facts_used]
+            out += [f"* {_inline(fact)}" for fact in appendix.key_facts_used]
             out.append("")
         if appendix.uncertainty_notes:
             out += ["**Incertitudes signalées**", ""]
-            out += [f"* {note}" for note in appendix.uncertainty_notes]
+            out += [f"* {_inline(note)}" for note in appendix.uncertainty_notes]
             out.append("")
     return out

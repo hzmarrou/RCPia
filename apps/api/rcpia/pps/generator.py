@@ -14,7 +14,7 @@ Two rules run through every section:
 """
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rcpia.agents.bundle import entries_from_version
 from rcpia.agents.schemas import AgentOutput
 from rcpia.cases import completeness
-from rcpia.cases.ledger import LedgerEntry, display_label
+from rcpia.cases.ledger import LedgerEntry, display_label, latest_version
 from rcpia.core.models import AgentRun, AgentRunStatus, Case, CaseLedgerVersion
 from rcpia.pps.schemas import (
     CareFramework,
@@ -92,7 +92,9 @@ def _joined(
     return " · ".join(parts) or None
 
 
-def build_synthesis(values: dict[str, str | None], *, cancer_type: str) -> Synthesis:
+def build_synthesis(
+    values: dict[str, str | None], *, cancer_type: str, question: str | None = None
+) -> Synthesis:
     sex, age = values.get("sex"), values.get("age")
     patient = ", ".join(part for part in (sex, age) if part)
 
@@ -107,7 +109,11 @@ def build_synthesis(values: dict[str, str | None], *, cancer_type: str) -> Synth
         comorbidities=_joined(
             values, ("medical_history", "toxic_habits", "who_status", "cardiac_assessment")
         ),
-        question=(
+        # The question the uploader actually asked, when they asked one. Substituting a
+        # generic sentence for it would quietly answer a different question from the one
+        # the RCP was convened for.
+        question=question
+        or (
             "Proposition de stratégie thérapeutique provisoire — "
             f"{'tumeur de vessie' if cancer_type == 'bladder' else 'cancer de la prostate'}, "
             "à valider en RCP."
@@ -317,16 +323,38 @@ async def latest_runs(
     return runs
 
 
-async def generate(
-    session: AsyncSession, *, case: Case, version: CaseLedgerVersion
-) -> PpsDocument:
-    """Assemble the provisional PPS for a case from its stored ledger and agent runs."""
+async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
+    """Assemble the provisional PPS for a case from its stored ledger and agent runs.
+
+    The ledger version is **the one the lead agent actually read**, not the newest. Those
+    diverge as soon as a clinician corrects a field after an analysis, and rendering the
+    newest data beside an opinion formed on older data would misrepresent what the agent
+    saw — while labelling the document with the newer version number, which is worse than
+    silence. When a newer version exists the document says so, and says the analysis
+    should be re-run.
+    """
     runs = await latest_runs(session, case_id=case.id)
     if not runs:
         raise NothingToReport(
             "Aucun avis d'agent n'a abouti pour ce dossier : lancez une analyse avant de "
             "générer le PPS."
         )
+
+    lead, _ = runs[0]
+    version = (
+        await session.get(CaseLedgerVersion, lead.ledger_version_id)
+        if lead.ledger_version_id
+        else None
+    )
+    if version is None:  # pragma: no cover - a successful run carries its version
+        raise PpsError(
+            "L'avis enregistré ne référence aucune version du tableau de données."
+        )
+
+    newest = await latest_version(session, case_id=case.id)
+    superseded_by = (
+        newest.version if newest is not None and newest.version > version.version else None
+    )
 
     entries = entries_from_version(version)
     values = _values(entries)
@@ -344,8 +372,11 @@ async def generate(
         cancer_type=str(case.cancer_type),
         generated_on=datetime.now(UTC).date(),
         ledger_version=version.version,
+        superseded_by=superseded_by,
         agent_run_ids=[str(run.id) for run, _ in runs],
-        synthesis=build_synthesis(values, cancer_type=str(case.cancer_type)),
+        synthesis=build_synthesis(
+            values, cancer_type=str(case.cancer_type), question=case.clinical_question
+        ),
         decision=build_decision(values),
         treatments=build_treatments(lead_output),
         support=build_support(values, agent_roles=roles),
@@ -365,7 +396,3 @@ async def generate(
             for run, output in runs
         ],
     )
-
-
-def today() -> date:  # pragma: no cover - seam for tests
-    return datetime.now(UTC).date()
