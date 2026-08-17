@@ -62,13 +62,16 @@ The PPS itself stays this concise. RCPia additionally produces, outside the six 
 - `examples/pps-example-01.md` — PPS for dossier 01
 - `examples/pps-example-02.md` — PPS for dossier 01, second variant
 
-One example is human-written and the other machine-generated. **Which is which is not
-confirmed**, and the clinician who would know has not been asked. Treat both as valid
-targets for the output *format*, and neither as a quality benchmark for content.
+**Confirmed by the treating clinician (17 August 2026): `pps-example-01.md` is the real,
+human-written fiche; `pps-example-02.md` is machine-generated.** Treat both as valid targets
+for the output *format*, and neither as a quality benchmark for content — for `01` the
+reason is below.
 
-### Inferred, not confirmed: 01 reads as human, 02 as machine
+### How that was inferred beforehand, and why it still matters
 
-Working conclusion for Phase 8, roughly 80% confidence, from the documents alone:
+The conclusion was reached from the documents alone before the clinician answered, and the
+reasoning held. It is kept because it names the signals that distinguish a real fiche from a
+generated one, which is the same judgment a reviewer of RCPia's output has to make:
 
 - **01 contains a practice error of a kind a model does not make.** Its nutrition plan is
   *albumine en IV* for repletion, which does not work and which guidelines say not to do —
@@ -89,11 +92,28 @@ Working conclusion for Phase 8, roughly 80% confidence, from the documents alone
 Both files carry the same PDF/Word conversion damage (02 splits `Extra-` / `hospitalier`
 across two tables at a page break), so that discriminates nothing.
 
-**What Phase 8 does with this.** Take the *format* from the union of both, since each drops
-sections the other keeps — 02 lost the decision précision in §2, 01 renders §6 as loose
-bold lines rather than a table. Take the *register* from 01: terse and decision-first, which
-is what this RCP actually records. Take content standards from neither. If the inference is
-backwards, only the register call changes.
+**What Phase 8 did with this**, and which the confirmation validates: the *format* comes
+from the union of both, since each drops sections the other keeps — 02 lost the decision
+précision in §2, 01 renders §6 as loose bold lines rather than a table. The *register*
+comes from 01: terse and decision-first, which is what this RCP actually records. Content
+standards come from neither.
+
+### The IV albumin line is in the real document
+
+Now that `01` is confirmed human, its nutrition plan — *support nutritionnel intensif par
+albumine en IV* — is a real prescription in a real fiche, not a generated artefact.
+Intravenous albumin does not repair malnutrition; correcting a low albumin by infusing it
+treats the number rather than the patient, and the guidelines say so.
+
+`rules/support.py` therefore proposes the oral-then-enteral route and states explicitly
+that IV albumin is not nutritional support. **That is a deliberate departure from what the
+treating clinician wrote**, which is a heavier thing than departing from a machine draft,
+and it should be raised with them directly rather than left to be discovered in RCPia's
+output. It is a question about one line in one document, not about their practice.
+
+It is also the clearest possible argument for the rule the rest of this phase follows:
+RCPia must not be tuned to reproduce its reference documents. Matching a human fiche is not
+the objective, and here it would mean reproducing an error.
 
 ## Dossier input fields to extract
 
