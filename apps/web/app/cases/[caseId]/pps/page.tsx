@@ -35,6 +35,10 @@ function ReferralBlock({ referral }: { referral: Referral }) {
   );
 }
 
+function SupportBlockCaveat({ caveat }: { caveat: string | null }) {
+  return caveat ? <p className="muted">{caveat}</p> : null;
+}
+
 function StepBlock({ step, index }: { step: TreatmentStep; index: number }) {
   return (
     <li>
@@ -63,6 +67,7 @@ function SupportBlock({ item }: { item: SupportItem }) {
       {item.trigger ? (
         <p className="muted">Déclenché par la valeur enregistrée — {item.trigger}</p>
       ) : null}
+      <SupportBlockCaveat caveat={item.caveat} />
     </li>
   );
 }
@@ -128,9 +133,17 @@ export default async function PpsPage({
       <p className="provisional">{pps.banner}</p>
 
       <h1>Fiche RCP — proposition de prise en charge</h1>
+      {pps.superseded_by !== null ? (
+        <p className="provisional">
+          Données modifiées depuis cette analyse : l&apos;avis porte sur la version{" "}
+          {pps.ledger_version}, la version courante est la {pps.superseded_by}. Relancez
+          l&apos;analyse avant de vous appuyer sur ce document.
+        </p>
+      ) : null}
       <p className="muted">
         Dossier {pps.case_reference} · généré le {pps.generated_on} · données version{" "}
-        {pps.ledger_version}
+        {pps.ledger_version} · générateur {pps.generator_version} · avis{" "}
+        {pps.agent_run_ids.join(", ") || "—"}
       </p>
       <p>
         <a href={downloadUrl(caseId)}>Télécharger au format Markdown</a>
@@ -158,9 +171,12 @@ export default async function PpsPage({
 
       <h2>3 — Propositions de traitements</h2>
       {pps.treatments.withheld ? (
-        <p className="warnings">
-          L&apos;agent a explicitement refusé de formuler une recommandation en
-          l&apos;état.
+        // No steps follow. An agent that declines still writes about what could be
+        // considered, and showing that here would disclaim a plan and then print one.
+        <p className="provisional">
+          Aucune proposition thérapeutique n&apos;est formulée. L&apos;agent a estimé
+          qu&apos;aucune conduite ne pouvait être proposée sans risque en l&apos;état.
+          Son raisonnement complet figure en annexe.
         </p>
       ) : null}
       <ul>
@@ -168,6 +184,16 @@ export default async function PpsPage({
           <StepBlock key={step.title} step={step} index={index + 1} />
         ))}
       </ul>
+      {pps.treatments.missing_information.length > 0 ? (
+        <>
+          <h3>Informations requises avant toute proposition</h3>
+          <ul>
+            {pps.treatments.missing_information.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       {pps.treatments.contraindications.length > 0 ? (
         <>
           <h3>Contre-indications relevées</h3>
@@ -214,9 +240,16 @@ export default async function PpsPage({
         <dt>Référentiel</dt>
         <dd>{pps.framework.reference_standard}</dd>
         <dt>Essai clinique</dt>
-        <dd>{pps.framework.clinical_trial}</dd>
+        <dd>
+          {ANSWER_LABELS[pps.framework.clinical_trial]}
+          {pps.framework.clinical_trial_note
+            ? ` — ${pps.framework.clinical_trial_note}`
+            : ""}
+        </dd>
         <dt>Fiche validée</dt>
-        <dd>{pps.framework.validated}</dd>
+        <dd>
+          {pps.framework.validated ? "Oui" : "Non"} — {pps.framework.validated_note}
+        </dd>
         <dt>Participants</dt>
         <dd>{pps.framework.participants}</dd>
         <dt>Réévaluation</dt>
@@ -271,8 +304,18 @@ export default async function PpsPage({
           <h2>Annexe — raisonnement : {agentLabel(appendix.agent_role)}</h2>
           {appendix.model ? (
             <p className="muted">
-              Produit par {appendix.model}. Avis provisoire, non validé.
+              Produit par {appendix.model}
+              {appendix.ledger_version !== null
+                ? `, version ${appendix.ledger_version} du tableau de données`
+                : ""}
+              . Avis provisoire, non validé.
             </p>
+          ) : null}
+          {appendix.withheld_statement ? (
+            <>
+              <h3>Ce que l&apos;agent a indiqué en lieu de recommandation</h3>
+              <p>{appendix.withheld_statement}</p>
+            </>
           ) : null}
           <p>{appendix.rationale}</p>
           {appendix.uncertainty_notes.length > 0 ? (

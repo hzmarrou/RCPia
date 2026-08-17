@@ -12,11 +12,13 @@ reading, so the properties under test are:
 
 import sys
 import uuid
+from datetime import date
 from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rcpia.agents.pi_adapter import PiAdapter
@@ -47,8 +49,22 @@ from rcpia.jobs.models import JobType
 from rcpia.main import app
 from rcpia.pps import generator
 from rcpia.pps.render import render_markdown
-from rcpia.pps.schemas import FORBIDDEN_IN_GENERATED_OUTPUT
+from rcpia.pps.schemas import (
+    FORBIDDEN_IN_GENERATED_OUTPUT,
+    CareFramework,
+    Decision,
+    DocumentAssertsADecision,
+    PpsDocument,
+    RationaleAppendix,
+    Referral,
+    SocialAssessment,
+    SupportCare,
+    Synthesis,
+    Treatments,
+    TreatmentStep,
+)
 from rcpia.rules.referrals import (
+    G8_THRESHOLD,
     fertility_referral,
     genetic_referral,
     geriatric_referral,
@@ -232,6 +248,29 @@ async def build_document(factory: async_sessionmaker[AsyncSession], case: Case):
         return await generator.generate(session, case=stored)
 
 
+def _minimal_document() -> PpsDocument:
+    """A document with just enough structure to exercise the invariants."""
+    return PpsDocument(
+        case_id="c",
+        case_reference="CASE-1",
+        cancer_type="bladder",
+        generated_on=date(2026, 8, 17),
+        ledger_version=1,
+        synthesis=Synthesis(patient="Femme, 85 ans", question="?"),
+        decision=Decision(statement="Aucune décision n'a été prise."),
+        treatments=Treatments(status="Proposition provisoire."),
+        support=SupportCare(status="…"),
+        social=SocialAssessment(),
+        framework=CareFramework(
+            reference_standard="Non référencé",
+            validated_note="Document provisoire non validé.",
+            sent_to_gp_note="À envoyer après validation.",
+            participants="RCP à constituer.",
+            review="Date à fixer.",
+        ),
+    )
+
+
 async def sign_in(client: AsyncClient, user: User) -> None:
     response = await client.post(
         "/auth/login", json={"email": user.email, "password": PASSWORD}
@@ -263,7 +302,68 @@ async def test_the_document_never_presents_itself_as_a_decision(
         assert forbidden not in body
     assert "[ ] Décision prise" in body, "the decision box stays unticked"
     assert "DOCUMENT PROVISOIRE" in body
-    assert "[X] Non — document provisoire non validé" in body
+    # Typed state, drawn as boxes by the renderer — no string can claim the opposite.
+    assert document.framework.validated is False
+    assert document.framework.sent_to_gp is False
+    assert "[ ] Oui  [X] Non — Document provisoire non validé" in body
+
+
+def test_a_framework_claiming_validation_is_refused() -> None:
+    """The old check searched for "[X] Non" inside a display string, which a value reading
+    `[X] Non … [X] Oui` satisfied while claiming the opposite. Booleans cannot be phrased
+    around."""
+    document = _minimal_document()
+    document.framework.validated = True
+
+    with pytest.raises(DocumentAssertsADecision, match="validated"):
+        document.assert_provisional()
+
+
+def test_a_document_claiming_a_decision_is_refused() -> None:
+    document = _minimal_document()
+    document.decision.taken = True
+
+    with pytest.raises(DocumentAssertsADecision):
+        document.assert_provisional()
+
+
+def test_an_unapproved_rule_may_not_answer_a_referral() -> None:
+    """A ticked box means a rule started answering without being signed off."""
+    document = _minimal_document()
+    document.decision.referrals = [
+        Referral(
+            label="Préservation fertilité",
+            answer="non",
+            justification="…",
+            approved=False,
+        )
+    ]
+
+    with pytest.raises(DocumentAssertsADecision, match="unapproved"):
+        document.assert_provisional()
+
+
+def test_raw_html_cannot_survive_into_the_document() -> None:
+    """Markdown passes HTML through, so escaping `#` achieves nothing if the text can
+    write `<h1>` — or an `<input checked>`, which draws the very mark that means
+    "decided" in this form."""
+    document = _minimal_document()
+    document.appendices = [
+        RationaleAppendix(
+            agent_role="urology_oncology",
+            rationale=(
+                '<h1>Décision</h1>\n<input type="checkbox" checked> Décision prise\n'
+                "<script>alert(1)</script>"
+            ),
+        )
+    ]
+
+    body = render_markdown(document)
+
+    assert "<h1>" not in body
+    assert "<input" not in body
+    assert "<script>" not in body
+    assert "&lt;h1&gt;" in body, "the text survives, inert"
 
 
 async def test_quoting_a_validated_document_does_not_break_generation(
@@ -646,8 +746,30 @@ async def test_a_withheld_recommendation_is_not_turned_into_a_plan(
     body = render_markdown(document)
 
     assert document.treatments.withheld is True
-    assert "Aucune proposition thérapeutique en l'état" in body
-    assert "refusé de formuler une recommandation" in body
+    # No treatment content at all. An agent that declines often still writes paragraphs
+    # about what could be considered, and printing them under a heading saying it declined
+    # gives the reader a document that disclaims a plan and then prints one.
+    assert document.treatments.steps == []
+    assert document.treatments.rejected == []
+    assert "Aucune proposition thérapeutique n'est formulée" in body
+    # What is missing takes its place.
+    assert "Bilan d'extension incomplet" in body
+    # The agent's own words survive in the reasoning, where they are marked as reasoning.
+    appendix = body.split("# ANNEXE")[1]
+    assert "Aucune recommandation possible en l'état." in appendix
+    assert document.appendices[0].withheld_statement is not None
+
+
+async def test_a_withheld_section_cannot_be_built_with_treatment_content(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Enforced by the model, so no future caller can reintroduce it."""
+    with pytest.raises(ValidationError, match="no treatment steps"):
+        Treatments(
+            status="…",
+            withheld=True,
+            steps=[TreatmentStep(title="Cystectomie", items=["…"])],
+        )
 
 
 # --------------------------------------------------------------------------------------
@@ -717,43 +839,74 @@ async def test_section_six_does_not_claim_a_guideline_it_never_had(
 # --------------------------------------------------------------------------------------
 
 
-def test_a_high_age_proposes_an_oncogeriatric_assessment() -> None:
-    referral = geriatric_referral(age="85 ans", g8=None)
+@pytest.mark.parametrize(
+    "referral",
+    [
+        geriatric_referral(age="85 ans", g8=None),
+        geriatric_referral(age="62 ans", g8="5"),
+        geriatric_referral(age=None, g8=None),
+        genetic_referral(family_history="RAS"),
+        genetic_referral(family_history="Mère : cancer du sein à 45 ans"),
+        genetic_referral(family_history=None),
+        fertility_referral(age="34 ans", sex="Homme"),
+        fertility_referral(age="46 ans", sex="Femme"),
+        fertility_referral(age="85 ans", sex="Femme"),
+    ],
+)
+def test_no_unapproved_rule_answers_a_clinical_question(referral) -> None:
+    """The thresholds behind these are conventional or invented, and none is signed off.
 
-    assert referral.answer == "oui"
-    assert referral.basis == "Âge : 85 ans"
+    A ticked *Non* for fertility preservation on a 46-year-old woman is permanent harm,
+    and the form gives it the same weight as a decision a room of oncologists took. Until
+    a clinician approves the criterion, RCPia observes and the RCP answers.
+    """
+    assert referral.answer == "a_determiner"
+    assert referral.approved is False
+    assert "non validé" in referral.justification
 
 
-def test_a_low_g8_proposes_one_whatever_the_age() -> None:
-    referral = geriatric_referral(age="62 ans", g8="5")
+def test_an_observation_still_puts_the_evidence_in_front_of_the_rcp() -> None:
+    """Declining to answer is not declining to be useful: the question is asked with the
+    recorded value beside it."""
+    geriatric = geriatric_referral(age="85 ans", g8="5")
 
-    assert referral.answer == "oui"
-    assert "G8" in (referral.basis or "")
+    assert "5" in geriatric.justification
+    assert geriatric.basis == "G8 : 5"
+    assert str(G8_THRESHOLD)[0] in geriatric.justification
 
 
-def test_an_unknown_age_is_not_guessed_at() -> None:
-    """"We do not know" is the honest output, and the missing report already says so."""
-    referral = geriatric_referral(age=None, g8=None)
+def test_a_family_history_of_hypertension_is_not_read_as_oncological() -> None:
+    """The rule used to propose a genetics referral for `Père : HTA`. Judging relevance
+    needs a clinician, so the recorded text is shown and the question is put."""
+    referral = genetic_referral(family_history="Père : HTA")
 
     assert referral.answer == "a_determiner"
-    assert referral.basis is None
+    assert "Père : HTA" in referral.justification
+    assert "pertinence" in referral.justification
 
 
-def test_ras_family_history_is_an_answer_but_an_empty_field_is_not() -> None:
+def test_ras_and_an_empty_field_remain_distinguishable() -> None:
     """The distinction the whole ledger turns on, carried into section 2."""
-    assert genetic_referral(family_history="RAS").answer == "non"
-    assert genetic_referral(family_history=None).answer == "a_determiner"
-    assert genetic_referral(family_history="Mère : cancer du sein à 45 ans").answer == "oui"
+    assert "RAS" in genetic_referral(family_history="RAS").justification
+    assert "non renseigné" in genetic_referral(family_history=None).justification.lower()
 
 
-def test_fertility_is_raised_while_it_can_still_be_offered() -> None:
-    assert fertility_referral(age="34 ans", sex="Homme").answer == "oui"
-    assert fertility_referral(age="85 ans", sex="Femme").answer == "non"
-    assert fertility_referral(age="40 ans", sex=None).answer == "a_determiner"
+def test_a_contested_value_is_no_basis_for_an_observation() -> None:
+    """Reasoning from one arbitrary reading, and printing it as the reason, presents as
+    settled the very thing a clinician still has to settle."""
+    contested = frozenset({"age", "g8_score", "family_history", "sex"})
+
+    geriatric = geriatric_referral(age="85 ans", g8="5", contested=contested)
+    genetic = genetic_referral(family_history="Mère : cancer", contested=contested)
+    fertility = fertility_referral(age="46 ans", sex="Femme", contested=contested)
+
+    for referral in (geriatric, genetic, fertility):
+        assert referral.basis is None
+        assert "contradictoire" in referral.justification
 
 
-def test_every_proposal_states_a_justification() -> None:
-    """A proposal a reader cannot trace is indistinguishable from an assertion."""
+def test_every_referral_states_a_justification() -> None:
+    """An observation a reader cannot trace is indistinguishable from an assertion."""
     referrals = [
         geriatric_referral(age="85 ans", g8=None),
         genetic_referral(family_history="RAS"),
@@ -791,7 +944,7 @@ async def test_a_referral_proposal_shows_its_basis_on_the_page(
     body = render_markdown(await build_document(session_factory, case))
 
     assert "Fondé sur — Âge : 85 ans" in body
-    assert "propositions" in body.lower()
+    assert "RCPia ne se prononce pas" in body
 
 
 # --------------------------------------------------------------------------------------
@@ -807,6 +960,30 @@ def test_support_items_fire_on_recorded_values_and_say_which() -> None:
     assert titles["Transfusion sanguine"].trigger == "Hb : 8.4 g/dL"
     assert "Support nutritionnel" in titles
     assert "Surveillance néphrologique" in titles
+
+
+def test_a_triggered_item_states_the_threshold_and_that_it_is_unvalidated() -> None:
+    """Hb 9.9 and Hb 10.1 are not different clinical situations. An item that instructs on
+    one side of an unapproved line pretends they are, so it evaluates rather than
+    prescribes and shows the line it used."""
+    item = next(
+        item for item in support_items({"haemoglobin": "9.9"}) if item.trigger
+    )
+
+    assert "Seuil indicatif non validé" in (item.caveat or "")
+    # In words, not "<": the renderer escapes angle brackets, and `Hb &lt; 10` is not
+    # something to show a clinician.
+    assert "Hb inférieure à 10 g/dL" in (item.caveat or "")
+    # Phrased as an assessment, not an instruction.
+    assert "évaluer l'indication" in item.detail
+
+
+def test_a_contested_value_triggers_nothing() -> None:
+    """Firing on one arbitrary reading, and printing it as the reason, presents a
+    contradiction as a settled fact."""
+    items = support_items({"haemoglobin": "8.4"}, contested=frozenset({"haemoglobin"}))
+
+    assert not any(item.trigger for item in items)
 
 
 def test_untriggered_items_are_simply_absent() -> None:
@@ -917,6 +1094,72 @@ async def test_the_document_names_what_it_was_built_from(
     assert first.ledger_version == second.ledger_version
     assert first.agent_run_ids == second.agent_run_ids
     assert render_markdown(first) == render_markdown(second)
+
+
+async def test_the_downloaded_document_names_the_runs_and_the_generator(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing is persisted, so what produced the document has to travel inside it.
+    Otherwise a downloaded copy cannot be matched later to the runs and the code behind
+    it, and "regenerate and compare" compares unknowns."""
+    user, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+    await sign_in(client, user)
+
+    document = await build_document(session_factory, case)
+    body = (await client.get(f"/cases/{case.id}/pps/markdown")).text
+
+    assert document.agent_run_ids
+    for run_id in document.agent_run_ids:
+        assert run_id in body
+    assert document.generator_version in body
+    assert "Version du générateur" in body
+
+
+async def test_several_specialists_are_refused_until_a_synthesis_exists(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whichever run finished last would otherwise lead section 3, letting the job queue
+    decide which speciality a clinician reads first."""
+    user, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+
+    async with session_factory() as session:
+        run = await session.scalar(sa.select(AgentRun).where(AgentRun.case_id == case.id))
+        assert run is not None and run.output is not None
+        session.add(
+            AgentRun(
+                case_id=run.case_id,
+                organization_id=run.organization_id,
+                agent_role="medical_oncology",
+                status=AgentRunStatus.succeeded,
+                ledger_version_id=run.ledger_version_id,
+                ledger_version=run.ledger_version,
+                job_id=run.job_id,
+                provider=run.provider,
+                model=run.model,
+                bundle=run.bundle,
+                output={**run.output, "agent_role": "medical_oncology"},
+                session_blob_key=run.session_blob_key,
+            )
+        )
+        await session.commit()
+
+    with pytest.raises(generator.SynthesisRequired, match="synthèse"):
+        await build_document(session_factory, case)
+
+    await sign_in(client, user)
+    response = await client.get(f"/cases/{case.id}/pps")
+    assert response.status_code == 409
+    assert "Oncologie médicale" in response.json()["detail"]
 
 
 async def test_only_the_newest_opinion_per_specialist_is_rendered(

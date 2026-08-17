@@ -16,7 +16,7 @@ Clinical text is French, because the readers are the RCP. Keys are English, bein
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Section 2 records a decision the RCP has not yet taken, and section 6 records validation
 # that has not happened. These are the phrases the reference documents carry, and RCPia
@@ -57,9 +57,17 @@ class Field2(Strict):
 
 
 class Referral(Strict):
-    """A referral RCPia *proposes*. The RCP decides.
+    """A referral question, and what the dossier says that bears on it.
 
-    `basis` names the recorded value the proposal was derived from. A proposal whose basis
+    RCPia does not answer these. The thresholds behind them are conventional or invented
+    and none has been approved by a clinician, so `answer` is `a_determiner` and the
+    justification is an *observation* — the recorded value plus the criterion that bears
+    on it, with the decision left to the RCP.
+
+    `approved` records whether the rule behind this row has been signed off. Only an
+    approved rule may answer, and `PpsDocument.assert_provisional` enforces that.
+
+    `basis` names the recorded value the observation came from. An observation whose basis
     a reader cannot see is indistinguishable from an assertion, and this document must
     never assert.
     """
@@ -68,6 +76,7 @@ class Referral(Strict):
     answer: Answer
     justification: str
     basis: str | None = None
+    approved: bool = False
 
 
 class TreatmentStep(Strict):
@@ -82,6 +91,9 @@ class SupportItem(Strict):
     title: str
     detail: str
     trigger: str | None = None
+    # The threshold behind a triggered item, and its standing. Absent on standing items,
+    # which rest on no threshold at all.
+    caveat: str | None = None
 
 
 class MissingItem(Strict):
@@ -110,10 +122,16 @@ class RationaleAppendix(Strict):
 
     agent_role: str
     model: str | None = None
+    # Each agent read some version of the ledger, and two agents need not have read the
+    # same one. Recorded per appendix so a reader can tell.
+    ledger_version: int | None = None
     rationale: str
     key_facts_used: list[str] = Field(default_factory=list)
     uncertainty_notes: list[str] = Field(default_factory=list)
     recommendation_withheld: bool = False
+    # What the agent wrote in place of a recommendation when it withheld one. Kept here,
+    # in the reasoning, and never in section 3 — see `Treatments`.
+    withheld_statement: str | None = None
 
 
 class Synthesis(Strict):
@@ -132,12 +150,31 @@ class Decision(Strict):
 
 
 class Treatments(Strict):
+    """Section 3.
+
+    When the agent withholds a recommendation, `steps` and `rejected` are **empty**. The
+    section then carries only what is missing and what is uncertain. Printing the agent's
+    text under a heading saying it declined to recommend produces a document that says
+    "no proposal" and then reads as a proposal — and a reader acts on the part that looks
+    like a plan, not on the disclaimer above it.
+    """
+
     steps: list[TreatmentStep] = Field(default_factory=list)
     precisions: list[str] = Field(default_factory=list)
     contraindications: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
     rejected: list[TreatmentStep] = Field(default_factory=list)
     status: str
     withheld: bool = False
+
+    @model_validator(mode="after")
+    def a_withheld_section_proposes_nothing(self) -> "Treatments":
+        if self.withheld and (self.steps or self.rejected):
+            raise ValueError(
+                "a withheld recommendation must render no treatment steps: the agent "
+                "declined to propose, so section 3 has nothing to carry"
+            )
+        return self
 
 
 class SupportCare(Strict):
@@ -153,10 +190,21 @@ class SocialAssessment(Strict):
 
 
 class CareFramework(Strict):
+    """Section 6.
+
+    The three yes/no fields are **typed**, not prose. They used to be display strings, and
+    a string check for "[X] Non" passed a value reading `[X] Non … [X] Oui`. State that
+    matters is state, and the renderer draws the boxes from it.
+    """
+
     reference_standard: str
-    clinical_trial: str
-    validated: str
-    sent_to_gp: str
+    clinical_trial: Answer = "a_determiner"
+    clinical_trial_note: str | None = None
+    # Always False in a generated document, and `assert_provisional` enforces it.
+    validated: bool = False
+    validated_note: str
+    sent_to_gp: bool = False
+    sent_to_gp_note: str
     participants: str
     review: str
 
@@ -178,6 +226,10 @@ class PpsDocument(Strict):
     # so this opinion was formed on data that is no longer current.
     superseded_by: int | None = None
     agent_run_ids: list[str] = Field(default_factory=list)
+    # The document is regenerated rather than stored, so what produced it has to travel
+    # inside it. Without these two a downloaded copy cannot be matched to the runs and the
+    # code that made it, and "regenerate to check" silently compares different things.
+    generator_version: str = "0"
 
     banner: str = PROVISIONAL_BANNER
     synthesis: Synthesis
@@ -194,22 +246,37 @@ class PpsDocument(Strict):
     def assert_provisional(self) -> None:
         """Refuse to leave RCPia claiming a decision or a validation.
 
-        The generator hardcodes both, so this cannot fire today. It is here because the
-        cost of the two being wrong is a document a clinician can act on, and that is
-        worth making unreachable rather than merely unlikely.
+        Checks **typed state**, not rendered strings. A previous version searched for
+        `"[X] Non"` inside a display string, which a value reading `[X] Non … [X] Oui`
+        satisfied while claiming the opposite. Booleans cannot be phrased around.
         """
         if self.decision.taken:
             raise DocumentAssertsADecision("decision.taken is True in a generated PPS")
+        if self.framework.validated:
+            raise DocumentAssertsADecision("framework.validated is True in a generated PPS")
+        if self.framework.sent_to_gp:
+            raise DocumentAssertsADecision("a generated PPS was marked as sent to the GP")
+        if self.treatments.withheld and (
+            self.treatments.steps or self.treatments.rejected
+        ):
+            raise DocumentAssertsADecision(
+                "a withheld recommendation is carrying treatment content"
+            )
 
-        authored = (self.decision.statement, self.framework.validated, self.banner)
-        for text in authored:
+        # A referral may only be answered by an approved rule. Nothing is approved, so a
+        # ticked box here means a rule started answering without being signed off.
+        for referral in self.decision.referrals:
+            if referral.answer != "a_determiner" and not referral.approved:
+                raise DocumentAssertsADecision(
+                    f"{referral.label}: an unapproved rule answered {referral.answer!r}"
+                )
+
+        # Prose RCPia authors must not carry the phrases that mean "decided" and
+        # "validated". This is not applied to the whole document: an agent or a dossier
+        # may legitimately quote a previous fiche, and the claim is structural.
+        for text in (self.decision.statement, self.banner, self.framework.validated_note):
             for forbidden in FORBIDDEN_IN_GENERATED_OUTPUT:
                 if forbidden in text:
                     raise DocumentAssertsADecision(
                         f"a generated field claims {forbidden!r}"
                     )
-
-        if "[X] Non" not in self.framework.validated:
-            raise DocumentAssertsADecision(
-                "section 6 does not state the document is unvalidated"
-            )

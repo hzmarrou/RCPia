@@ -47,18 +47,30 @@ def _escape(value: str | None) -> str:
     """
     if value is None:
         return ""
-    return value.replace("|", "\\|").replace("\n", " ").strip()
+    return _no_html(value.replace("|", "\\|").replace("\n", " ").strip())
+
+
+def _no_html(value: str) -> str:
+    """Neutralise raw HTML.
+
+    Markdown passes HTML through, so escaping `#` at a line start achieves nothing if the
+    text can write `<h1>`. Worse, `<input type="checkbox" checked>` renders as a ticked
+    box — the exact mark that means "decided" in this form — with no Markdown involved at
+    all. Angle brackets become entities; the text still reads correctly.
+    """
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _inline(value: str | None) -> str:
     """Agent text going onto one line of the document.
 
     Flattened, because a newline here would let the text below it start a heading, a
-    blockquote or a table — structure this document's reader is entitled to trust.
+    blockquote or a table — structure this document's reader is entitled to trust — and
+    stripped of HTML for the same reason.
     """
     if value is None:
         return ""
-    return " ".join(value.split())
+    return _no_html(" ".join(value.split()))
 
 
 def _block(value: str) -> list[str]:
@@ -67,11 +79,11 @@ def _block(value: str) -> list[str]:
     A rationale is a page of prose and deserves its paragraph breaks. But it is written by
     a language model, and a model that emits `# 2 — DÉCISION RCP` followed by
     `[X] Décision prise` would forge a decision into a document that exists precisely to
-    say no decision has been taken. Every structural line start is escaped; the text
-    survives, its ability to shape the page does not.
+    say no decision has been taken. HTML is escaped first, then every structural line
+    start; the text survives, its ability to shape the page does not.
     """
     lines: list[str] = []
-    for line in value.splitlines():
+    for line in _no_html(value).splitlines():
         lines.append(STRUCTURAL_LINE.sub(r"\1\\\2", line.rstrip()))
     return lines
 
@@ -89,6 +101,13 @@ def _checkboxes(answer: Answer) -> str:
     oui = CHECKED if answer == "oui" else UNCHECKED
     non = CHECKED if answer == "non" else UNCHECKED
     return f"{oui} Oui  {non} Non"
+
+
+def _yes_no(value: bool) -> str:
+    """Draw the boxes from typed state, so no string can claim the opposite."""
+    return (
+        f"{CHECKED} Oui  {UNCHECKED} Non" if value else f"{UNCHECKED} Oui  {CHECKED} Non"
+    )
 
 
 def _referral(referral: Referral) -> list[str]:
@@ -112,6 +131,8 @@ def _support(item: SupportItem) -> list[str]:
     lines = [f"■ **{item.title}**", "", item.detail]
     if item.trigger:
         lines.append(f"*Déclenché par la valeur enregistrée — {_inline(item.trigger)}*")
+    if item.caveat:
+        lines.append(f"*{_inline(item.caveat)}*")
     return [*lines, ""]
 
 
@@ -147,6 +168,11 @@ def render_markdown(document: PpsDocument) -> str:
                     else ""
                 ),
             ),
+            # This document is regenerated, never stored. Printing what produced it is
+            # what lets a downloaded copy be matched later to the runs and the code
+            # behind it; without these, "regenerate and compare" compares unknowns.
+            ("Avis analysés", ", ".join(document.agent_run_ids) or "—"),
+            ("Version du générateur", document.generator_version),
         ]
     )
     out.append("")
@@ -175,13 +201,21 @@ def render_markdown(document: PpsDocument) -> str:
     # ------------------------------------------------------------------ 3
     out += [f"# 3 — {SECTION_TITLES[2]}", ""]
     if document.treatments.withheld:
+        # No steps follow. The section carries what is missing and what is uncertain, and
+        # nothing that could be read as a plan.
         out += [
-            "> L'agent a explicitement refusé de formuler une recommandation en l'état. "
-            "Voir les informations manquantes ci-dessous.",
+            "> **Aucune proposition thérapeutique n'est formulée.** L'agent a estimé "
+            "qu'aucune conduite ne pouvait être proposée sans risque en l'état. Son "
+            "raisonnement complet figure en annexe.",
             "",
         ]
     for index, step in enumerate(document.treatments.steps, start=1):
         out += _step(step, index)
+
+    if document.treatments.missing_information:
+        out += ["**Informations requises avant toute proposition**", ""]
+        out += [f"* {_inline(item)}" for item in document.treatments.missing_information]
+        out.append("")
 
     if document.treatments.rejected:
         out += ["**Options écartées**", ""]
@@ -228,9 +262,25 @@ def render_markdown(document: PpsDocument) -> str:
     out += _table(
         [
             ("Référentiel", document.framework.reference_standard),
-            ("Essai clinique", document.framework.clinical_trial),
-            ("Fiche RCP validée", document.framework.validated),
-            ("Fiche envoyée médecin traitant", document.framework.sent_to_gp),
+            (
+                "Essai clinique",
+                f"{_checkboxes(document.framework.clinical_trial)}"
+                + (
+                    f" — {document.framework.clinical_trial_note}"
+                    if document.framework.clinical_trial_note
+                    else ""
+                ),
+            ),
+            (
+                "Fiche RCP validée",
+                f"{_yes_no(document.framework.validated)} — "
+                f"{document.framework.validated_note}",
+            ),
+            (
+                "Fiche envoyée médecin traitant",
+                f"{_yes_no(document.framework.sent_to_gp)} — "
+                f"{document.framework.sent_to_gp_note}",
+            ),
             ("Participants", document.framework.participants),
             ("Réévaluation", document.framework.review),
         ]
@@ -286,10 +336,24 @@ def _appendices(document: PpsDocument) -> list[str]:
 
         title = agent_label(appendix.agent_role)
         out += [f"# ANNEXE — RAISONNEMENT : {title.upper()}", ""]
-        if appendix.model:
-            out += [f"*Produit par {appendix.model}. Avis provisoire, non validé.*", ""]
+        provenance = [
+            f"Produit par {appendix.model}" if appendix.model else None,
+            (
+                f"version {appendix.ledger_version} du tableau de données"
+                if appendix.ledger_version is not None
+                else None
+            ),
+        ]
+        stated = ", ".join(part for part in provenance if part)
+        if stated:
+            out += [f"*{stated}. Avis provisoire, non validé.*", ""]
         if appendix.recommendation_withheld:
             out += ["> Recommandation explicitement suspendue par l'agent.", ""]
+        if appendix.withheld_statement:
+            # The agent's own words about why it declined. Here, in the reasoning, and
+            # deliberately not in section 3 where they would read as a plan.
+            out += ["**Ce que l'agent a indiqué en lieu de recommandation**", ""]
+            out += [*_block(appendix.withheld_statement), ""]
         out += [*_block(appendix.rationale), ""]
 
         if appendix.key_facts_used:

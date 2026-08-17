@@ -10,6 +10,15 @@ So each item here is either **triggered** by a recorded value — and then state
 reference documents carry it unconditionally. Nothing is invented from the diagnosis, and
 the section says plainly that the RCP completes it.
 
+The thresholds are conventional but unapproved (see `approval.py`), so a triggered item is
+phrased as a point to evaluate, never as a prescription: "anaemia documented, assess the
+transfusion indication", not "transfuse". Hb 9.9 and Hb 10.1 are not different clinical
+situations, and a rule that instructs on one side of an unapproved line pretends they are.
+
+A value the dossier contradicts itself about triggers nothing. Firing on one arbitrary
+reading of a contested field, and printing that reading as the reason, presents as settled
+exactly what a clinician still has to settle.
+
 One of the reference documents prescribes intravenous albumin as nutritional repletion.
 That is a practice error: albumin is not nutrition, and correcting a low albumin by
 infusing it treats the number rather than the patient. RCPia proposes the oral-then-enteral
@@ -40,9 +49,17 @@ class Trigger:
     title: str
     detail: str
     applies: Callable[[float], bool]
+    # The threshold in words, shown to the reader so they can disagree with it.
+    criterion: str
     unit: str = ""
 
-    def evaluate(self, raw: str | None) -> SupportItem | None:
+    def evaluate(
+        self, raw: str | None, *, contested: bool = False
+    ) -> SupportItem | None:
+        if contested:
+            # The dossier disagrees with itself about this value. Whichever reading fired
+            # would be printed as the reason, which is a claim RCPia cannot make.
+            return None
         value = number_in(raw)
         if value is None or not self.applies(value):
             return None
@@ -52,6 +69,9 @@ class Trigger:
             # Named, not bare: "7" tells a reader nothing, "Score MNA : 7" tells them
             # which value called for this and lets them check it.
             trigger=f"{display_label(self.key)} : {raw}{self.unit}",
+            # The threshold is conventional, not approved. Said next to the item, because
+            # a reader deciding whether to act on it needs to know what it rests on.
+            caveat=f"Seuil indicatif non validé : {self.criterion}. À confirmer en RCP.",
         )
 
 
@@ -65,6 +85,7 @@ TRIGGERED: tuple[Trigger, ...] = (
             "g/dL). Surveillance NFS."
         ),
         applies=lambda value: value < HAEMOGLOBIN_TRANSFUSION,
+        criterion=f"Hb inférieure à {HAEMOGLOBIN_TRANSFUSION:g} g/dL",
         unit=" g/dL",
     ),
     Trigger(
@@ -76,6 +97,7 @@ TRIGGERED: tuple[Trigger, ...] = (
             "L'albumine intraveineuse n'est pas un support nutritionnel."
         ),
         applies=lambda value: value < ALBUMIN_LOW,
+        criterion=f"albumine inférieure à {ALBUMIN_LOW:g} g/L",
         unit=" g/L",
     ),
     Trigger(
@@ -86,6 +108,7 @@ TRIGGERED: tuple[Trigger, ...] = (
             "avec réévaluation du poids et de l'albuminémie."
         ),
         applies=lambda value: value < MNA_MALNOURISHED,
+        criterion=f"MNA inférieur à {MNA_MALNOURISHED:g}",
     ),
     Trigger(
         key="egfr",
@@ -95,6 +118,7 @@ TRIGGERED: tuple[Trigger, ...] = (
             "et confirmer la clairance avant toute chimiothérapie à base de sels de platine."
         ),
         applies=lambda value: value < EGFR_IMPAIRED,
+        criterion=f"DFG inférieur à {EGFR_IMPAIRED:g} mL/min",
         unit=" mL/min",
     ),
 )
@@ -132,7 +156,9 @@ COMPLETED_BY_RCP = (
 )
 
 
-def support_items(values: dict[str, str | None]) -> list[SupportItem]:
+def support_items(
+    values: dict[str, str | None], *, contested: frozenset[str] = frozenset()
+) -> list[SupportItem]:
     """Support items the recorded values call for, then the standing ones.
 
     Two triggers can name the same item — a low albumin and a low MNA both call for
@@ -143,7 +169,9 @@ def support_items(values: dict[str, str | None]) -> list[SupportItem]:
     seen: set[str] = set()
 
     for trigger in TRIGGERED:
-        item = trigger.evaluate(values.get(trigger.key))
+        item = trigger.evaluate(
+            values.get(trigger.key), contested=trigger.key in contested
+        )
         if item is None or item.title in seen:
             continue
         seen.add(item.title)

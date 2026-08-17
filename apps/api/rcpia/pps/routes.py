@@ -68,7 +68,7 @@ async def _build(
         # The generator resolves its own ledger version — the one the lead agent read,
         # not the newest. Passing one in from here is how the two came apart.
         document = await generator.generate(session, case=case)
-    except generator.NothingToReport as exc:
+    except (generator.NothingToReport, generator.SynthesisRequired) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except generator.PpsError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc

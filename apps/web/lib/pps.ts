@@ -6,8 +6,10 @@ export type Referral = {
   label: string;
   answer: Answer;
   justification: string;
-  /** The recorded value the proposal was derived from. Absent means RCPia had none. */
+  /** The recorded value the observation came from. Absent means RCPia had none. */
   basis: string | null;
+  /** Only an approved rule may answer; nothing is approved yet. */
+  approved: boolean;
 };
 
 export type TreatmentStep = {
@@ -20,6 +22,8 @@ export type SupportItem = {
   title: string;
   detail: string;
   trigger: string | null;
+  /** The threshold behind a triggered item, and that it is not clinically approved. */
+  caveat: string | null;
 };
 
 export type MissingItem = {
@@ -40,10 +44,13 @@ export type EvidenceEntry = {
 export type RationaleAppendix = {
   agent_role: string;
   model: string | null;
+  ledger_version: number | null;
   rationale: string;
   key_facts_used: string[];
   uncertainty_notes: string[];
   recommendation_withheld: boolean;
+  /** What the agent wrote instead of a recommendation. Reasoning, never a plan. */
+  withheld_statement: string | null;
 };
 
 export type Pps = {
@@ -51,8 +58,12 @@ export type Pps = {
   case_reference: string;
   cancer_type: string;
   generated_on: string;
+  /** The version the lead agent read — not necessarily the newest. */
   ledger_version: number;
+  /** Set when the case has moved on since the analysis. */
+  superseded_by: number | null;
   agent_run_ids: string[];
+  generator_version: string;
   banner: string;
   synthesis: {
     patient: string;
@@ -62,9 +73,11 @@ export type Pps = {
   };
   decision: { taken: boolean; statement: string; referrals: Referral[] };
   treatments: {
+    /** Empty when `withheld`: a declined recommendation carries no treatment content. */
     steps: TreatmentStep[];
     precisions: string[];
     contraindications: string[];
+    missing_information: string[];
     rejected: TreatmentStep[];
     status: string;
     withheld: boolean;
@@ -81,9 +94,13 @@ export type Pps = {
   };
   framework: {
     reference_standard: string;
-    clinical_trial: string;
-    validated: string;
-    sent_to_gp: string;
+    clinical_trial: Answer;
+    clinical_trial_note: string | null;
+    /** Typed, not prose: a string saying "[X] Non … [X] Oui" claimed both. */
+    validated: boolean;
+    validated_note: string;
+    sent_to_gp: boolean;
+    sent_to_gp_note: string;
     participants: string;
     review: string;
   };
