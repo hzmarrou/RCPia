@@ -106,6 +106,25 @@ Two rules the adapter enforces:
   document identifiers; the uploaded filename is kept in the database as data, not used
   as a path.
 
+## Parsing
+
+`PARSER_PROVIDER` selects the parser. `llamaparse` (default) sends the dossier to
+LlamaParse Cloud and needs `LLAMAPARSE_API_KEY`; `liteparse` is reserved for local
+parsing and currently fails with a clear message rather than silently falling back to the
+cloud — a deployment that chose local parsing for confidentiality must never parse
+elsewhere by accident.
+
+Parsing runs in the worker, since it takes minutes:
+
+```bash
+uv run python -m rcpia.worker
+```
+
+The handler stores one `document_chunks` row per parsed block, keeping page, section, and
+bounding box so extracted facts can cite them. It is idempotent — a re-run replaces the
+document's chunks — because job delivery is at-least-once. Thin or empty parses produce
+French warnings shown next to the document instead of failing silently.
+
 ## Jobs
 
 The queue is PostgreSQL — no Redis or message broker in v1. `rcpia.jobs.service` provides
