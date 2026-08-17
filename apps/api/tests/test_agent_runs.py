@@ -661,6 +661,60 @@ async def test_asking_twice_does_not_queue_two_runs(
     assert first.json()["job_id"] == second.json()["job_id"]
 
 
+async def test_filling_the_missing_field_releases_the_parked_job(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing else returns a parked job to the queue, so asking again has to.
+
+    Otherwise the clinician supplies exactly what was asked for, presses the button, and
+    gets back a job that will never run.
+    """
+    user, case = await seed_case(
+        session_factory, text="**Type histologique** : Carcinome urothélial\n"
+    )
+    await sign_in(client, user)
+    job_id = await agent_job(session_factory, case)
+    parked = await execute(session_factory, job_id, adapter, blobs, monkeypatch)
+    assert parked is not None and parked.status is JobStatus.waiting_for_user
+
+    async with session_factory() as session:
+        # What the worker records when the handler reports `waiting_for_user`.
+        job = await session.get(AnalysisJob, job_id)
+        assert job is not None
+        job.status = JobStatus.waiting_for_user
+        job.error_message = "Infiltration du muscle : information manquante"
+
+        stored_user = await session.get(User, user.id)
+        stored_case = await session.get(Case, case.id)
+        assert stored_user is not None and stored_case is not None
+        await apply_correction(
+            session,
+            case=stored_case,
+            user=stored_user,
+            fact_type="muscle_invasion",
+            value="Oui",
+            note="Confirmé sur le compte rendu opératoire.",
+        )
+        await record_version(session, case=stored_case, change_reason="Correction")
+        await session.commit()
+
+    response = await client.post(f"/cases/{case.id}/analysis", json={})
+
+    assert response.status_code == 202
+    assert response.json()["job_id"] == str(job_id), "the parked job, not a new one"
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, job_id)
+        assert job is not None
+        assert job.status is JobStatus.queued
+        # Re-pinned: the correction that unblocked the case created a new version, and
+        # the old one is the version that was blocked.
+        assert job.payload["ledger_version"] == 2
+
+
 async def test_a_case_missing_a_blocking_field_cannot_be_analysed(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:

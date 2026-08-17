@@ -18,6 +18,7 @@ from rcpia.cases import completeness
 from rcpia.cases import ledger as ledger_service
 from rcpia.cases import service as case_service
 from rcpia.core.models import AgentRun, AnalysisJob, AuditEvent, JobStatus, UserRole
+from rcpia.jobs import service as job_service
 from rcpia.jobs.models import JobType
 from rcpia.jobs.service import enqueue
 
@@ -100,7 +101,34 @@ async def start_analysis(
         .limit(1)
     )
     if existing is not None:
+        if existing.status is JobStatus.waiting_for_user:
+            # The job was parked for a missing field, and the checks above have just
+            # established the field is no longer missing. Nothing else would ever return
+            # this job to the queue, so asking again has to — otherwise the clinician
+            # fills in what was asked for, presses the button, and gets back a job that
+            # never runs.
+            #
+            # Re-pinned to the current version: the correction that unblocked the case
+            # created a new one, and analysing the version that was blocked would answer
+            # the wrong question.
+            existing.payload = {**existing.payload, "ledger_version": version.version}
+            await job_service.resume(session, existing.id)
+            session.add(
+                AuditEvent(
+                    organization_id=case.organization_id,
+                    case_id=case.id,
+                    actor_user_id=user.id,
+                    event_type="agent.run_resumed",
+                    entity_type="analysis_jobs",
+                    entity_id=existing.id,
+                    payload={
+                        "agent_role": payload.agent_role,
+                        "ledger_version": version.version,
+                    },
+                )
+            )
         await session.commit()
+        await session.refresh(existing)
         return AnalysisJobRead(
             job_id=existing.id,
             status=str(existing.status),
