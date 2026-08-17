@@ -13,6 +13,9 @@ import logging
 import signal
 import sys
 
+from rcpia.agents.factory import get_pi_adapter
+from rcpia.agents.pi_adapter import PiNotConfigured
+from rcpia.agents.service import run_agent
 from rcpia.cases.facts import extract_case_facts
 from rcpia.cases.ledger import record_version
 from rcpia.core.db import get_session_factory
@@ -41,6 +44,7 @@ def build_worker() -> Worker:
     """
     parser = get_parser()
     blobs = get_blob_store()
+    adapter = get_pi_adapter()
     worker = Worker(get_session_factory())
 
     async def handle_parse(session, job: AnalysisJob) -> JobOutcome | None:
@@ -68,8 +72,12 @@ def build_worker() -> Worker:
                 )
         return outcome
 
+    async def handle_agent(session, job: AnalysisJob) -> JobOutcome | None:
+        return await run_agent(session, job, adapter=adapter, blobs=blobs)
+
     worker.register(JobType.PARSE_DOSSIER, handle_parse)
     worker.register(JobType.EXTRACT_FACTS, handle_extract)
+    worker.register(JobType.RUN_AGENT, handle_agent)
     return worker
 
 
@@ -78,7 +86,7 @@ async def main() -> None:
 
     try:
         worker = build_worker()
-    except ParserNotConfigured as exc:
+    except (ParserNotConfigured, PiNotConfigured) as exc:
         logger.error("worker cannot start: %s", exc)
         raise SystemExit(2) from exc
 

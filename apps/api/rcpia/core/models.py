@@ -26,6 +26,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -39,7 +40,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from rcpia.core.db import Base
 
 # Tables whose rows may never be updated or deleted outside an audited purge.
-APPEND_ONLY_TABLES = ("extracted_facts", "case_ledger_versions", "audit_events")
+APPEND_ONLY_TABLES = (
+    "extracted_facts",
+    "case_ledger_versions",
+    "agent_runs",
+    "audit_events",
+)
 
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
@@ -101,6 +107,18 @@ class FactStatus(enum.StrEnum):
 class FactOrigin(enum.StrEnum):
     machine = "machine"
     human = "human"
+
+
+class AgentRunStatus(enum.StrEnum):
+    """A run is recorded once it has ended, so there is no in-flight state here.
+
+    While an agent is running, the fact that it is running lives in `analysis_jobs`,
+    which already holds the lease and the attempt count. Duplicating it would give two
+    places to disagree about whether an opinion exists.
+    """
+
+    succeeded = "succeeded"
+    failed = "failed"
 
 
 class JobStatus(enum.StrEnum):
@@ -485,6 +503,87 @@ class CaseLedgerVersion(TimestampMixin, Base):
             name="fk_case_ledger_versions_author_same_organization",
         ),
         UniqueConstraint("case_id", "version", name="uq_case_ledger_versions_case_version"),
+        # Target for the agent run -> ledger version composite key, which carries the
+        # case along: a run cannot claim to have read another case's snapshot.
+        UniqueConstraint("id", "case_id", name="uq_case_ledger_versions_id_case"),
+    )
+
+
+class AgentRun(TimestampMixin, Base):
+    """One completed invocation of a specialist agent, successful or not.
+
+    Append-only, like the facts: an opinion that was given to a clinician cannot later be
+    edited into a different opinion. A revised view is a new run.
+
+    The exact `bundle` handed to the agent is stored alongside its answer. Together with
+    the archived Pi session that makes a run reproducible — what it was told, what it
+    said, and by which deployment — which is the whole basis for reviewing a
+    recommendation months later.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    case_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    agent_role: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[AgentRunStatus] = mapped_column(
+        _enum(AgentRunStatus, "agent_run_status"), nullable=False
+    )
+
+    # Which snapshot of the case the agent read. Corrections that arrive afterwards
+    # produce a new version, so the opinion stays attached to what justified it.
+    ledger_version_id: Mapped[uuid.UUID | None] = mapped_column()
+    ledger_version: Mapped[int | None] = mapped_column(Integer)
+    job_id: Mapped[uuid.UUID | None] = mapped_column()
+
+    # The deployment that produced the opinion, recorded rather than implied.
+    provider: Mapped[str | None] = mapped_column(String(100))
+    model: Mapped[str | None] = mapped_column(String(100))
+
+    bundle: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    output: Mapped[dict | None] = mapped_column(JSONB)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    session_blob_key: Mapped[str | None] = mapped_column(String(500))
+    pi_session_id: Mapped[str | None] = mapped_column(String(100))
+
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_total: Mapped[float] = mapped_column(
+        Numeric(12, 6), nullable=False, default=0, server_default=text("0")
+    )
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "organization_id"],
+            ["cases.id", "cases.organization_id"],
+            ondelete="RESTRICT",
+            name="fk_agent_runs_case_same_organization",
+        ),
+        ForeignKeyConstraint(
+            ["ledger_version_id", "case_id"],
+            ["case_ledger_versions.id", "case_ledger_versions.case_id"],
+            ondelete="RESTRICT",
+            name="fk_agent_runs_ledger_version_same_case",
+        ),
+        ForeignKeyConstraint(
+            ["job_id", "case_id"],
+            ["analysis_jobs.id", "analysis_jobs.case_id"],
+            ondelete="RESTRICT",
+            name="fk_agent_runs_job_same_case",
+        ),
+        # A successful run without an opinion, or a failed one without a reason, would be
+        # a row nobody can act on.
+        CheckConstraint(
+            "(status = 'succeeded' AND output IS NOT NULL) "
+            "OR (status = 'failed' AND error_message IS NOT NULL)",
+            name="agent_runs_carry_a_result",
+        ),
+        Index("ix_agent_runs_case_id_created_at", "case_id", "created_at"),
+        Index("ix_agent_runs_case_id_agent_role", "case_id", "agent_role"),
     )
 
 
@@ -529,6 +628,8 @@ class AnalysisJob(TimestampMixin, Base):
             ondelete="RESTRICT",
             name="fk_analysis_jobs_case_same_organization",
         ),
+        # Target for the agent run -> job composite key.
+        UniqueConstraint("id", "case_id", name="uq_analysis_jobs_id_case"),
         CheckConstraint("attempts >= 0", name="attempts_are_not_negative"),
         CheckConstraint("max_attempts >= 1", name="max_attempts_allows_one_run"),
         Index("ix_analysis_jobs_status_created_at", "status", "created_at"),

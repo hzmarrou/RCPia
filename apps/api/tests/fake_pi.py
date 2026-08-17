@@ -13,6 +13,14 @@ provider, a network, or a key. Behaviour is chosen with RCPIA_FAKE_PI_MODE:
     crash        non-zero exit
     nosession    exits 0 without writing a session
     hang         sleeps, to exercise the timeout
+    invented     an answer citing evidence the bundle never contained
+    wrongcase    an answer about a different case
+    offschema    valid JSON that does not match AgentOutput
+
+The answer echoes the case, role and first snippet id found in the task bundle, the way
+a cooperating model would. That makes the fake exercise the real path — a bundle that
+never reached the model produces an answer that fails validation, which is exactly what
+should happen.
 """
 
 import json
@@ -21,18 +29,45 @@ import sys
 import time
 from pathlib import Path
 
-ANSWER = {
-    "agent_role": "urology_oncology",
-    "case_id": "case-under-test",
-    "recommendation": "Cystectomie totale après optimisation.",
-    "rationale": "Tumeur infiltrant le muscle.",
-    "evidence_references": [{"id": "snip-001", "supports": "Infiltration confirmée"}],
-}
-
 
 def argument(flag: str) -> str | None:
     argv = sys.argv
     return argv[argv.index(flag) + 1] if flag in argv else None
+
+
+def read_bundle() -> dict:
+    """Read the task bundle Pi was given as `-p "@path"`."""
+    prompt = argument("-p") or ""
+    if not prompt.startswith("@"):
+        return {}
+    try:
+        return json.loads(Path(prompt[1:]).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def answer_for(bundle: dict, mode: str) -> dict:
+    inputs = bundle.get("inputs") or {}
+    snippets = inputs.get("source_snippets") or []
+    citation = snippets[0]["id"] if snippets else None
+
+    answer = {
+        "agent_role": inputs.get("agent_role", "urology_oncology"),
+        "case_id": inputs.get("case_id", "case-under-test"),
+        "recommendation": "Cystectomie totale après optimisation.",
+        "rationale": "Tumeur infiltrant le muscle.",
+        "evidence_references": (
+            [{"id": citation, "supports": "Infiltration confirmée"}] if citation else []
+        ),
+    }
+
+    if mode == "invented":
+        answer["evidence_references"] = [{"id": "ev-999", "supports": "Inventé"}]
+    elif mode == "wrongcase":
+        answer["case_id"] = "00000000-0000-4000-8000-000000000000"
+    elif mode == "offschema":
+        answer["confidence"] = 0.97  # AgentOutput forbids unknown fields
+    return answer
 
 
 def event(kind: str, **fields: object) -> str:
@@ -91,9 +126,9 @@ def main() -> int:
         ),
     ]
 
-    answer = json.dumps(ANSWER, ensure_ascii=False)
+    answer = json.dumps(answer_for(read_bundle(), mode), ensure_ascii=False)
 
-    if mode == "ok":
+    if mode in ("ok", "invented", "wrongcase", "offschema"):
         lines.append(assistant([{"type": "text", "text": answer}]))
     elif mode == "preamble":
         # Two assistant messages: chatter first, the real answer second.

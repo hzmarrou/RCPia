@@ -92,6 +92,17 @@ not use it: naming the deployment directly in each agent's `settings.json` means
 folder states exactly which deployment produced a clinical opinion, which is what an
 audit needs.
 
+Two more variables the runtime needs:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `PI_WORK_ROOT` | `/tmp/rcpia-pi` | Task bundles and sessions while a run is in flight. Both are deleted once the session is archived, but the directory holds patient data meanwhile — put it on a disk you would trust with the dossiers |
+| `AGENT_TIMEOUT_SECONDS` | `600` | Ten minutes per agent, matching the design. The job lease is fifteen, so a timeout is always recorded by the worker that owns the job |
+
+**On Windows**, npm installs `pi` as a `pi.cmd` shim, which `CreateProcess` will not find
+from the bare name the way a shell would. The adapter resolves the executable on `PATH`
+before spawning it; if it is installed somewhere unusual, set `PI_BIN` to the full path.
+
 ## 5. Azure deployment — needed at Phase 14
 
 Only when RCPia is deployed to Azure. An on-premises deployment needs none of these.

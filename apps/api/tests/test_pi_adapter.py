@@ -224,7 +224,8 @@ async def test_a_fenced_code_block_is_unwrapped(
 ) -> None:
     result = await run(adapter, monkeypatch, mode="fenced")
 
-    assert result.output_json()["case_id"] == "case-under-test"
+    # The fake echoes the case it was given, so this also proves the bundle reached it.
+    assert result.output_json()["case_id"] == str(CASE_ID)
 
 
 async def test_thinking_and_tool_calls_are_not_part_of_the_answer(

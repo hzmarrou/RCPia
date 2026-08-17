@@ -161,11 +161,28 @@ class PiAdapter:
 
     # ---------------------------------------------------------------- running
 
+    def executable(self) -> str:
+        """Resolve the Pi binary on PATH.
+
+        Windows needs this: npm installs `pi` as a `pi.cmd` shim, and CreateProcess will
+        not find it from the bare name the way a shell would. Resolving explicitly also
+        turns a missing installation into a message naming the command, rather than a
+        bare `FileNotFoundError` from deep inside subprocess.
+        """
+        name = self.pi_command[0]
+        resolved = shutil.which(name)
+        if resolved is None:
+            raise PiNotConfigured(
+                f"Pi executable not found on PATH: {name!r}. Set PI_BIN to its full path."
+            )
+        return resolved
+
     def build_command(
         self, *, settings: AgentSettings, session_path: Path, task_path: Path
     ) -> list[str]:
         command = [
-            *self.pi_command,
+            self.executable(),
+            *self.pi_command[1:],
             "--provider",
             settings.provider,
             "--model",

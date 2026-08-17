@@ -29,8 +29,16 @@ class Settings(BaseSettings):
     parser_provider: Literal["llamaparse", "liteparse"] = "llamaparse"
     llamaparse_api_key: str = ""
 
+    # Pi is the agent runtime. Everything it needs is passed explicitly rather than left
+    # to the machine's own Pi configuration, so a developer's personal provider cannot
+    # end up answering a clinical question.
     pi_bin: str = "pi"
     agents_root: str = "/app/agents"
+    pi_work_root: str = "/tmp/rcpia-pi"
+    agent_timeout_seconds: float = 600.0
+
+    azure_openai_base_url: str = ""
+    azure_openai_api_key: str = ""
 
     auth_secret: str = DEFAULT_AUTH_SECRET
 
