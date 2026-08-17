@@ -1,0 +1,398 @@
+"""Running a specialist agent through the Pi CLI.
+
+Pi is the runtime, never the record. This adapter writes a task bundle to a file, runs
+Pi against the agent's own folder, reads the resulting JSONL session, and hands back the
+final text plus the metadata an audit needs. PostgreSQL stores the validated output; the
+session file is archived as an audit artifact and never read back as clinical state.
+
+Everything is passed explicitly — provider, model, session path, tool allowlist — because
+Pi otherwise resolves them from the working directory and from the developer's global
+configuration. During verification a stray warning from a personal `openrouter` setting
+appeared in an RCPia run, which is exactly the leak explicit flags prevent.
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import time
+import uuid
+from dataclasses import dataclass, field
+from functools import partial
+from pathlib import Path
+from typing import Any
+
+import anyio.to_thread
+
+from rcpia.agents.schemas import TaskBundle
+
+# The design fixes ten minutes per agent run; the job lease is fifteen, so a timeout is
+# always recorded by the worker that owns the job rather than by a lease expiring.
+DEFAULT_TIMEOUT_SECONDS = 600.0
+
+JSON_FENCE = re.compile(r"^\s*```(?:json)?\s*(?P<body>.*?)\s*```\s*$", re.DOTALL)
+
+
+class PiError(Exception):
+    """Base class for Pi runtime failures."""
+
+
+class PiNotConfigured(PiError):
+    """The agent folder or Pi credentials are missing or malformed."""
+
+
+class PiRunFailed(PiError):
+    """Pi exited non-zero, timed out, or produced no usable output."""
+
+
+class PiOutputInvalid(PiError):
+    """Pi produced text that is not the JSON the task bundle asked for."""
+
+
+@dataclass(frozen=True)
+class PiUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_total: float = 0.0
+
+
+@dataclass(frozen=True)
+class PiRunResult:
+    """Everything one agent run produced, including what it cost and how it ran."""
+
+    agent_name: str
+    output_text: str
+    session_path: Path
+    session_bytes: bytes
+    provider: str | None
+    model: str | None
+    usage: PiUsage
+    duration_seconds: float
+    stderr: str = ""
+    session_id: str | None = None
+
+    def output_json(self) -> dict[str, Any]:
+        """Parse the agent's answer, tolerating a fenced code block around it."""
+        text = self.output_text.strip()
+        fenced = JSON_FENCE.match(text)
+        if fenced:
+            text = fenced.group("body").strip()
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise PiOutputInvalid(
+                f"L'agent {self.agent_name} n'a pas renvoyé de JSON exploitable : {exc}"
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise PiOutputInvalid(
+                f"L'agent {self.agent_name} a renvoyé {type(parsed).__name__}, pas un objet JSON"
+            )
+        return parsed
+
+
+@dataclass(frozen=True)
+class AgentSettings:
+    """Provider and model taken from the agent's own `.pi/settings.json`.
+
+    Read here and passed as flags, so the deployment that produced a clinical opinion is
+    recorded in the run rather than implied by whatever configuration happened to apply.
+    """
+
+    provider: str
+    model: str
+
+    @classmethod
+    def from_folder(cls, agent_dir: Path) -> "AgentSettings":
+        settings_path = agent_dir / ".pi" / "settings.json"
+        try:
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise PiNotConfigured(f"Missing agent settings: {settings_path}") from exc
+        except json.JSONDecodeError as exc:
+            raise PiNotConfigured(f"Malformed agent settings: {settings_path}: {exc}") from exc
+
+        provider, model = data.get("defaultProvider"), data.get("defaultModel")
+        if not provider or not model:
+            raise PiNotConfigured(
+                f"{settings_path} must set defaultProvider and defaultModel"
+            )
+        return cls(provider=str(provider), model=str(model))
+
+
+@dataclass
+class PiAdapter:
+    """Invokes Pi for one agent at a time.
+
+    `pi_command` is a list so tests can substitute a fake executable, and so a container
+    can point at an absolute path without shell quoting.
+    """
+
+    agents_root: Path
+    work_root: Path
+    api_key: str = ""
+    base_url: str = ""
+    pi_command: tuple[str, ...] = ("pi",)
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    extra_env: dict[str, str] = field(default_factory=dict)
+
+    # ---------------------------------------------------------------- paths
+
+    def agent_dir(self, agent_name: str) -> Path:
+        agent_dir = self.agents_root / agent_name
+        if not (agent_dir / "brain.md").is_file():
+            raise PiNotConfigured(f"Agent folder has no brain.md: {agent_dir}")
+        if not (agent_dir / ".pi" / "APPEND_SYSTEM.md").is_file():
+            # Without this file Pi never reads brain.md, and the agent would answer as a
+            # generic assistant while looking like a specialist.
+            raise PiNotConfigured(
+                f"Agent folder has no .pi/APPEND_SYSTEM.md, so brain.md would be ignored: "
+                f"{agent_dir}"
+            )
+        return agent_dir
+
+    def session_path(self, case_id: uuid.UUID, agent_name: str, run_id: uuid.UUID) -> Path:
+        # Sessions are scoped per case, per agent and per run: never reused across cases.
+        return self.work_root / "sessions" / f"case-{case_id}-{agent_name}-{run_id}.jsonl"
+
+    def task_path(self, case_id: uuid.UUID, agent_name: str, run_id: uuid.UUID) -> Path:
+        return self.work_root / "tasks" / f"task-{case_id}-{agent_name}-{run_id}.json"
+
+    # ---------------------------------------------------------------- running
+
+    def build_command(
+        self, *, settings: AgentSettings, session_path: Path, task_path: Path
+    ) -> list[str]:
+        command = [
+            *self.pi_command,
+            "--provider",
+            settings.provider,
+            "--model",
+            settings.model,
+            "--session",
+            str(session_path),
+            # Clinical agents read; they never write files or run commands.
+            "--tools",
+            "read",
+            # Global skills must not reach a clinical agent.
+            "--no-skills",
+            # Provider, model and session path land in the session for the audit trail.
+            "--verbose",
+            "-p",
+            f"@{task_path}",
+        ]
+        if self.api_key:
+            command += ["--api-key", self.api_key]
+        command.append(
+            "Complete the task in the attached task bundle file. "
+            "Return only the final structured output."
+        )
+        return command
+
+    def _environment(self) -> dict[str, str]:
+        env = dict(os.environ)
+        if self.base_url:
+            # Pi reads AZURE_OPENAI_BASE_URL; the name matters, _ENDPOINT is ignored.
+            env["AZURE_OPENAI_BASE_URL"] = self.base_url
+        env.update(self.extra_env)
+        return env
+
+    async def run(
+        self,
+        *,
+        bundle: TaskBundle,
+        agent_name: str,
+        case_id: uuid.UUID,
+        run_id: uuid.UUID | None = None,
+    ) -> PiRunResult:
+        run_id = run_id or uuid.uuid4()
+        agent_dir = self.agent_dir(agent_name)
+        settings = AgentSettings.from_folder(agent_dir)
+
+        session_path = self.session_path(case_id, agent_name, run_id)
+        task_path = self.task_path(case_id, agent_name, run_id)
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        task_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # The bundle goes to a file, not an argument: it is large, and keeping it on disk
+        # makes the exact input auditable alongside the session.
+        task_path.write_text(
+            json.dumps(bundle.model_dump(by_alias=True), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        command = self.build_command(
+            settings=settings, session_path=session_path, task_path=task_path
+        )
+
+        # Pi runs in a worker thread rather than through asyncio's subprocess support:
+        # psycopg's async driver requires the selector event loop on Windows, and that
+        # loop cannot spawn subprocesses at all. A thread works the same everywhere.
+        started = time.monotonic()
+        try:
+            completed = await anyio.to_thread.run_sync(
+                partial(
+                    subprocess.run,
+                    command,
+                    cwd=str(agent_dir),  # so .pi/APPEND_SYSTEM.md applies, loading brain.md
+                    env=self._environment(),
+                    capture_output=True,
+                    timeout=self.timeout_seconds,
+                )
+            )
+        except subprocess.TimeoutExpired:
+            raise PiRunFailed(
+                f"L'agent {agent_name} a dépassé le délai de "
+                f"{int(self.timeout_seconds)} s."
+            ) from None
+
+        duration = time.monotonic() - started
+        # `partial` hides subprocess.run's overloads from the type checker, so accept
+        # either form rather than asserting one.
+        raw_stderr: Any = completed.stderr
+        stderr = (
+            raw_stderr
+            if isinstance(raw_stderr, str)
+            else bytes(raw_stderr or b"").decode("utf-8", errors="replace")
+        ).strip()
+        returncode = completed.returncode
+
+        if returncode != 0:
+            raise PiRunFailed(
+                f"L'agent {agent_name} s'est terminé avec le code {returncode}. "
+                f"{stderr[:500]}"
+            )
+
+        if not session_path.exists():
+            raise PiRunFailed(
+                f"L'agent {agent_name} n'a produit aucun journal de session : {session_path}"
+            )
+
+        session_bytes = session_path.read_bytes()
+        parsed = parse_session(session_bytes)
+
+        if not parsed.output_text.strip():
+            raise PiRunFailed(f"L'agent {agent_name} n'a produit aucune réponse.")
+
+        return PiRunResult(
+            agent_name=agent_name,
+            output_text=parsed.output_text,
+            session_path=session_path,
+            session_bytes=session_bytes,
+            provider=parsed.provider or settings.provider,
+            model=parsed.model or settings.model,
+            usage=parsed.usage,
+            duration_seconds=duration,
+            stderr=stderr,
+            session_id=parsed.session_id,
+        )
+
+    def cleanup(self, *, case_id: uuid.UUID, agent_name: str, run_id: uuid.UUID) -> None:
+        """Remove local task and session files once archived to blob storage."""
+        for path in (
+            self.task_path(case_id, agent_name, run_id),
+            self.session_path(case_id, agent_name, run_id),
+        ):
+            path.unlink(missing_ok=True)
+
+    def clear_work(self) -> None:  # pragma: no cover - operational helper
+        shutil.rmtree(self.work_root, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------------------
+# Session parsing
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ParsedSession:
+    output_text: str
+    provider: str | None = None
+    model: str | None = None
+    session_id: str | None = None
+    usage: PiUsage = field(default_factory=PiUsage)
+    assistant_messages: int = 0
+
+
+def parse_session(session: bytes | str) -> ParsedSession:
+    """Read Pi's append-only JSONL session.
+
+    The final answer is the **last** assistant text part, not every text part joined.
+    A model that says anything before its JSON — a sentence of preamble, a retry after a
+    tool call — would otherwise produce a concatenation that parses as nothing at all.
+    Thinking and tool-call parts are skipped; they are reasoning, not answer.
+
+    Malformed lines are ignored rather than fatal: a truncated final line must not
+    discard an answer that was already written.
+    """
+    text = session if isinstance(session, str) else session.decode("utf-8", errors="replace")
+
+    last_text: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    session_id: str | None = None
+    input_tokens = output_tokens = total_tokens = 0
+    cost = 0.0
+    assistant_messages = 0
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+
+        kind = event.get("type")
+        if kind == "session":
+            session_id = event.get("id") or session_id
+            continue
+        if kind == "model_change":
+            provider = event.get("provider") or provider
+            model = event.get("modelId") or model
+            continue
+        if kind != "message":
+            continue
+
+        message = event.get("message")
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+
+        assistant_messages += 1
+        provider = message.get("provider") or provider
+        model = message.get("model") or model
+
+        usage = message.get("usage")
+        if isinstance(usage, dict):
+            # Pi has no model card for a custom Azure deployment, so this block is the
+            # only trustworthy source of token counts.
+            input_tokens += int(usage.get("input") or 0)
+            output_tokens += int(usage.get("output") or 0)
+            total_tokens += int(usage.get("totalTokens") or 0)
+            money = usage.get("cost")
+            if isinstance(money, dict):
+                cost += float(money.get("total") or 0.0)
+
+        for part in message.get("content") or []:
+            if isinstance(part, dict) and part.get("type") == "text":
+                candidate = str(part.get("text") or "")
+                if candidate.strip():
+                    last_text = candidate
+
+    return ParsedSession(
+        output_text=last_text or "",
+        provider=provider,
+        model=model,
+        session_id=session_id,
+        usage=PiUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cost_total=cost,
+        ),
+        assistant_messages=assistant_messages,
+    )
