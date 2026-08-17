@@ -108,16 +108,32 @@ table.ledger th {
 
 tr.highlight-red th[scope="row"],
 tr.highlight-red td,
-li.highlight-red {
+li.highlight-red,
+td.highlight-red,
+dd.highlight-red {
   background: var(--danger-bg);
   color: var(--danger-fg);
 }
 
 tr.highlight-amber th[scope="row"],
 tr.highlight-amber td,
-li.highlight-amber {
+li.highlight-amber,
+td.highlight-amber,
+dd.highlight-amber {
   background: var(--warn-bg);
   color: var(--warn-fg);
+}
+
+/* The provisional banner. Loud on purpose: this document has the shape of the validated
+   record clinicians read every week, and the one thing it must never do is pass for one. */
+.provisional {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--danger-fg);
+  border-radius: 0.4rem;
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  font-weight: 600;
 }
 
 .missing-value {

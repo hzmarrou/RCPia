@@ -86,7 +86,40 @@ def highlight_for(status: FactStatus) -> str:
     return NEUTRAL
 
 
+# Fields whose label is an acronym or has internal capitals. Capitalising the first
+# letter of the matching label turns `ptnm` into `Ptnm` and `oms` into `Oms`, which reads
+# as a typo to the clinicians these labels are for.
+DISPLAY_OVERRIDES: dict[str, str] = {
+    "ptnm": "pTNM",
+    "cis": "CIS",
+    "who_status": "OMS",
+    "g8_score": "Score G8",
+    "mna": "Score MNA",
+    "adl": "ADL",
+    "ipss": "Score IPSS",
+    "iief5": "Score IIEF5",
+    "pallia10": "Pallia 10",
+    "psa_total": "PSA total",
+    "psa_free": "PSA libre",
+    "egfr": "DFG",
+    "ct_tap": "TDM TAP",
+    "urine_culture": "ECBU",
+    "crp": "CRP",
+    "ldh": "LDH",
+    "cpk": "CPK",
+    "alat": "ALAT",
+    "asat": "ASAT",
+    "prothrombin": "TP",
+    "haemoglobin": "Hb",
+    "prostate_mri": "IRM prostatique multiparamétrique",
+}
+
+
 def display_label(key: str) -> str:
+    override = DISPLAY_OVERRIDES.get(key)
+    if override:
+        return override
+
     spec = FIELDS_BY_KEY.get(key)
     if spec is None:
         return key

@@ -104,9 +104,14 @@ export default async function CasePage({
           Vérifier les données extraites
         </Link>
       </p>
+      <p>
+        <Link href={`/cases/${clinicalCase.id}/pps`}>
+          Voir la proposition provisoire (PPS)
+        </Link>
+      </p>
       <p className="muted">
-        La génération d&apos;une proposition provisoire sera disponible ici. Toute sortie
-        de RCPia est provisoire et doit être validée en RCP.
+        Toute sortie de RCPia est provisoire et doit être relue, corrigée et validée en
+        RCP avant tout usage clinique.
       </p>
     </section>
   );
