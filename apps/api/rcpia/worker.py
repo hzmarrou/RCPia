@@ -13,9 +13,12 @@ import logging
 import signal
 import sys
 
+from rcpia.cases.facts import extract_case_facts
+from rcpia.cases.ledger import record_version
 from rcpia.core.db import get_session_factory
-from rcpia.core.models import AnalysisJob
+from rcpia.core.models import AnalysisJob, Case
 from rcpia.jobs.models import JobOutcome, JobType
+from rcpia.jobs.service import enqueue
 from rcpia.jobs.worker import Worker
 from rcpia.parsing.base import ParserNotConfigured
 from rcpia.parsing.factory import get_parser
@@ -41,9 +44,30 @@ def build_worker() -> Worker:
     worker = Worker(get_session_factory())
 
     async def handle_parse(session, job: AnalysisJob) -> JobOutcome | None:
-        return await parse_document(session, job, parser=parser, blobs=blobs)
+        outcome = await parse_document(session, job, parser=parser, blobs=blobs)
+        if outcome is None:
+            # Parsing succeeded, so the dossier can be read for facts.
+            await enqueue(
+                session,
+                case_id=job.case_id,
+                organization_id=job.organization_id,
+                job_type=JobType.EXTRACT_FACTS,
+                payload={},
+            )
+        return outcome
+
+    async def handle_extract(session, job: AnalysisJob) -> JobOutcome | None:
+        outcome = await extract_case_facts(session, job)
+        if outcome is None:
+            case = await session.get(Case, job.case_id)
+            if case is not None:
+                await record_version(
+                    session, case=case, change_reason="Extraction automatique"
+                )
+        return outcome
 
     worker.register(JobType.PARSE_DOSSIER, handle_parse)
+    worker.register(JobType.EXTRACT_FACTS, handle_extract)
     return worker
 
 

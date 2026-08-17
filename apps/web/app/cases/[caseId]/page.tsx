@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 
@@ -98,10 +99,14 @@ export default async function CasePage({
         </ul>
       )}
 
+      <p>
+        <Link href={`/cases/${clinicalCase.id}/ledger`}>
+          Vérifier les données extraites
+        </Link>
+      </p>
       <p className="muted">
-        L&apos;extraction des données et la génération d&apos;une proposition provisoire
-        seront disponibles ici. Toute sortie de RCPia est provisoire et doit être validée
-        en RCP.
+        La génération d&apos;une proposition provisoire sera disponible ici. Toute sortie
+        de RCPia est provisoire et doit être validée en RCP.
       </p>
     </section>
   );

@@ -84,6 +84,68 @@ label {
   font-weight: 600;
 }
 
+/* Missing information reads red, uncertain or contradictory reads amber. The colour is
+   never the only signal: the text says which it is. */
+table.ledger {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+}
+
+table.ledger th[scope="row"] {
+  text-align: left;
+  font-weight: 600;
+  width: 32%;
+  vertical-align: top;
+}
+
+table.ledger td,
+table.ledger th {
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.6rem;
+  vertical-align: top;
+}
+
+tr.highlight-red th[scope="row"],
+tr.highlight-red td,
+li.highlight-red {
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+}
+
+tr.highlight-amber th[scope="row"],
+tr.highlight-amber td,
+li.highlight-amber {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.missing-value {
+  font-style: italic;
+}
+
+.badge {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  font-size: 0.75rem;
+}
+
+blockquote {
+  margin: 0.35rem 0 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .warnings {
   margin: 0.35rem 0 0.75rem;
   color: var(--warn-fg);
