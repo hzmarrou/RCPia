@@ -810,6 +810,50 @@ async def test_the_database_refuses_a_successful_run_that_cannot_be_reviewed(
             await session.commit()
 
 
+@pytest.mark.parametrize(
+    ("bundle_value", "output_value", "why"),
+    [
+        ({"inputs": None}, {"recommendation": "x", "rationale": "y"}, "null inputs"),
+        ({}, {"recommendation": "x", "rationale": "y"}, "no inputs at all"),
+        ({"inputs": {"case_id": ""}}, {"recommendation": "x", "rationale": "y"}, "no case"),
+        ({"inputs": {"case_id": "c"}}, {}, "an empty opinion"),
+        ({"inputs": {"case_id": "c"}}, {"recommendation": "x"}, "no rationale"),
+        ({"inputs": {"case_id": "c"}}, {"rationale": "y"}, "no recommendation"),
+    ],
+)
+async def test_a_successful_run_needs_a_real_bundle_and_a_real_opinion(
+    session_factory: async_sessionmaker[AsyncSession],
+    bundle_value: dict,
+    output_value: dict,
+    why: str,
+) -> None:
+    """A key that exists is not a bundle, and `{}` is not an opinion. Checking presence
+    rather than shape let both through."""
+    user, case = await seed_case(session_factory)
+
+    async with session_factory() as session:
+        version = await _latest_version(session, case)
+        job_id = await agent_job(session_factory, case)
+        session.add(
+            AgentRun(
+                case_id=case.id,
+                organization_id=case.organization_id,
+                agent_role="urology_oncology",
+                status=AgentRunStatus.succeeded,
+                ledger_version_id=version.id,
+                ledger_version=version.version,
+                job_id=job_id,
+                provider="azure-openai-responses",
+                model="gpt-5.6-sol",
+                session_blob_key="cases/x/sessions/urology_oncology/y.jsonl",
+                bundle=bundle_value,
+                output=output_value,
+            )
+        )
+        with pytest.raises(IntegrityError, match="successful_runs_are_reviewable"):
+            await session.commit()
+
+
 async def test_a_run_cannot_record_a_version_number_that_is_not_its_snapshots(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

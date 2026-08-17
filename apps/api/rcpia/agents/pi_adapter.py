@@ -163,11 +163,24 @@ class PiAdapter:
             raise PiNotConfigured(f"Unsafe agent name: {agent_name!r}")
 
         agent_dir = self.agents_root / agent_name
+
+        # Two checks, because they catch different things. The lexical one rejects `..`
+        # without touching the filesystem. The resolved one follows symlinks and Windows
+        # junctions, which a lexical check cannot see at all: a junction named `evil`
+        # inside AGENTS_ROOT is a perfectly ordinary-looking path that points anywhere.
+        #
+        # Both sides are resolved together, so the short and long forms of a Windows path
+        # cannot disagree.
         root = os.path.normpath(str(self.agents_root))
-        # Lexical, not `resolve()`: on Windows the short and long forms of a path differ,
-        # and comparing resolved paths raced when the directory was created concurrently.
         if os.path.commonpath([root, os.path.normpath(str(agent_dir))]) != root:
             raise PiNotConfigured(f"Agent folder escapes AGENTS_ROOT: {agent_name!r}")
+
+        real_root = Path(os.path.realpath(self.agents_root))
+        real_dir = Path(os.path.realpath(agent_dir))
+        if real_dir != real_root and real_root not in real_dir.parents:
+            raise PiNotConfigured(
+                f"Agent folder resolves outside AGENTS_ROOT: {agent_name!r} -> {real_dir}"
+            )
 
         if not (agent_dir / "brain.md").is_file():
             raise PiNotConfigured(f"Agent folder has no brain.md: {agent_dir}")

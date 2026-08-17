@@ -23,8 +23,9 @@ MAX_RATIONALE_CHARACTERS = 3000
 MAX_TEXT = 4000
 
 # The shape of an id RCPia hands out. Used to catch citations written into prose, where
-# no allowlist would otherwise look.
-CITATION_IN_PROSE = re.compile(r"\b(?:snip|ev)-\d{1,6}\b")
+# no allowlist would otherwise look. Case-insensitive, because a model writing "SNIP-999"
+# has made exactly the same claim as one writing "snip-999".
+CITATION_IN_PROSE = re.compile(r"\b(?:snip|ev)-\d{1,6}\b", re.IGNORECASE)
 
 
 class Strict(BaseModel):
@@ -293,17 +294,29 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
     face value.
     """
     allowed = bundle.citable_ids()
-    cited = {reference.id for reference in output.evidence_references}
-    cited |= {
+    on_recommendation = {reference.id for reference in output.evidence_references}
+    on_options = {
         evidence_id
         for option in (*output.alternatives, *output.rejected_options)
         for evidence_id in option.evidence_ids
     }
+    # Matched case-insensitively: an id is only miscased or fabricated, and a reviewer
+    # reading "SNIP-001" would find snip-001 without difficulty.
+    allowed_folded = {identifier.casefold() for identifier in allowed}
     in_prose = {
-        found for text in _prose_of(output) for found in CITATION_IN_PROSE.findall(text)
+        found.casefold()
+        for text in _prose_of(output)
+        for found in CITATION_IN_PROSE.findall(text)
     }
 
-    invented = sorted((cited | in_prose) - allowed)
+    invented = sorted(
+        {
+            identifier
+            for identifier in (on_recommendation | on_options)
+            if identifier.casefold() not in allowed_folded
+        }
+        | {identifier for identifier in in_prose if identifier not in allowed_folded}
+    )
     if invented:
         raise UncitedEvidence(
             "L'agent a cité des preuves qui ne lui ont pas été fournies : "
@@ -312,10 +325,15 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
 
     # Citing nothing is honest only when there was nothing to cite. With evidence in the
     # bundle, an uncited recommendation is an assertion, and RCPia cannot stand behind it.
-    if allowed and not cited and not output.recommendation_withheld:
+    #
+    # `evidence_references` specifically, not any citation anywhere in the output: an
+    # agent that grounds a rejected alternative and asserts its actual recommendation has
+    # produced exactly the document this check exists to refuse.
+    if allowed and not on_recommendation and not output.recommendation_withheld:
         raise UngroundedRecommendation(
             f"L'agent a formulé une recommandation sans citer aucune des {len(allowed)} "
-            "sources qui lui ont été fournies."
+            "sources qui lui ont été fournies (les citations portées par les "
+            "alternatives ne fondent pas la recommandation elle-même)."
         )
 
 

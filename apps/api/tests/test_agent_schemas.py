@@ -291,6 +291,45 @@ def test_a_recommendation_must_cite_something_when_there_was_something_to_cite()
         check_citations(ungrounded, task)
 
 
+def test_grounding_an_alternative_does_not_ground_the_recommendation() -> None:
+    """An agent that cites its rejected option and asserts its actual advice has produced
+    exactly the document this check exists to refuse."""
+    task = bundle()
+    misplaced = output(
+        recommendation="Cystectomie totale.",
+        evidence_references=[],
+        alternatives=[
+            TreatmentOption(option="Surveillance", evidence_ids=["snip-001"])
+        ],
+    )
+
+    with pytest.raises(UngroundedRecommendation):
+        check_citations(misplaced, task)
+
+
+def test_a_fabricated_prose_citation_cannot_hide_in_a_different_case() -> None:
+    """"SNIP-999" makes the same claim to a reader as "snip-999"."""
+    task = bundle()
+    smuggled = output(
+        evidence_references=[EvidenceReference(id="snip-001", supports="Muscle infiltré")],
+        rationale="Selon SNIP-999, le cisplatine est contre-indiqué.",
+    )
+
+    with pytest.raises(UncitedEvidence, match="(?i)snip-999"):
+        check_citations(smuggled, task)
+
+
+def test_a_miscased_reference_to_real_evidence_is_accepted() -> None:
+    """It is a typo, not a fabrication: a reviewer following it finds the snippet."""
+    task = bundle()
+    miscased = output(
+        evidence_references=[EvidenceReference(id="snip-001", supports="Muscle infiltré")],
+        rationale="Voir SNIP-001 pour l'infiltration.",
+    )
+
+    check_citations(miscased, task)
+
+
 def test_withholding_a_recommendation_needs_no_citation() -> None:
     """"I cannot advise" is a refusal to recommend, not an ungrounded recommendation."""
     task = bundle()

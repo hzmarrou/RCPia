@@ -610,8 +610,15 @@ class AgentRun(TimestampMixin, Base):
             "AND job_id IS NOT NULL "
             "AND provider IS NOT NULL AND model IS NOT NULL "
             "AND session_blob_key IS NOT NULL "
-            # jsonb_exists, not the `?` operator: `?` is a bind parameter to the driver.
-            "AND jsonb_exists(bundle, 'inputs'))",
+            # The presence of a key proves nothing: `{"inputs": null}` has one. These
+            # assert the shape, and that the bundle names the case it was built for.
+            "AND jsonb_typeof(bundle -> 'inputs') = 'object' "
+            "AND length(coalesce(bundle -> 'inputs' ->> 'case_id', '')) > 0 "
+            # Likewise `{}` is not an opinion. A successful run carries the two fields
+            # that make one reviewable: what to do, and why.
+            "AND jsonb_typeof(output) = 'object' "
+            "AND length(coalesce(output ->> 'recommendation', '')) > 0 "
+            "AND length(coalesce(output ->> 'rationale', '')) > 0)",
             name="successful_runs_are_reviewable",
         ),
         # Both halves of the version reference travel together or not at all.

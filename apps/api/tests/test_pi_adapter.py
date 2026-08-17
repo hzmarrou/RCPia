@@ -5,6 +5,7 @@ process is invoked, how the JSONL session is read, and what happens when a run f
 """
 
 import json
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -110,6 +111,57 @@ def test_the_command_states_provider_model_tools_and_skills(adapter: PiAdapter) 
     # The bundle is attached as a file, never inlined as an argument.
     assert command[command.index("-p") + 1] == f"@{task_path}"
     assert "--api-key" in command
+
+
+def link_directory(link: Path, target: Path) -> bool:
+    """Create a directory link, whichever kind this platform allows unprivileged."""
+    if sys.platform == "win32":
+        # Junctions need no privilege; symlinks do.
+        completed = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+        )
+        return completed.returncode == 0
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:  # pragma: no cover - platform dependent
+        return False
+    return True
+
+
+@pytest.mark.parametrize("name", ["../outside", "..", "a/b", "Agent", "évil", ""])
+def test_an_agent_name_that_is_not_a_plain_name_is_refused(
+    adapter: PiAdapter, name: str
+) -> None:
+    """This value arrives from an HTTP request and becomes a path segment."""
+    with pytest.raises(PiNotConfigured):
+        adapter.agent_dir(name)
+
+
+def test_a_junction_out_of_the_agents_directory_is_refused(
+    agents_root: Path, tmp_path: Path
+) -> None:
+    """A lexical check cannot see a link. `evil` is an ordinary-looking name inside
+    AGENTS_ROOT that points wherever its creator chose."""
+    outside = tmp_path / "outside"
+    (outside / ".pi").mkdir(parents=True)
+    (outside / "brain.md").write_text("# not ours", encoding="utf-8")
+    (outside / ".pi" / "APPEND_SYSTEM.md").write_text("…", encoding="utf-8")
+
+    if not link_directory(agents_root / "evil", outside):
+        pytest.skip("this platform will not create a directory link unprivileged")
+
+    adapter = PiAdapter(agents_root=agents_root, work_root=tmp_path / "work")
+
+    with pytest.raises(PiNotConfigured, match="resolves outside"):
+        adapter.agent_dir("evil")
+
+
+def test_a_real_agent_folder_is_still_accepted(agents_root: Path, tmp_path: Path) -> None:
+    """The containment checks must not reject the ordinary case."""
+    adapter = PiAdapter(agents_root=agents_root, work_root=tmp_path / "work")
+
+    assert adapter.agent_dir("urology_oncology").name == "urology_oncology"
 
 
 def test_a_missing_append_system_file_is_refused(agents_root: Path, tmp_path: Path) -> None:
