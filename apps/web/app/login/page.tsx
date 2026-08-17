@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -70,7 +71,7 @@ export default function LoginPage() {
       </form>
 
       <p className="muted">
-        <a href="/request-access">Demander un accès</a>
+        <Link href="/request-access">Demander un accès</Link>
       </p>
     </section>
   );

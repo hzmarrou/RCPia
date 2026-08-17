@@ -84,7 +84,15 @@ label {
   font-weight: 600;
 }
 
-input {
+.warnings {
+  margin: 0.35rem 0 0.75rem;
+  color: var(--warn-fg);
+  font-size: 0.875rem;
+}
+
+input,
+select,
+textarea {
   padding: 0.55rem 0.7rem;
   margin-bottom: 0.75rem;
   border: 1px solid var(--border);

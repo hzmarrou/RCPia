@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -54,8 +55,11 @@ export default async function DashboardPage() {
         Connecté en tant que <strong>{user.full_name ?? user.email}</strong> —{" "}
         {ROLE_LABELS[user.role] ?? user.role}
       </p>
+      <p>
+        <Link href="/cases/new">Déposer un nouveau dossier</Link>
+      </p>
       <p className="muted">
-        Le dépôt de dossiers et la génération de PPS provisoires seront disponibles ici.
+        La génération de PPS provisoires sera disponible ici.
       </p>
     </section>
   );

@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from rcpia.auth.routes import router as auth_router
+from rcpia.cases.routes import router as cases_router
 from rcpia.core.config import get_settings
 
 settings = get_settings()
@@ -52,6 +53,7 @@ async def no_store_for_auth(request: Request, call_next: Callable) -> Response:
 
 
 app.include_router(auth_router)
+app.include_router(cases_router)
 
 
 @app.get("/health")

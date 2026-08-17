@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Demander un accès — RCPia",
@@ -23,7 +24,7 @@ export default function RequestAccessPage() {
         doivent être validées par les experts humains.
       </p>
       <p>
-        <a href="/login">Retour à la connexion</a>
+        <Link href="/login">Retour à la connexion</Link>
       </p>
     </section>
   );
