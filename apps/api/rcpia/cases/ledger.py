@@ -47,6 +47,17 @@ class FieldNotInScope(LedgerError):
 
 
 @dataclass(frozen=True)
+class LedgerReading:
+    """One value read for a field, and where it was written."""
+
+    value: str | None
+    source_excerpt: str | None = None
+    source_document_id: str | None = None
+    source_chunk_id: str | None = None
+    fact_id: str | None = None
+
+
+@dataclass(frozen=True)
 class LedgerEntry:
     key: str
     label: str
@@ -62,6 +73,9 @@ class LedgerEntry:
     source_chunk_id: str | None = None
     fact_id: str | None = None
     corrected: bool = False
+    # Populated when the dossier says more than one thing: every reading with its own
+    # source, so a clinician can see where each version was written.
+    readings: tuple[LedgerReading, ...] = ()
 
 
 def highlight_for(status: FactStatus) -> str:
@@ -80,12 +94,17 @@ def display_label(key: str) -> str:
     return label[:1].upper() + label[1:]
 
 
-async def current_facts(session: AsyncSession, *, case_id: uuid.UUID) -> dict[str, ExtractedFact]:
-    """The fact that currently speaks for each field.
+async def current_readings(
+    session: AsyncSession, *, case_id: uuid.UUID
+) -> dict[str, list[ExtractedFact]]:
+    """Every fact that currently speaks for each field.
 
-    A human correction supersedes the machine reading, and the most recent row wins
-    within each origin — so a corrected field shows the correction, and an uncorrected
-    one shows the latest extraction.
+    Usually one. A field the dossier contradicts itself about keeps them all, because
+    the disagreement *is* the information — collapsing it to the first value read would
+    hide exactly what a clinician needs to settle.
+
+    A human correction outranks the machine entirely: once someone has decided, the case
+    shows their decision rather than the argument behind it.
     """
     result = await session.execute(
         sa.select(ExtractedFact)
@@ -93,25 +112,45 @@ async def current_facts(session: AsyncSession, *, case_id: uuid.UUID) -> dict[st
         .order_by(ExtractedFact.created_at, ExtractedFact.id)
     )
 
-    chosen: dict[str, ExtractedFact] = {}
-    for fact in result.scalars().all():
-        existing = chosen.get(fact.fact_type)
-        if existing is None:
-            chosen[fact.fact_type] = fact
-            continue
-        # A human correction outranks any machine reading; otherwise the newer row wins.
-        if fact.origin is FactOrigin.human or existing.origin is not FactOrigin.human:
-            chosen[fact.fact_type] = fact
+    machine: dict[str, tuple[str | None, list[ExtractedFact]]] = {}
+    human: dict[str, ExtractedFact] = {}
 
+    for fact in result.scalars().all():
+        if fact.origin is FactOrigin.human:
+            human[fact.fact_type] = fact
+            continue
+        # Facts from one extraction share a signature; a newer reading replaces the
+        # older one wholesale rather than being merged with it.
+        generation, rows = machine.get(fact.fact_type, (None, []))
+        if generation is not None and fact.extraction_signature != generation:
+            rows = []
+        rows.append(fact)
+        machine[fact.fact_type] = (fact.extraction_signature, rows)
+
+    chosen: dict[str, list[ExtractedFact]] = {
+        key: rows for key, (_, rows) in machine.items()
+    }
+    for key, correction in human.items():
+        chosen[key] = [correction]
     return chosen
 
 
+async def current_facts(session: AsyncSession, *, case_id: uuid.UUID) -> dict[str, ExtractedFact]:
+    """The single fact that currently speaks for each field, for callers needing one."""
+    return {
+        key: rows[0]
+        for key, rows in (await current_readings(session, case_id=case_id)).items()
+        if rows
+    }
+
+
 async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntry]:
-    facts = await current_facts(session, case_id=case.id)
+    readings = await current_readings(session, case_id=case.id)
     entries: list[LedgerEntry] = []
 
     for spec in fields_for(case.cancer_type):
-        fact = facts.get(spec.key)
+        rows = readings.get(spec.key) or []
+        fact = rows[0] if rows else None
         if fact is None:
             entries.append(
                 LedgerEntry(
@@ -145,6 +184,20 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
                 source_chunk_id=str(fact.source_chunk_id) if fact.source_chunk_id else None,
                 fact_id=str(fact.id),
                 corrected=fact.origin is FactOrigin.human,
+                readings=tuple(
+                    LedgerReading(
+                        value=row.value,
+                        source_excerpt=row.source_excerpt,
+                        source_document_id=(
+                            str(row.source_document_id) if row.source_document_id else None
+                        ),
+                        source_chunk_id=(
+                            str(row.source_chunk_id) if row.source_chunk_id else None
+                        ),
+                        fact_id=str(row.id),
+                    )
+                    for row in rows
+                ),
             )
         )
 
@@ -171,6 +224,11 @@ async def record_version(
     Versions are immutable, so the input any agent run was given can be reproduced
     exactly, however many corrections followed.
     """
+    # Lock the case first: two clinicians correcting different fields at the same moment
+    # would otherwise both compute the same next version number, and one would lose its
+    # correction to a unique-constraint violation.
+    await session.execute(sa.select(Case.id).where(Case.id == case.id).with_for_update())
+
     entries = await build_entries(session, case=case)
     highest = await session.scalar(
         sa.select(sa.func.max(CaseLedgerVersion.version)).where(
@@ -224,6 +282,8 @@ async def apply_correction(
     if not spec.applies_to(case.cancer_type):
         raise FieldNotInScope(fact_type)
 
+    # Correcting a contradictory field supersedes the first reading; the others remain
+    # on record, and the correction is what the ledger shows from now on.
     facts = await current_facts(session, case_id=case.id)
     superseded = facts.get(fact_type)
 

@@ -36,15 +36,35 @@ function EntryRow({
         {entry.unit ? <span className="muted"> ({entry.unit})</span> : null}
       </th>
       <td>
-        {entry.value ?? <span className="missing-value">Information manquante</span>}
-        {entry.corrected ? <span className="badge">corrigé</span> : null}
-        {entry.note ? <p className="muted">{entry.note}</p> : null}
-        {entry.source_excerpt ? (
-          <details>
-            <summary className="muted">Source</summary>
-            <blockquote>{entry.source_excerpt}</blockquote>
-          </details>
-        ) : null}
+        {entry.readings.length > 1 ? (
+          // The dossier says more than one thing. Showing only the first value would
+          // hide precisely what the clinician has to settle.
+          <>
+            <strong>Valeurs contradictoires :</strong>
+            <ul>
+              {entry.readings.map((reading) => (
+                <li key={reading.fact_id ?? reading.value}>
+                  {reading.value}
+                  {reading.source_excerpt ? (
+                    <blockquote>{reading.source_excerpt}</blockquote>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <>
+            {entry.value ?? <span className="missing-value">Information manquante</span>}
+            {entry.corrected ? <span className="badge">corrigé</span> : null}
+            {entry.note ? <p className="muted">{entry.note}</p> : null}
+            {entry.source_excerpt ? (
+              <details>
+                <summary className="muted">Source</summary>
+                <blockquote>{entry.source_excerpt}</blockquote>
+              </details>
+            ) : null}
+          </>
+        )}
       </td>
       <td>
         <button type="button" onClick={() => onCorrect(entry)}>

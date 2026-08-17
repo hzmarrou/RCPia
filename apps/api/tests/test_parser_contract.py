@@ -26,6 +26,7 @@ from rcpia.core.models import (
     ParseStatus,
     UploadedDocument,
 )
+from rcpia.jobs.service import enqueue
 from rcpia.jobs.worker import Worker
 from rcpia.parsing.base import (
     ParsedBlock,
@@ -38,7 +39,7 @@ from rcpia.parsing.factory import build_parser
 from rcpia.parsing.liteparse import LiteParseParser
 from rcpia.parsing.llamaparse import LlamaParseParser
 from rcpia.parsing.quality import quality_warnings
-from rcpia.parsing.service import parse_document
+from rcpia.parsing.service import all_documents_settled, parse_document
 from rcpia.storage.base import checksum
 from rcpia.storage.local import LocalBlobStore
 
@@ -720,6 +721,78 @@ async def test_worker_retries_a_transient_failure_and_keeps_the_explanation(
         assert document is not None
         assert document.parse_status is ParseStatus.failed, "explanation survived the retry"
         assert document.parse_warnings
+
+
+async def test_extraction_waits_until_every_document_is_parsed(
+    session_factory: async_sessionmaker[AsyncSession], tmp_path
+) -> None:
+    """Extraction reads the whole case, so starting it after the first of two documents
+    would build a ledger from half the evidence and call it complete."""
+    blobs = LocalBlobStore(tmp_path, signing_secret="s")
+    case_id, first_document = await seed_document(session_factory, blobs)
+
+    async with session_factory() as session:
+        document = await session.get(UploadedDocument, first_document)
+        assert document is not None
+        organization_id = document.organization_id
+
+        second_id = uuid.uuid4()
+        key = f"cases/{case_id}/dossiers/{second_id}.pdf"
+        await blobs.put_bytes(key, PDF_BYTES, "application/pdf")
+        session.add(
+            UploadedDocument(
+                id=second_id,
+                case_id=case_id,
+                organization_id=organization_id,
+                blob_key=key,
+                original_filename="addendum.pdf",
+                content_type="application/pdf",
+                checksum_sha256=checksum(PDF_BYTES),
+                size_bytes=len(PDF_BYTES),
+                parse_status=ParseStatus.pending,
+            )
+        )
+        session.add(parse_job(case_id, first_document, organization_id))
+        await session.commit()
+
+    async def handle(session, job):
+        outcome = await parse_document(
+            session, job, parser=llamaparse_with(successful_handler()), blobs=blobs
+        )
+        if outcome is None and await all_documents_settled(session, case_id=job.case_id):
+            await enqueue(
+                session,
+                case_id=job.case_id,
+                organization_id=job.organization_id,
+                job_type="extract_facts",
+                payload={},
+            )
+        return outcome
+
+    worker = Worker(session_factory, name="test-worker")
+    worker.register("parse_dossier", handle)
+    await worker.run_once()
+
+    async with session_factory() as session:
+        extraction_jobs = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AnalysisJob)
+            .where(AnalysisJob.job_type == "extract_facts")
+        )
+        assert extraction_jobs == 0, "the addendum has not been parsed yet"
+
+        session.add(parse_job(case_id, second_id, organization_id))
+        await session.commit()
+
+    await worker.run_once()
+
+    async with session_factory() as session:
+        extraction_jobs = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AnalysisJob)
+            .where(AnalysisJob.job_type == "extract_facts")
+        )
+        assert extraction_jobs == 1, "queued once, after the last document"
 
 
 async def test_worker_completes_a_successful_parse(

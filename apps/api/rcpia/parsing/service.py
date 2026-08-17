@@ -177,6 +177,19 @@ async def _store_chunks(
     await session.flush()
 
 
+async def all_documents_settled(session: AsyncSession, *, case_id: uuid.UUID) -> bool:
+    """True when no document of this case is still waiting to be parsed."""
+    outstanding = await session.scalar(
+        sa.select(sa.func.count())
+        .select_from(UploadedDocument)
+        .where(
+            UploadedDocument.case_id == case_id,
+            UploadedDocument.parse_status.in_([ParseStatus.pending, ParseStatus.parsing]),
+        )
+    )
+    return not outstanding
+
+
 async def _advance_case_if_ready(session: AsyncSession, case_id: uuid.UUID) -> None:
     """Move the case on once every document is parsed.
 

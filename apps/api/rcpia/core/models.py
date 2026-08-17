@@ -376,6 +376,12 @@ class ExtractedFact(TimestampMixin, Base):
     recorded_by_user_id: Mapped[uuid.UUID | None] = mapped_column()
     note: Mapped[str | None] = mapped_column(Text)
 
+    # Which reading of the case produced this fact: a digest of every document and parse
+    # run that was examined. Extraction is skipped only when a fact already exists for
+    # exactly this set, so adding a second dossier re-reads the case instead of being
+    # mistaken for work already done.
+    extraction_signature: Mapped[str | None] = mapped_column(String(64))
+
     __table_args__ = (
         ForeignKeyConstraint(
             ["case_id", "organization_id"],
@@ -438,6 +444,11 @@ class ExtractedFact(TimestampMixin, Base):
             postgresql_where=text("supersedes_fact_id IS NOT NULL"),
         ),
         Index("ix_extracted_facts_case_id_fact_type", "case_id", "fact_type"),
+        Index(
+            "ix_extracted_facts_case_id_extraction_signature",
+            "case_id",
+            "extraction_signature",
+        ),
     )
 
 

@@ -63,6 +63,7 @@ def extract_from_text(
     chunk_id: object | None = None,
     document_id: object | None = None,
     following_text: str | None = None,
+    following_chunk_id: object | None = None,
 ) -> list[FactCandidate]:
     """Find every recognised field in one chunk of dossier text.
 
@@ -95,13 +96,20 @@ def extract_from_text(
             continue
 
         excerpt = line.strip()
+        source_chunk = chunk_id
 
         if not value:
             continuation, consumed = _read_continuation(lines, index + 1)
             if not continuation and following_text:
-                # The label ended this chunk; its report opens the next one.
+                # The label ended this chunk; its report opens the next one. The value
+                # then lives in that chunk, so that is the chunk the fact must cite —
+                # an excerpt has to be findable in the text it points at.
                 continuation, consumed = _read_continuation(following_text.splitlines(), 0)
-            if continuation:
+                if continuation:
+                    source_chunk = following_chunk_id
+                    value = continuation
+                    excerpt = "\n".join(consumed).strip()
+            elif continuation:
                 value = continuation
                 excerpt = "\n".join([line.strip(), *consumed]).strip()
 
@@ -115,7 +123,7 @@ def extract_from_text(
                 key=field_spec.key,
                 value=REPORTED_ABSENT if is_reported_absent(value) else value[:MAX_VALUE_LENGTH],
                 excerpt=excerpt[:MAX_VALUE_LENGTH],
-                chunk_id=chunk_id,
+                chunk_id=source_chunk,
                 document_id=document_id,
                 reported_absent=is_reported_absent(value),
             )
@@ -184,7 +192,12 @@ def normalize_value(value: str | None) -> str:
 
 @dataclass(frozen=True)
 class ResolvedFact:
-    """What extraction concluded about one field, before it is written down."""
+    """What extraction concluded about one field, before it is written down.
+
+    A conflict keeps every reading, each with the chunk it came from: "the dossier says
+    both 17.33 and 173.3" is only actionable if a clinician can see where each was
+    written.
+    """
 
     key: str
     value: str | None
@@ -193,6 +206,7 @@ class ResolvedFact:
     chunk_id: object | None
     document_id: object | None
     conflicting_values: tuple[str, ...] = ()
+    readings: tuple[FactCandidate, ...] = ()
 
 
 def resolve(
@@ -233,6 +247,12 @@ def resolve(
         first = found[0]
 
         if len(distinct) > 1:
+            # Keep one reading per distinct value, each with its own source, so a
+            # clinician can see where every version was written.
+            seen: dict[str, FactCandidate] = {}
+            for candidate in found:
+                seen.setdefault(normalize_value(candidate.value), candidate)
+
             resolved.append(
                 ResolvedFact(
                     key=field_spec.key,
@@ -244,6 +264,7 @@ def resolve(
                     conflicting_values=tuple(
                         sorted({candidate.value or "" for candidate in found})
                     ),
+                    readings=tuple(seen.values()),
                 )
             )
             continue
@@ -256,6 +277,7 @@ def resolve(
                 excerpt=first.excerpt,
                 chunk_id=first.chunk_id,
                 document_id=first.document_id,
+                readings=(first,),
             )
         )
 

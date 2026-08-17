@@ -506,6 +506,193 @@ async def test_reparsing_produces_a_newer_reading(
         assert history == 2, "the earlier reading is still on record"
 
 
+# --------------------------------------------------------------------------------------
+# More than one document
+# --------------------------------------------------------------------------------------
+
+
+async def add_document(
+    factory: async_sessionmaker[AsyncSession],
+    *,
+    case_id: uuid.UUID,
+    organization_id: uuid.UUID,
+    text: str,
+) -> uuid.UUID:
+    async with factory() as session:
+        document = UploadedDocument(
+            case_id=case_id,
+            organization_id=organization_id,
+            blob_key=f"cases/{case_id}/dossiers/{uuid.uuid4()}.pdf",
+            original_filename="addendum.pdf",
+            content_type="application/pdf",
+            checksum_sha256="e" * 64,
+            size_bytes=512,
+            parse_status=ParseStatus.parsed,
+            parser_provider="llamaparse",
+        )
+        session.add(document)
+        await session.flush()
+        session.add(
+            DocumentChunk(
+                document_id=document.id,
+                parse_run=0,
+                ordinal=0,
+                text=text,
+                page=1,
+                block_type=BlockType.paragraph,
+            )
+        )
+        await session.commit()
+        return document.id
+
+
+async def run_extraction(
+    factory: async_sessionmaker[AsyncSession], case_id: uuid.UUID, organization_id: uuid.UUID
+):
+    async with factory() as session:
+        job = extraction_job(case_id, organization_id)
+        session.add(job)
+        await session.flush()
+        outcome = await extract_case_facts(session, job)
+        await session.commit()
+        return outcome
+
+
+async def test_two_documents_disagreeing_produce_a_conflict_not_a_coin_toss(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A dossier and its addendum describe one patient. Two different creatinines are a
+    contradiction to settle, not two independent truths."""
+    case_id, organization_id = await seed_parsed_case(session_factory)
+    await add_document(
+        session_factory,
+        case_id=case_id,
+        organization_id=organization_id,
+        text="Créatinine : 173.3\n",
+    )
+
+    await run_extraction(session_factory, case_id, organization_id)
+
+    async with session_factory() as session:
+        facts = [
+            fact
+            for fact in await latest_machine_facts(session, case_id=case_id)
+            if fact.fact_type == "creatinine"
+        ]
+
+    assert {fact.status for fact in facts} == {FactStatus.conflicting}
+    assert {fact.value for fact in facts} == {"17.33", "173.3"}
+    # Each reading keeps the document and chunk it came from.
+    assert len({fact.source_document_id for fact in facts}) == 2
+    assert all(fact.source_chunk_id is not None for fact in facts)
+    assert all(fact.source_excerpt for fact in facts)
+
+
+async def test_a_second_document_is_read_rather_than_skipped(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Extraction already ran for the first dossier; adding another must re-read the case."""
+    case_id, organization_id = await seed_parsed_case(
+        session_factory, text="**Sexe** : Femme\nCréatinine : 17.33\n"
+    )
+    await run_extraction(session_factory, case_id, organization_id)
+
+    await add_document(
+        session_factory,
+        case_id=case_id,
+        organization_id=organization_id,
+        text="DFG : 30\nScintigraphie osseuse : RAS\n",
+    )
+    await run_extraction(session_factory, case_id, organization_id)
+
+    async with session_factory() as session:
+        facts = {
+            fact.fact_type: fact for fact in await latest_machine_facts(session, case_id=case_id)
+        }
+
+    assert facts["egfr"].value == "30", "the addendum was read"
+    assert facts["bone_scan"].value == "RAS"
+    assert facts["creatinine"].value == "17.33", "the first dossier is still read too"
+
+
+async def test_redelivery_with_the_same_documents_changes_nothing(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    case_id, organization_id = await seed_parsed_case(session_factory)
+    await run_extraction(session_factory, case_id, organization_id)
+    await run_extraction(session_factory, case_id, organization_id)
+
+    async with session_factory() as session:
+        count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(ExtractedFact)
+            .where(
+                ExtractedFact.case_id == case_id, ExtractedFact.fact_type == "creatinine"
+            )
+        )
+        assert count == 1
+
+
+async def test_units_and_dates_are_recorded(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """`unit` and `observed_date` are part of the fact contract, not decoration."""
+    case_id, organization_id = await seed_parsed_case(
+        session_factory,
+        text="Créatinine : 17.33\nDFG : 30\nDate de diagnostic : 19/05/2025\n",
+    )
+    await run_extraction(session_factory, case_id, organization_id)
+
+    async with session_factory() as session:
+        facts = {
+            fact.fact_type: fact for fact in await latest_machine_facts(session, case_id=case_id)
+        }
+
+    assert facts["egfr"].unit == "mL/min"
+    assert facts["diagnosis_date"].observed_date is not None
+    assert facts["diagnosis_date"].observed_date.year == 2025
+    assert facts["diagnosis_date"].observed_date.month == 5
+
+
+async def test_a_value_continuing_into_the_next_chunk_cites_the_chunk_holding_it(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """An excerpt must be findable in the chunk the fact points at."""
+    case_id, organization_id = await seed_parsed_case(
+        session_factory, text="**Evaluation cardiaque** :"
+    )
+
+    async with session_factory() as session:
+        document = await session.scalar(
+            sa.select(UploadedDocument).where(UploadedDocument.case_id == case_id)
+        )
+        assert document is not None
+        session.add(
+            DocumentChunk(
+                document_id=document.id,
+                parse_run=0,
+                ordinal=1,
+                text="FEVG conservée à 60%.\nPas de valvulopathie.",
+                page=1,
+                block_type=BlockType.paragraph,
+            )
+        )
+        await session.commit()
+
+    await run_extraction(session_factory, case_id, organization_id)
+
+    async with session_factory() as session:
+        facts = {
+            fact.fact_type: fact for fact in await latest_machine_facts(session, case_id=case_id)
+        }
+        cardiac = facts["cardiac_assessment"]
+        assert "FEVG" in (cardiac.value or "")
+
+        cited = await session.get(DocumentChunk, cardiac.source_chunk_id)
+        assert cited is not None
+        assert cardiac.source_excerpt in cited.text, "the excerpt is in the cited chunk"
+
+
 def test_every_field_key_is_unique_and_indexed() -> None:
     keys = [field.key for field in FIELDS_BY_KEY.values()]
 

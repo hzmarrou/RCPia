@@ -2,6 +2,14 @@ import { API_BASE_URL } from "@/lib/api";
 
 export type Highlight = "red" | "amber" | "neutral";
 
+export type LedgerReading = {
+  value: string | null;
+  source_excerpt: string | null;
+  source_document_id: string | null;
+  source_chunk_id: string | null;
+  fact_id: string | null;
+};
+
 export type LedgerEntry = {
   key: string;
   label: string;
@@ -17,6 +25,8 @@ export type LedgerEntry = {
   source_chunk_id: string | null;
   fact_id: string | null;
   corrected: boolean;
+  /** Several when the dossier contradicts itself; each with the text it came from. */
+  readings: LedgerReading[];
 };
 
 export type CompletenessIssue = {

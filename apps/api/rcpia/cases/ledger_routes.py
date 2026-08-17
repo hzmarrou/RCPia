@@ -18,6 +18,16 @@ router = protected_router(
 )
 
 
+class LedgerReadingRead(BaseModel):
+    """One value read for a field, with where it was written."""
+
+    value: str | None
+    source_excerpt: str | None = None
+    source_document_id: str | None = None
+    source_chunk_id: str | None = None
+    fact_id: str | None = None
+
+
 class LedgerEntryRead(BaseModel):
     key: str
     label: str
@@ -33,6 +43,8 @@ class LedgerEntryRead(BaseModel):
     source_chunk_id: str | None = None
     fact_id: str | None = None
     corrected: bool = False
+    # Several when the dossier contradicts itself; the disagreement is the information.
+    readings: list[LedgerReadingRead] = []
 
 
 class CompletenessIssueRead(BaseModel):

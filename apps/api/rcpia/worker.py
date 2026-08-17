@@ -22,7 +22,7 @@ from rcpia.jobs.service import enqueue
 from rcpia.jobs.worker import Worker
 from rcpia.parsing.base import ParserNotConfigured
 from rcpia.parsing.factory import get_parser
-from rcpia.parsing.service import parse_document
+from rcpia.parsing.service import all_documents_settled, parse_document
 from rcpia.storage.factory import get_blob_store
 
 if sys.platform == "win32":
@@ -45,8 +45,10 @@ def build_worker() -> Worker:
 
     async def handle_parse(session, job: AnalysisJob) -> JobOutcome | None:
         outcome = await parse_document(session, job, parser=parser, blobs=blobs)
-        if outcome is None:
-            # Parsing succeeded, so the dossier can be read for facts.
+        if outcome is None and await all_documents_settled(session, case_id=job.case_id):
+            # Extraction reads the whole case at once, so it waits until no document is
+            # still being parsed. Starting earlier would build a ledger from half the
+            # evidence and call it complete.
             await enqueue(
                 session,
                 case_id=job.case_id,

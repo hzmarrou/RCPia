@@ -29,6 +29,15 @@ const LEDGER: Ledger = {
       source_chunk_id: "chunk",
       fact_id: "fact",
       corrected: false,
+      readings: [
+        {
+          value: "17.33",
+          source_excerpt: "Créatinine : 17.33",
+          source_document_id: "doc",
+          source_chunk_id: "chunk",
+          fact_id: "fact",
+        },
+      ],
     },
   ],
   missing_fields: ["bone_scan"],

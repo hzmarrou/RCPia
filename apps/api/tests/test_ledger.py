@@ -487,6 +487,79 @@ async def test_the_stored_version_reflects_the_ledger_at_that_moment(
     assert value_of(versions[1], "creatinine") == "222"
 
 
+async def test_a_contradicted_field_shows_every_reading_with_its_source(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """"The dossier says both 17.33 and 173.3" is only actionable with both sources."""
+    user, case = await seed_case_with_facts(
+        session_factory, text=DOSSIER_TEXT + "\nCréatinine : 173.3\n"
+    )
+    await sign_in(client, user)
+
+    entries = {
+        entry["key"]: entry
+        for entry in (await client.get(f"/cases/{case.id}/ledger")).json()["entries"]
+    }
+    creatinine = entries["creatinine"]
+
+    assert creatinine["highlight"] == "amber"
+    assert {reading["value"] for reading in creatinine["readings"]} == {"17.33", "173.3"}
+    assert all(reading["source_chunk_id"] for reading in creatinine["readings"])
+    assert all(reading["source_excerpt"] for reading in creatinine["readings"])
+
+
+async def test_correcting_a_contradicted_field_settles_it(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    user, case = await seed_case_with_facts(
+        session_factory, text=DOSSIER_TEXT + "\nCréatinine : 173.3\n"
+    )
+    await sign_in(client, user)
+
+    response = await client.post(
+        f"/cases/{case.id}/ledger/corrections",
+        json={
+            "fact_type": "creatinine",
+            "value": "173.3",
+            "note": "Valeur confirmée sur le compte rendu de biologie.",
+        },
+    )
+
+    entries = {entry["key"]: entry for entry in response.json()["entries"]}
+    assert entries["creatinine"]["value"] == "173.3"
+    assert entries["creatinine"]["highlight"] == "neutral", "a decision was made"
+    assert "creatinine" not in response.json()["uncertain_fields"]
+
+
+async def test_concurrent_corrections_do_not_collide_on_a_version_number(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Two clinicians correcting different fields at once must both succeed."""
+    import asyncio
+
+    user, case = await seed_case_with_facts(session_factory)
+    await sign_in(client, user)
+    cookies = dict(client.cookies)
+
+    async def correct(field: str, value: str):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=cookies
+        ) as other:
+            return await other.post(
+                f"/cases/{case.id}/ledger/corrections",
+                json={"fact_type": field, "value": value, "note": "Correction simultanée."},
+            )
+
+    first, second = await asyncio.gather(
+        correct("grade", "Haut"), correct("cis", "Non")
+    )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert {first.json()["version"], second.json()["version"]} == {1, 2}
+
+
 def test_highlight_mapping() -> None:
     assert ledger_service.highlight_for(FactStatus.missing) == "red"
     assert ledger_service.highlight_for(FactStatus.conflicting) == "amber"
