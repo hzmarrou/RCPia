@@ -14,7 +14,7 @@ from rcpia.cases import service
 from rcpia.cases.models import CaseCreate, CaseDetail, CaseRead, DocumentRead
 from rcpia.cases.uploads import MAX_UPLOAD_BYTES, UploadRejected
 from rcpia.core.models import UserRole
-from rcpia.storage.base import BlobStore, StorageError
+from rcpia.storage.base import BlobStore, StorageError, checksum
 from rcpia.storage.factory import get_blob_store
 
 router = protected_router(UserRole.admin, UserRole.uploader, prefix="/cases", tags=["cases"])
@@ -88,7 +88,7 @@ async def upload_document(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Stockage indisponible, réessayez."
         ) from exc
 
-    await session.commit()
+    # add_document owns the commit, so that a failure can delete the blob it wrote.
     return DocumentRead.model_validate(document)
 
 
@@ -113,6 +113,15 @@ async def download_document(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document introuvable.") from exc
     except StorageError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Contenu introuvable.") from exc
+
+    # The dossier is evidence: hand back only bytes that still match what was uploaded.
+    if checksum(content) != document.checksum_sha256:
+        await service.record_integrity_failure(session, document=document, actor=user)
+        await session.commit()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Le document stocké ne correspond plus à son empreinte enregistrée.",
+        )
 
     return Response(
         content=content,

@@ -277,6 +277,12 @@ class UploadedDocument(TimestampMixin, Base):
     )
     parser_provider: Mapped[str | None] = mapped_column(String(50))
     parser_provider_version: Mapped[str | None] = mapped_column(String(50))
+    # Which parse run the current chunks belong to. Re-parsing adds a run rather than
+    # replacing chunks, because extracted facts cite chunks and that provenance must
+    # survive a retry.
+    current_parse_run: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     # Services append to this list, so it needs mutation tracking.
     parse_warnings: Mapped[list[str]] = mapped_column(
         MutableList.as_mutable(JSONB), nullable=False, default=list
@@ -313,6 +319,11 @@ class DocumentChunk(TimestampMixin, Base):
     document_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("uploaded_documents.id", ondelete="RESTRICT"), nullable=False
     )
+    # Chunks are never deleted, so a re-parse writes a new run; the document names the
+    # run that is current.
+    parse_run: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     page: Mapped[int | None] = mapped_column(Integer)
@@ -325,9 +336,12 @@ class DocumentChunk(TimestampMixin, Base):
     document: Mapped[UploadedDocument] = relationship(back_populates="chunks")
 
     __table_args__ = (
-        UniqueConstraint("document_id", "ordinal", name="uq_document_chunks_document_ordinal"),
+        UniqueConstraint(
+            "document_id", "parse_run", "ordinal", name="uq_document_chunks_document_run_ordinal"
+        ),
         # Target for the fact -> chunk composite key, which carries the document along.
         UniqueConstraint("id", "document_id", name="uq_document_chunks_id_document"),
+        Index("ix_document_chunks_document_id_parse_run", "document_id", "parse_run"),
     )
 
 

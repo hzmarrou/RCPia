@@ -116,7 +116,12 @@ class Worker:
         claim_token: uuid.UUID,
         outcome: JobOutcome | None,
     ) -> None:
-        """Record what the handler reported. Returning None means success."""
+        """Record what the handler reported. Returning None means success.
+
+        This runs in the handler's own session, and the caller commits both together, so
+        a handler that recorded why it failed keeps those writes instead of having them
+        rolled back alongside the transition.
+        """
         if outcome is None or outcome.status is JobStatus.completed:
             await service.complete(session, job_id, claim_token)
         elif outcome.status is JobStatus.waiting_for_user:
@@ -132,6 +137,7 @@ class Worker:
                 job_id,
                 claim_token,
                 error=outcome.error_message or "Handler reported failure",
+                terminal=not outcome.retryable,
             )
         elif outcome.status is JobStatus.cancelled:
             await service.cancel(session, job_id, reason=outcome.error_message)

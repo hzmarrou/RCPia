@@ -300,6 +300,43 @@ async def test_the_blob_key_ignores_the_uploaded_filename(
         assert document.original_filename == "../../etc/passwd.pdf", "kept as data"
 
 
+async def test_a_docx_whose_content_types_entry_is_not_first_is_accepted(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Word does not guarantee entry order, and a substring check on the first few
+    kilobytes rejects perfectly valid documents."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("docProps/app.xml", "<Properties/>" + "padding" * 1000)
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", "<document/>")
+
+    response = await upload(client, case["id"], "dossier.docx", buffer.getvalue())
+
+    assert response.status_code == 201
+
+
+async def test_an_archive_merely_mentioning_content_types_is_refused(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A zip containing the marker as data is not an Office document."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("readme.txt", "[Content_Types].xml")
+
+    response = await upload(client, case["id"], "dossier.docx", buffer.getvalue())
+
+    assert response.status_code == 415
+
+
 @pytest.mark.parametrize(
     ("filename", "content"),
     [
@@ -445,6 +482,68 @@ async def test_download_is_refused_across_organizations(
 
     response = await client.get(f"/cases/{case['id']}/documents/{document['id']}/content")
     assert response.status_code == 404
+
+
+async def test_a_corrupted_blob_is_refused_and_audited_on_download(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    blob_store: LocalBlobStore,
+    tmp_path: Path,
+) -> None:
+    """Handing back bytes that no longer match their checksum would quietly undermine
+    every fact extracted from the dossier."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    document = (await upload(client, case["id"], "dossier.pdf", PDF_BYTES)).json()
+
+    async with session_factory() as session:
+        stored = await session.get(UploadedDocument, uuid.UUID(document["id"]))
+        assert stored is not None
+        key = stored.blob_key
+    (tmp_path / f"objects/{key}/data").write_bytes(b"%PDF-1.7 tampered")
+
+    response = await client.get(f"/cases/{case['id']}/documents/{document['id']}/content")
+
+    assert response.status_code == 409
+    async with session_factory() as session:
+        event = await session.scalar(
+            sa.select(AuditEvent).where(AuditEvent.event_type == "document.integrity_failed")
+        )
+        assert event is not None
+        assert event.entity_id == uuid.UUID(document["id"])
+
+
+async def test_a_failed_upload_transaction_leaves_no_orphan_blob(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    blob_store: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The blob is written before the row that justifies it. If the transaction fails,
+    that blob must not survive as unaudited clinical data."""
+    from rcpia.cases import service as cases_service
+
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+
+    async def explode(*args: object, **kwargs: object):
+        raise RuntimeError("database went away mid-commit")
+
+    monkeypatch.setattr(cases_service, "_record_document", explode)
+
+    # The test client re-raises rather than turning it into a 500; either way the
+    # request failed and the compensation must have run.
+    with pytest.raises(RuntimeError, match="database went away"):
+        await upload(client, case["id"], "dossier.pdf", PDF_BYTES)
+
+    async with session_factory() as session:
+        documents = (await session.execute(sa.select(UploadedDocument))).scalars().all()
+        assert documents == []
+
+    keys = list((Path(blob_store.root) / "objects").rglob("data"))
+    assert keys == [], "the orphaned blob was removed"
 
 
 async def test_downloading_an_unknown_document_is_not_found(

@@ -17,6 +17,7 @@ from rcpia.core.db import get_session_factory
 from rcpia.core.models import AnalysisJob
 from rcpia.jobs.models import JobOutcome, JobType
 from rcpia.jobs.worker import Worker
+from rcpia.parsing.base import ParserNotConfigured
 from rcpia.parsing.factory import get_parser
 from rcpia.parsing.service import parse_document
 from rcpia.storage.factory import get_blob_store
@@ -29,10 +30,18 @@ logger = logging.getLogger(__name__)
 
 
 def build_worker() -> Worker:
+    """Build the worker, resolving its dependencies now rather than per job.
+
+    A missing LLAMAPARSE_API_KEY is a deployment mistake. Discovered inside a handler it
+    becomes a generic error on every job, one document at a time; discovered here the
+    worker refuses to start and says why.
+    """
+    parser = get_parser()
+    blobs = get_blob_store()
     worker = Worker(get_session_factory())
 
     async def handle_parse(session, job: AnalysisJob) -> JobOutcome | None:
-        return await parse_document(session, job, parser=get_parser(), blobs=get_blob_store())
+        return await parse_document(session, job, parser=parser, blobs=blobs)
 
     worker.register(JobType.PARSE_DOSSIER, handle_parse)
     return worker
@@ -40,7 +49,12 @@ def build_worker() -> Worker:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    worker = build_worker()
+
+    try:
+        worker = build_worker()
+    except ParserNotConfigured as exc:
+        logger.error("worker cannot start: %s", exc)
+        raise SystemExit(2) from exc
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

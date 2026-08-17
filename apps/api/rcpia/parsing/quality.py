@@ -15,6 +15,9 @@ from rcpia.parsing.base import ParsedDocument
 MIN_EXPECTED_CHARACTERS = 1000
 # Scanned documents parse into images with no text behind them.
 MIN_TEXT_BLOCK_RATIO = 0.3
+# Page numbers above this are treated as provider noise rather than real pages. No
+# clinical dossier runs to five thousand pages.
+MAX_TRACKED_PAGE = 5000
 
 
 def quality_warnings(document: ParsedDocument) -> list[str]:
@@ -42,19 +45,27 @@ def quality_warnings(document: ParsedDocument) -> list[str]:
             "(document probablement scanné)."
         )
 
-    pages = {block.page for block in document.blocks if block.page is not None}
+    # Page numbers come from the provider, so they are untrusted input. Bounding them
+    # keeps a malformed response (page: 10**9) from being turned into a huge range.
+    pages = {
+        block.page
+        for block in document.blocks
+        if block.page is not None and 1 <= block.page <= MAX_TRACKED_PAGE
+    }
     if not pages:
         warnings.append(
             "Aucune page n'a été identifiée : la traçabilité des données extraites sera "
             "limitée."
         )
-    elif pages and max(pages) > len(pages):
-        missing = sorted(set(range(1, max(pages) + 1)) - pages)
-        if missing:
-            warnings.append(
-                "Certaines pages n'ont produit aucun contenu : "
-                + ", ".join(str(page) for page in missing[:10])
-                + ("…" if len(missing) > 10 else "")
-            )
+        return warnings
+
+    highest = max(pages)
+    if highest > len(pages):
+        missing = [page for page in range(1, highest + 1) if page not in pages]
+        warnings.append(
+            "Certaines pages n'ont produit aucun contenu : "
+            + ", ".join(str(page) for page in missing[:10])
+            + ("…" if len(missing) > 10 else "")
+        )
 
     return warnings

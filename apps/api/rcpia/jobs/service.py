@@ -201,9 +201,19 @@ async def wait_for_user(
 
 
 async def fail(
-    session: AsyncSession, job_id: uuid.UUID, claim_token: uuid.UUID, *, error: str
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    claim_token: uuid.UUID,
+    *,
+    error: str,
+    terminal: bool = False,
 ) -> None:
     """Record a failure, retrying with backoff until `max_attempts` is exhausted.
+
+    `terminal=True` skips the retries entirely, for failures that cannot succeed on a
+    later attempt — a missing API key, a malformed payload, a document that does not
+    exist. Retrying those wastes the attempt budget and delays the human who has to fix
+    the cause.
 
     The error detail is stored on every attempt, including retried ones, so a job that
     eventually succeeds still carries the last thing that went wrong.
@@ -212,7 +222,7 @@ async def fail(
     if job is None:
         raise JobTransitionError(f"Cannot fail job {job_id}: it does not exist")
 
-    if job.attempts >= job.max_attempts:
+    if terminal or job.attempts >= job.max_attempts:
         values: dict[str, object] = {
             "status": JobStatus.failed,
             "error_message": error,

@@ -8,6 +8,7 @@ audit event, and the parsing job — so a document can never exist without a job
 it, nor a job without its document.
 """
 
+import contextlib
 import uuid
 
 import sqlalchemy as sa
@@ -26,7 +27,7 @@ from rcpia.core.models import (
 from rcpia.jobs import service as jobs
 from rcpia.jobs.models import JobType
 from rcpia.storage import keys
-from rcpia.storage.base import BlobStore
+from rcpia.storage.base import BlobInfo, BlobStore, StorageError
 
 
 class CaseError(Exception):
@@ -121,11 +122,12 @@ async def add_document(
     filename: str,
     content: bytes,
 ) -> UploadedDocument:
-    """Store an uploaded dossier and queue it for parsing.
+    """Store an uploaded dossier and queue it for parsing, committing all of it together.
 
-    The blob is written before the row, so a failure leaves an unreferenced blob rather
-    than a row pointing at nothing: an orphan blob is inert, a dangling reference is a
-    fault every later phase has to handle.
+    The blob has to be written before the row that references it, which leaves a window:
+    if the transaction then fails, the blob would linger with nothing pointing at it —
+    unaudited clinical data. So this function owns the commit and deletes the blob it
+    wrote if the commit does not happen.
     """
     detected = detect_dossier_type(filename, content)
 
@@ -133,6 +135,30 @@ async def add_document(
     key = keys.dossier_key(case.id, document_id, filename)
     stored = await blobs.put_bytes(key, content, detected.content_type)
 
+    try:
+        document = await _record_document(
+            session, user=user, case=case, document_id=document_id, filename=filename, stored=stored
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        # Compensate: the row that would have justified this blob does not exist.
+        with contextlib.suppress(StorageError):
+            await blobs.delete(stored.key)
+        raise
+
+    return document
+
+
+async def _record_document(
+    session: AsyncSession,
+    *,
+    user: User,
+    case: Case,
+    document_id: uuid.UUID,
+    filename: str,
+    stored: BlobInfo,
+) -> UploadedDocument:
     document = UploadedDocument(
         id=document_id,
         case_id=case.id,
@@ -175,6 +201,31 @@ async def add_document(
     case.status = CaseStatus.parsing
     await session.flush()
     return document
+
+
+async def record_integrity_failure(
+    session: AsyncSession, *, document: UploadedDocument, actor: User | None = None
+) -> None:
+    """Audit a stored document whose bytes no longer match their checksum.
+
+    Silent corruption of a dossier would undermine every fact extracted from it, so it
+    is recorded as an event rather than only reported to whoever hit it.
+    """
+    session.add(
+        AuditEvent(
+            organization_id=document.organization_id,
+            case_id=document.case_id,
+            actor_user_id=actor.id if actor else None,
+            event_type="document.integrity_failed",
+            entity_type="uploaded_documents",
+            entity_id=document.id,
+            payload={
+                "blob_key": document.blob_key,
+                "expected_checksum": document.checksum_sha256,
+            },
+        )
+    )
+    await session.flush()
 
 
 async def get_document(

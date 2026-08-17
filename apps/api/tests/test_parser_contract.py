@@ -26,6 +26,7 @@ from rcpia.core.models import (
     ParseStatus,
     UploadedDocument,
 )
+from rcpia.jobs.worker import Worker
 from rcpia.parsing.base import (
     ParsedBlock,
     ParsedDocument,
@@ -38,6 +39,7 @@ from rcpia.parsing.liteparse import LiteParseParser
 from rcpia.parsing.llamaparse import LlamaParseParser
 from rcpia.parsing.quality import quality_warnings
 from rcpia.parsing.service import parse_document
+from rcpia.storage.base import checksum
 from rcpia.storage.local import LocalBlobStore
 
 PDF_BYTES = b"%PDF-1.7\nfake dossier\n%%EOF\n"
@@ -279,6 +281,24 @@ def test_missing_pages_are_named() -> None:
     assert any("2" in warning and "page" in warning.lower() for warning in warnings)
 
 
+def test_absurd_page_numbers_do_not_allocate_a_huge_range() -> None:
+    """Page numbers come from the provider, so a malformed response must not be turned
+    into a billion-element range."""
+    document = ParsedDocument(
+        provider="llamaparse",
+        blocks=[
+            ParsedBlock(text="x" * 1200, page=1),
+            ParsedBlock(text="y" * 1200, page=10**9),
+            ParsedBlock(text="z" * 1200, page=-5),
+        ],
+        raw_text="x" * 3600,
+    )
+
+    warnings = quality_warnings(document)
+
+    assert all(len(warning) < 500 for warning in warnings)
+
+
 def test_a_healthy_parse_produces_no_warnings() -> None:
     document = ParsedDocument(
         provider="llamaparse",
@@ -321,7 +341,7 @@ async def seed_document(
                 blob_key=key,
                 original_filename="dossier.pdf",
                 content_type="application/pdf",
-                checksum_sha256="a" * 64,
+                checksum_sha256=checksum(PDF_BYTES),
                 size_bytes=len(PDF_BYTES),
                 parse_status=ParseStatus.pending,
             )
@@ -386,10 +406,15 @@ async def test_parsing_stores_chunks_with_their_provenance(
         assert case.status is CaseStatus.ready_for_review, "all documents parsed"
 
 
-async def test_reparsing_replaces_chunks_rather_than_duplicating_them(
+async def test_reparsing_versions_chunks_instead_of_deleting_them(
     session_factory: async_sessionmaker[AsyncSession], tmp_path
 ) -> None:
-    """Job delivery is at-least-once, so the handler must be idempotent."""
+    """Job delivery is at-least-once, so a re-parse happens.
+
+    Chunks are cited by extracted facts through restrictive foreign keys, so deleting
+    them would eventually make a retry impossible. A re-parse adds a run and moves the
+    document's pointer.
+    """
     blobs = LocalBlobStore(tmp_path, signing_secret="s")
     case_id, document_id = await seed_document(session_factory, blobs)
     parser = llamaparse_with(successful_handler())
@@ -405,12 +430,92 @@ async def test_reparsing_replaces_chunks_rather_than_duplicating_them(
             await session.commit()
 
     async with session_factory() as session:
-        count = await session.scalar(
+        document = await session.get(UploadedDocument, document_id)
+        assert document is not None
+        assert document.current_parse_run == 1, "the second run is current"
+
+        runs = (
+            (
+                await session.execute(
+                    sa.select(DocumentChunk.parse_run, sa.func.count())
+                    .where(DocumentChunk.document_id == document_id)
+                    .group_by(DocumentChunk.parse_run)
+                    .order_by(DocumentChunk.parse_run)
+                )
+            )
+            .all()
+        )
+        assert runs == [(0, 4), (1, 4)], "the earlier run survives"
+
+
+async def test_a_job_cannot_parse_another_organizations_document(
+    session_factory: async_sessionmaker[AsyncSession], tmp_path
+) -> None:
+    """The payload names a document; the job's own scope decides what it may reach."""
+    blobs = LocalBlobStore(tmp_path, signing_secret="s")
+    victim_case, victim_document = await seed_document(session_factory, blobs)
+    attacker_case, _ = await seed_document(session_factory, blobs)
+
+    async with session_factory() as session:
+        attacker = await session.get(Case, attacker_case)
+        assert attacker is not None
+        job = parse_job(attacker_case, victim_document, attacker.organization_id)
+        session.add(job)
+        await session.flush()
+
+        outcome = await parse_document(
+            session, job, parser=llamaparse_with(successful_handler()), blobs=blobs
+        )
+        await session.commit()
+
+    assert outcome is not None
+    assert outcome.retryable is False
+
+    async with session_factory() as session:
+        victim = await session.get(UploadedDocument, victim_document)
+        chunks = await session.scalar(
             sa.select(sa.func.count())
             .select_from(DocumentChunk)
-            .where(DocumentChunk.document_id == document_id)
+            .where(DocumentChunk.document_id == victim_document)
         )
-        assert count == 4
+        assert victim is not None
+        assert victim.parse_status is ParseStatus.pending, "untouched"
+        assert chunks == 0
+        assert victim_case != attacker_case
+
+
+async def test_corrupted_storage_is_detected_and_not_parsed(
+    session_factory: async_sessionmaker[AsyncSession], tmp_path
+) -> None:
+    """The checksum recorded at upload is what the parser must be given."""
+    blobs = LocalBlobStore(tmp_path, signing_secret="s")
+    case_id, document_id = await seed_document(session_factory, blobs)
+
+    async with session_factory() as session:
+        document = await session.get(UploadedDocument, document_id)
+        assert document is not None
+        document.checksum_sha256 = "b" * 64  # as if the bytes had changed underneath
+        await session.commit()
+
+    async with session_factory() as session:
+        document = await session.get(UploadedDocument, document_id)
+        assert document is not None
+        job = parse_job(case_id, document_id, document.organization_id)
+        session.add(job)
+        await session.flush()
+
+        outcome = await parse_document(
+            session, job, parser=llamaparse_with(successful_handler()), blobs=blobs
+        )
+        await session.commit()
+
+    assert outcome is not None and outcome.retryable is False
+
+    async with session_factory() as session:
+        document = await session.get(UploadedDocument, document_id)
+        assert document is not None
+        assert document.parse_status is ParseStatus.failed
+        assert any("empreinte" in warning for warning in document.parse_warnings)
 
 
 async def test_a_thin_parse_warns_the_uploader(
@@ -501,8 +606,11 @@ async def test_a_transient_parser_failure_is_raised_for_retry(
         session.add(job)
         await session.flush()
 
-        with pytest.raises(RuntimeError):
-            await parse_document(session, job, parser=llamaparse_with(handler), blobs=blobs)
+        outcome = await parse_document(session, job, parser=llamaparse_with(handler), blobs=blobs)
+        await session.commit()
+
+    assert outcome is not None
+    assert outcome.retryable is True, "an unreachable or failing provider may succeed later"
 
 
 async def test_a_missing_blob_fails_the_document(
@@ -519,10 +627,120 @@ async def test_a_missing_blob_fails_the_document(
         session.add(job)
         await session.flush()
 
-        with pytest.raises(RuntimeError, match="illisible"):
-            await parse_document(
-                session, job, parser=llamaparse_with(successful_handler()), blobs=blobs
-            )
+        outcome = await parse_document(
+            session, job, parser=llamaparse_with(successful_handler()), blobs=blobs
+        )
+        await session.commit()
+
+    assert outcome is not None and outcome.retryable is True
+    async with session_factory() as session:
+        document = await session.get(UploadedDocument, document_id)
+        assert document is not None
+        assert any("illisible" in warning for warning in document.parse_warnings)
+
+
+# --------------------------------------------------------------------------------------
+# Through the real worker, not the handler alone
+# --------------------------------------------------------------------------------------
+
+
+async def run_worker_once(
+    session_factory: async_sessionmaker[AsyncSession], parser, blobs
+) -> None:
+    """Drive the production path: claim, handle, apply outcome, commit."""
+
+    async def handle(session, job):
+        return await parse_document(session, job, parser=parser, blobs=blobs)
+
+    worker = Worker(session_factory, name="test-worker")
+    worker.register("parse_dossier", handle)
+    await worker.run_once()
+
+
+async def test_worker_gives_up_immediately_on_a_misconfigured_parser(
+    session_factory: async_sessionmaker[AsyncSession], tmp_path
+) -> None:
+    """Terminal means terminal: attempts remain, but the job must not be requeued."""
+    blobs = LocalBlobStore(tmp_path, signing_secret="s")
+    case_id, document_id = await seed_document(session_factory, blobs)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"detail": "forbidden"})
+
+    async with session_factory() as session:
+        document = await session.get(UploadedDocument, document_id)
+        assert document is not None
+        session.add(parse_job(case_id, document_id, document.organization_id))
+        await session.commit()
+
+    await run_worker_once(session_factory, llamaparse_with(handler), blobs)
+
+    async with session_factory() as session:
+        job = await session.scalar(sa.select(AnalysisJob))
+        document = await session.get(UploadedDocument, document_id)
+        assert job is not None
+        assert job.status.value == "failed", "not requeued despite remaining attempts"
+        assert job.attempts == 1
+        assert document is not None
+        assert document.parse_status is ParseStatus.failed
+        assert any("clé d'API" in warning for warning in document.parse_warnings)
+
+
+async def test_worker_retries_a_transient_failure_and_keeps_the_explanation(
+    session_factory: async_sessionmaker[AsyncSession], tmp_path
+) -> None:
+    """The document's failure state and the job transition must land together.
+
+    Previously the handler wrote the explanation and then raised, and the worker rolled
+    that write back — leaving a retrying job beside a document that looked untouched.
+    """
+    blobs = LocalBlobStore(tmp_path, signing_secret="s")
+    case_id, document_id = await seed_document(session_factory, blobs)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/upload"):
+            return httpx.Response(200, json={"id": "job-1"})
+        return httpx.Response(200, json={"status": "ERROR"})
+
+    async with session_factory() as session:
+        document = await session.get(UploadedDocument, document_id)
+        assert document is not None
+        session.add(parse_job(case_id, document_id, document.organization_id))
+        await session.commit()
+
+    await run_worker_once(session_factory, llamaparse_with(handler), blobs)
+
+    async with session_factory() as session:
+        job = await session.scalar(sa.select(AnalysisJob))
+        document = await session.get(UploadedDocument, document_id)
+        assert job is not None
+        assert job.status.value == "queued", "retryable, so it goes back on the queue"
+        assert job.attempts == 1
+        assert job.error_message
+        assert document is not None
+        assert document.parse_status is ParseStatus.failed, "explanation survived the retry"
+        assert document.parse_warnings
+
+
+async def test_worker_completes_a_successful_parse(
+    session_factory: async_sessionmaker[AsyncSession], tmp_path
+) -> None:
+    blobs = LocalBlobStore(tmp_path, signing_secret="s")
+    case_id, document_id = await seed_document(session_factory, blobs)
+
+    async with session_factory() as session:
+        document = await session.get(UploadedDocument, document_id)
+        assert document is not None
+        session.add(parse_job(case_id, document_id, document.organization_id))
+        await session.commit()
+
+    await run_worker_once(session_factory, llamaparse_with(successful_handler()), blobs)
+
+    async with session_factory() as session:
+        job = await session.scalar(sa.select(AnalysisJob))
+        document = await session.get(UploadedDocument, document_id)
+        assert job is not None and job.status.value == "completed"
+        assert document is not None and document.parse_status is ParseStatus.parsed
 
 
 def test_parsed_document_serializes_to_json() -> None:

@@ -21,6 +21,7 @@ overwriting a stored dossier, on both POSIX and Windows.
 import hashlib
 import hmac
 import json
+import os
 import shutil
 import time
 import uuid
@@ -49,20 +50,37 @@ class LocalBlobStore:
 
     def __init__(self, root: str | Path, *, signing_secret: str) -> None:
         self.root = Path(root).resolve()
-        self._objects = self.root / OBJECTS_DIRNAME
-        self._staging = self.root / STAGING_DIRNAME
+        # Both directories are created now and their canonical paths cached. Resolving a
+        # path that does not exist yet can yield a different form from resolving the same
+        # path once it does — on Windows, a short 8.3 name versus its long name — which
+        # made the containment check below depend on whether a concurrent write had
+        # already created the directory.
+        self._objects = (self.root / OBJECTS_DIRNAME)
+        self._staging = (self.root / STAGING_DIRNAME)
+        self._objects.mkdir(parents=True, exist_ok=True)
+        self._staging.mkdir(parents=True, exist_ok=True)
+        self._objects = self._objects.resolve()
+        self._staging = self._staging.resolve()
         self._signing_secret = signing_secret
 
     # ---------------------------------------------------------------- paths
 
     def _object_dir(self, key: str) -> Path:
+        """Map a key to its blob directory, lexically.
+
+        `validate_key` is the real guarantee: keys are a restricted character set with no
+        traversal, no absolute paths, and no trailing slash. This second check is only
+        belt and braces, so it must not touch the filesystem — `Path.resolve()` does, and
+        under concurrent writes Windows returned differently-formed paths for the same
+        location depending on whether a directory happened to exist yet, which made a
+        legitimate key look like an escape.
+        """
         validate_key(key)
-        target = (self._objects / key).resolve()
-        # validate_key already rejects traversal; this also catches a symlink component
-        # pointing outside the store.
-        if not target.is_relative_to(self._objects.resolve()):
+        target = self._objects.joinpath(key)
+        normalized = os.path.normpath(str(target))
+        if not normalized.startswith(str(self._objects) + os.sep):
             raise InvalidKey(f"Blob key escapes the storage root: {key!r}")
-        return target
+        return Path(normalized)
 
     # ---------------------------------------------------------------- writes
 

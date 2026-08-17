@@ -37,10 +37,20 @@ class JobType:
 
 @dataclass(frozen=True)
 class JobOutcome:
-    """What a handler reports back to the worker."""
+    """What a handler reports back to the worker.
+
+    Returning an outcome keeps the handler's own writes: the worker applies the outcome
+    in the same transaction and commits both together. Raising instead discards them,
+    which is right for an unexpected error and wrong for a failure the handler has
+    already recorded.
+
+    `retryable` distinguishes "try again later" from "this will never work". A missing
+    API key retried three times only delays the message a human has to act on.
+    """
 
     status: JobStatus
     error_message: str | None = None
+    retryable: bool = False
 
 
 def retry_delay(attempts: int) -> timedelta:
