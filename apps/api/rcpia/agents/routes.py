@@ -11,7 +11,9 @@ from datetime import datetime
 import sqlalchemy as sa
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 
+from rcpia.agents.pi_adapter import SAFE_AGENT_NAME
 from rcpia.agents.service import DEFAULT_AGENT_ROLE
 from rcpia.auth.dependencies import CurrentUser, SessionDep, protected_router
 from rcpia.cases import completeness
@@ -31,8 +33,16 @@ LIVE_JOB_STATUSES = (JobStatus.queued, JobStatus.running, JobStatus.waiting_for_
 
 
 class AnalysisRequest(BaseModel):
-    agent_role: str = Field(default=DEFAULT_AGENT_ROLE, min_length=1, max_length=64)
+    # `agent_role` becomes a directory name, so it is constrained at the edge as well as
+    # in the adapter. Two checks, because this value crosses a process boundary in a job
+    # payload and the second reader cannot assume the first one ran.
+    agent_role: str = Field(default=DEFAULT_AGENT_ROLE, pattern=SAFE_AGENT_NAME.pattern)
     clinical_question: str | None = Field(default=None, max_length=2000)
+
+
+def dedupe_key_for(case_id: uuid.UUID, agent_role: str) -> str:
+    """Names the work: this agent, on this case. Enforced by a partial unique index."""
+    return f"{JobType.RUN_AGENT}:{case_id}:{agent_role}"
 
 
 class AnalysisJobRead(BaseModel):
@@ -86,20 +96,12 @@ async def start_analysis(
             "Aucune version du tableau de données : l'extraction n'a pas encore abouti.",
         )
 
-    # One live run per agent and case. Pressing the button twice must not buy two
-    # opinions on the same question.
-    existing = await session.scalar(
-        sa.select(AnalysisJob)
-        .where(
-            AnalysisJob.case_id == case.id,
-            AnalysisJob.organization_id == case.organization_id,
-            AnalysisJob.job_type == JobType.RUN_AGENT,
-            AnalysisJob.status.in_(LIVE_JOB_STATUSES),
-            AnalysisJob.payload["agent_role"].astext == payload.agent_role,
-        )
-        .order_by(AnalysisJob.created_at.desc())
-        .limit(1)
-    )
+    # One live run per agent and case. The lookup below is a fast path only; the
+    # guarantee is the partial unique index on `dedupe_key`, because between this SELECT
+    # and the INSERT a concurrent request can do exactly the same thing. The
+    # IntegrityError branch after the insert is what actually holds the line.
+    dedupe_key = dedupe_key_for(case.id, payload.agent_role)
+    existing = await _live_job(session, dedupe_key)
     if existing is not None:
         if existing.status is JobStatus.waiting_for_user:
             # The job was parked for a missing field, and the checks above have just
@@ -136,34 +138,54 @@ async def start_analysis(
             created_at=existing.created_at,
         )
 
-    job = await enqueue(
-        session,
-        case_id=case.id,
-        organization_id=case.organization_id,
-        job_type=JobType.RUN_AGENT,
-        payload={
-            "agent_role": payload.agent_role,
-            "clinical_question": payload.clinical_question,
-            # Pinned, so a correction made while the job waits does not silently change
-            # the question the agent was asked.
-            "ledger_version": version.version,
-        },
-    )
-    session.add(
-        AuditEvent(
-            organization_id=case.organization_id,
+    try:
+        job = await enqueue(
+            session,
             case_id=case.id,
-            actor_user_id=user.id,
-            event_type="agent.run_requested",
-            entity_type="analysis_jobs",
-            entity_id=job.id,
+            organization_id=case.organization_id,
+            job_type=JobType.RUN_AGENT,
             payload={
                 "agent_role": payload.agent_role,
+                "clinical_question": payload.clinical_question,
+                # Pinned, so a correction made while the job waits does not silently
+                # change the question the agent was asked.
                 "ledger_version": version.version,
             },
+            dedupe_key=dedupe_key,
         )
-    )
-    await session.commit()
+        session.add(
+            AuditEvent(
+                organization_id=case.organization_id,
+                case_id=case.id,
+                actor_user_id=user.id,
+                event_type="agent.run_requested",
+                entity_type="analysis_jobs",
+                entity_id=job.id,
+                payload={
+                    "agent_role": payload.agent_role,
+                    "ledger_version": version.version,
+                },
+            )
+        )
+        await session.commit()
+    except IntegrityError:
+        # A concurrent request won the race. Its job is the one live job, and returning
+        # it is the same answer this request would have given had it arrived a moment
+        # later.
+        await session.rollback()
+        concurrent = await _live_job(session, dedupe_key)
+        if concurrent is None:  # pragma: no cover - it settled between the two queries
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Une analyse est déjà en cours pour ce dossier.",
+            ) from None
+        return AnalysisJobRead(
+            job_id=concurrent.id,
+            status=str(concurrent.status),
+            agent_role=payload.agent_role,
+            created_at=concurrent.created_at,
+        )
+
     # `created_at` is a server default, and an async session cannot load it lazily.
     await session.refresh(job)
 
@@ -172,6 +194,16 @@ async def start_analysis(
         status=str(job.status),
         agent_role=payload.agent_role,
         created_at=job.created_at,
+    )
+
+
+async def _live_job(session: SessionDep, dedupe_key: str) -> AnalysisJob | None:
+    """The one job the partial unique index permits to be live for this key."""
+    return await session.scalar(
+        sa.select(AnalysisJob).where(
+            AnalysisJob.dedupe_key == dedupe_key,
+            AnalysisJob.status.in_(LIVE_JOB_STATUSES),
+        )
     )
 
 

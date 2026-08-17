@@ -30,10 +30,18 @@ from rcpia.agents.schemas import (
     agent_output_json_schema,
 )
 from rcpia.cases import completeness
+from rcpia.cases.completeness import BLOCKING_FIELDS
+from rcpia.cases.fact_schema import required_fields_for
 from rcpia.cases.ledger import AMBER, RED, LedgerEntry, LedgerReading
-from rcpia.core.models import Case, CaseLedgerVersion, DocumentChunk
+from rcpia.core.models import CancerType, Case, CaseLedgerVersion, DocumentChunk
 
 MAX_SNIPPET_CHARACTERS = 4000
+
+# A bundle has to fit in the model's context window. These are deliberately blunt: the
+# point is that a large case degrades in a way RCPia chooses and declares, rather than
+# failing as a provider error nobody can explain to a clinician.
+MAX_SNIPPETS = 250
+MAX_BUNDLE_BYTES = 1_000_000
 
 # What every specialist agent is bound by, whatever its speciality. These are constraints
 # on the *output*, so they belong in the bundle rather than only in `brain.md`: the bundle
@@ -69,6 +77,10 @@ class BundleError(Exception):
 
 class LedgerNotReady(BundleError):
     """No ledger snapshot exists yet, so there is nothing to reason about."""
+
+
+class BundleTooLarge(BundleError):
+    """Even after prioritising, the case does not fit in one bundle."""
 
 
 @dataclass(frozen=True)
@@ -167,20 +179,29 @@ async def build_bundle(
     # One id per distinct excerpt: two fields read from the same line cite the same
     # snippet, which is what a reviewer expects to see.
     ids_by_excerpt: dict[tuple[str, str | None], str] = {}
-    ledger_fields: list[LedgerField] = []
-    conflicts: list[ConflictingField] = []
+    source_ids_by_key: dict[str, list[str]] = {}
+    dropped: list[str] = []
 
-    for entry in entries:
+    # Snippets are assigned in order of clinical weight, so that when a large case runs
+    # out of room it is the least consequential sources that go. A bundle truncated by
+    # arrival order would just as easily drop the muscle-invasion line.
+    for entry in sorted(entries, key=lambda item: _priority(item, case.cancer_type)):
         source_ids: list[str] = []
+        lost = False
 
         for reading in _readings_of(entry):
             excerpt = (reading.source_excerpt or "").strip()
-            if not excerpt:
+            # A snippet with no document behind it cannot be traced back, and an
+            # untraceable quotation is worse than none.
+            if not excerpt or not reading.source_document_id:
                 continue
             key = (excerpt[:MAX_SNIPPET_CHARACTERS], reading.source_chunk_id)
             snippet_id = ids_by_excerpt.get(key)
 
             if snippet_id is None:
+                if len(snippets) >= MAX_SNIPPETS:
+                    lost = True
+                    continue
                 snippet_id = f"snip-{len(snippets) + 1:03d}"
                 ids_by_excerpt[key] = snippet_id
                 chunk = (
@@ -192,7 +213,7 @@ async def build_bundle(
                     SourceSnippet(
                         id=snippet_id,
                         text=key[0],
-                        source_document_id=reading.source_document_id or "",
+                        source_document_id=reading.source_document_id,
                         source_chunk_id=reading.source_chunk_id,
                         page=chunk.page if chunk else None,
                         section=chunk.section if chunk else None,
@@ -201,33 +222,47 @@ async def build_bundle(
             if snippet_id not in source_ids:
                 source_ids.append(snippet_id)
 
-        ledger_fields.append(
-            LedgerField(
-                key=entry.key,
-                label=entry.label,
-                value=entry.value,
-                unit=entry.unit,
-                status=entry.status,
-                source_ids=source_ids,
-            )
-        )
+        source_ids_by_key[entry.key] = source_ids
+        if lost:
+            dropped.append(entry.label)
 
-        # A contradiction is stated as one, with each reading's own source. Presenting
-        # only the first value would hide the very thing a clinician has to settle.
-        if entry.highlight == AMBER and len(entry.readings) > 1:
-            conflicts.append(
-                ConflictingField(
-                    field=entry.key,
-                    values=[reading.value or "" for reading in entry.readings],
-                    source_ids=source_ids,
-                )
-            )
+    # The ledger itself keeps schema order, which is the order a clinician reads it in.
+    ledger_fields = [
+        LedgerField(
+            key=entry.key,
+            label=entry.label,
+            value=entry.value,
+            unit=entry.unit,
+            status=entry.status,
+            origin=entry.origin if entry.origin in ("machine", "human") else "machine",
+            # A correction has no excerpt to cite, so its reason is the only provenance
+            # it has. Without it the value would look like an unsourced machine reading.
+            correction_note=entry.note if entry.corrected else None,
+            source_ids=source_ids_by_key.get(entry.key, []),
+        )
+        for entry in entries
+    ]
+
+    # A contradiction is stated as one, with each reading's own source. Presenting only
+    # the first value would hide the very thing a clinician has to settle.
+    conflicts = [
+        ConflictingField(
+            field=entry.key,
+            values=[reading.value or "" for reading in entry.readings],
+            source_ids=source_ids_by_key.get(entry.key, []),
+        )
+        for entry in entries
+        if entry.highlight == AMBER and len(entry.readings) > 1
+    ]
 
     inputs = BundleInputs(
         case_id=str(case.id),
         agent_role=agent_role,
         cancer_type=str(case.cancer_type),
         clinical_question=clinical_question,
+        # Free text can carry another agent's opinion, so a bundle carrying a question is
+        # not an independent first pass and must not claim to be.
+        first_pass=not clinical_question,
         ledger_version=version.version,
         case_ledger=ledger_fields,
         source_snippets=snippets,
@@ -249,17 +284,58 @@ async def build_bundle(
             "Aucun extrait source n'est disponible : appuyez-vous sur le tableau de "
             "données et dites-le explicitement."
         )
+    if dropped:
+        # Declared, never silent. An agent reasoning from a truncated dossier without
+        # being told it was truncated would report a confidence it has not earned.
+        constraints.append(
+            "Dossier volumineux : les extraits sources de certains champs ont été omis "
+            f"faute de place ({', '.join(sorted(dropped))}). Traitez ces champs comme "
+            "non sourcés et signalez-le."
+        )
+    if clinical_question:
+        constraints.append(
+            "Une question a été posée par un opérateur : cet avis n'est donc pas un "
+            "premier passage indépendant."
+        )
 
-    return BuiltBundle(
-        bundle=TaskBundle(
-            goal=GOAL,
-            audience=AUDIENCE,
-            inputs=inputs,
-            # By field name, not by the `schema` alias: `schema_` avoids shadowing
-            # pydantic's own attribute, and the alias is what serialization emits.
-            output_format=OutputFormat(schema_=agent_output_json_schema()),
-            constraints=constraints,
-        ),
-        ledger_version=version,
-        report=report,
+    bundle = TaskBundle(
+        goal=GOAL,
+        audience=AUDIENCE,
+        inputs=inputs,
+        # By field name, not by the `schema` alias: `schema_` avoids shadowing
+        # pydantic's own attribute, and the alias is what serialization emits.
+        output_format=OutputFormat(schema_=agent_output_json_schema()),
+        constraints=constraints,
     )
+
+    # Refused, not silently trimmed further. A case this large is a situation a person
+    # has to look at, and a provider error would tell them nothing about why.
+    size = len(bundle.model_dump_json(by_alias=True).encode("utf-8"))
+    if size > MAX_BUNDLE_BYTES:
+        raise BundleTooLarge(
+            f"Le dossier dépasse la taille transmissible à un agent "
+            f"({size // 1024} Ko pour un maximum de {MAX_BUNDLE_BYTES // 1024} Ko). "
+            "Réduisez le nombre de documents ou scindez l'analyse."
+        )
+
+    return BuiltBundle(bundle=bundle, ledger_version=version, report=report)
+
+
+def _priority(entry: LedgerEntry, cancer_type: CancerType) -> tuple[int, str]:
+    """Rank a field by how badly its sources are needed, lowest first.
+
+    Blocking fields decide whether an answer is possible at all; a contradiction is the
+    thing a clinician must settle; a correction carries a person's judgment. Those three
+    keep their sources longest.
+    """
+    if entry.key in BLOCKING_FIELDS.get(cancer_type, ()):
+        rank = 0
+    elif entry.highlight == AMBER:
+        rank = 1
+    elif entry.corrected:
+        rank = 2
+    elif entry.key in {spec.key for spec in required_fields_for(cancer_type)}:
+        rank = 3
+    else:
+        rank = 4
+    return rank, entry.key

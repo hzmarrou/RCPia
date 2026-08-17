@@ -33,7 +33,13 @@ from rcpia.agents.pi_adapter import (
     PiRunFailed,
     PiRunResult,
 )
-from rcpia.agents.schemas import AgentOutput, TaskBundle, UncitedEvidence, check_citations
+from rcpia.agents.schemas import (
+    AgentOutput,
+    TaskBundle,
+    UncitedEvidence,
+    UngroundedRecommendation,
+    check_citations,
+)
 from rcpia.cases.ledger import latest_version
 from rcpia.core.models import (
     AgentRun,
@@ -132,28 +138,56 @@ async def run_agent(
         await _record_failure(session, job=job, built=built, message=str(exc))
         return _terminal(str(exc))
     except PiRunFailed as exc:
+        # A run that failed partway may still have written the transcript explaining why,
+        # and that is precisely what someone debugging it will want.
+        archived = False
+        if exc.session_bytes:
+            archived = await _archive_session(
+                blobs,
+                case_id=case.id,
+                agent_role=agent_role,
+                run_id=run_id,
+                session_bytes=exc.session_bytes,
+            )
         # The bundle holds patient data, so it goes even when the run that needed it
         # never started.
         adapter.cleanup(case_id=case.id, agent_name=agent_role, run_id=run_id)
-        await _record_failure(session, job=job, built=built, message=str(exc))
+        await _record_failure(
+            session,
+            job=job,
+            built=built,
+            message=str(exc),
+            run_id=run_id if exc.session_bytes else None,
+            archived=archived,
+        )
         return _retryable(str(exc))
+
+    # The transcript is archived whether the answer turns out to be usable or not: a
+    # rejected answer is exactly the case where someone will want to read what was said.
+    archived = await _archive_session(
+        blobs,
+        case_id=case.id,
+        agent_role=agent_role,
+        run_id=run_id,
+        session_bytes=result.session_bytes,
+    )
+    adapter.cleanup(case_id=case.id, agent_name=agent_role, run_id=run_id)
 
     try:
         output = _validated_output(result, built.bundle)
     except PiOutputInvalid as exc:
         await _record_failure(
-            session, job=job, built=built, message=str(exc), run_id=run_id, result=result
+            session,
+            job=job,
+            built=built,
+            message=str(exc),
+            run_id=run_id,
+            result=result,
+            archived=archived,
         )
         # A model that answered badly once may answer correctly next time, so this is
         # worth retrying — but only within the job's own attempt budget.
         return _retryable(str(exc))
-    finally:
-        # The transcript is archived whether the answer was usable or not: a rejected
-        # answer is exactly the case where someone will want to read what was said.
-        await _archive_session(
-            blobs, case_id=case.id, agent_role=agent_role, run_id=run_id, result=result
-        )
-        adapter.cleanup(case_id=case.id, agent_name=agent_role, run_id=run_id)
 
     run = AgentRun(
         id=run_id,
@@ -169,6 +203,7 @@ async def run_agent(
         bundle=built.bundle.model_dump(by_alias=True),
         output=output.model_dump(),
         session_blob_key=pi_session_key(case.id, agent_role, run_id),
+        session_archived=archived,
         pi_session_id=result.session_id,
         input_tokens=result.usage.input_tokens,
         output_tokens=result.usage.output_tokens,
@@ -246,7 +281,7 @@ def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
 
     try:
         check_citations(output, bundle)
-    except UncitedEvidence as exc:
+    except (UncitedEvidence, UngroundedRecommendation) as exc:
         raise PiOutputInvalid(str(exc)) from exc
 
     return output
@@ -258,25 +293,27 @@ async def _archive_session(
     case_id: uuid.UUID,
     agent_role: str,
     run_id: uuid.UUID,
-    result: PiRunResult,
-) -> None:
-    """Store the Pi transcript.
+    session_bytes: bytes,
+) -> bool:
+    """Store the Pi transcript. Returns whether it actually landed.
 
-    A storage failure is logged, not raised: the transcript is an audit artifact, and
-    losing it must not also lose the opinion PostgreSQL is about to record. The run's
-    `session_blob_key` may therefore point at a blob that failed to land, which the
-    archive check in operations is there to notice.
+    A storage failure is reported, not raised: the transcript is an audit artifact, and
+    losing it must not also lose the opinion PostgreSQL is about to record. But the run
+    must not then claim a transcript exists — `session_archived` records what is true, so
+    a reconciliation pass can find the runs whose transcript never arrived.
     """
     try:
         await blobs.put_bytes(
             pi_session_key(case_id, agent_role, run_id),
-            result.session_bytes,
+            session_bytes,
             SESSION_CONTENT_TYPE,
         )
     except (StorageError, ValueError):
         logger.warning(
             "could not archive the Pi session for case %s agent %s", case_id, agent_role
         )
+        return False
+    return True
 
 
 async def _record_failure(
@@ -287,6 +324,7 @@ async def _record_failure(
     message: str,
     run_id: uuid.UUID | None = None,
     result: PiRunResult | None = None,
+    archived: bool = False,
 ) -> None:
     """Record the attempt that failed, in the caller's transaction."""
     agent_role = built.bundle.inputs.agent_role
@@ -303,12 +341,13 @@ async def _record_failure(
         model=result.model if result else None,
         bundle=built.bundle.model_dump(by_alias=True),
         error_message=message,
-        # Only a run that produced a transcript has one to point at.
+        # Only a run whose transcript reached storage has one to point at. A crashed run
+        # that wrote nothing, or one whose archive failed, says so rather than recording
+        # a key nobody can follow.
         session_blob_key=(
-            pi_session_key(job.case_id, agent_role, run_id)
-            if result is not None and run_id is not None
-            else None
+            pi_session_key(job.case_id, agent_role, run_id) if run_id is not None else None
         ),
+        session_archived=archived,
         pi_session_id=result.session_id if result else None,
         input_tokens=result.usage.input_tokens if result else 0,
         output_tokens=result.usage.output_tokens if result else 0,

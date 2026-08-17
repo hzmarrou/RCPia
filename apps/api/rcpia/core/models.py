@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -506,6 +507,9 @@ class CaseLedgerVersion(TimestampMixin, Base):
         # Target for the agent run -> ledger version composite key, which carries the
         # case along: a run cannot claim to have read another case's snapshot.
         UniqueConstraint("id", "case_id", name="uq_case_ledger_versions_id_case"),
+        # ... and this one carries the version number, so a run cannot record a number
+        # that is not the one belonging to the snapshot it points at.
+        UniqueConstraint("id", "version", name="uq_case_ledger_versions_id_version"),
     )
 
 
@@ -546,6 +550,12 @@ class AgentRun(TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
 
     session_blob_key: Mapped[str | None] = mapped_column(String(500))
+    # Whether the transcript actually landed in blob storage. A key on its own is a claim
+    # about another system; this is what the row knows to be true, and what a
+    # reconciliation job looks for.
+    session_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     pi_session_id: Mapped[str | None] = mapped_column(String(100))
 
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -575,12 +585,43 @@ class AgentRun(TimestampMixin, Base):
             ondelete="RESTRICT",
             name="fk_agent_runs_job_same_case",
         ),
+        # The stored version number must be the one belonging to the referenced snapshot,
+        # not merely some number. Otherwise a run could claim to have read version 1
+        # while pointing at version 7.
+        ForeignKeyConstraint(
+            ["ledger_version_id", "ledger_version"],
+            ["case_ledger_versions.id", "case_ledger_versions.version"],
+            ondelete="RESTRICT",
+            name="fk_agent_runs_ledger_version_number_matches",
+        ),
         # A successful run without an opinion, or a failed one without a reason, would be
         # a row nobody can act on.
         CheckConstraint(
             "(status = 'succeeded' AND output IS NOT NULL) "
             "OR (status = 'failed' AND error_message IS NOT NULL)",
             name="agent_runs_carry_a_result",
+        ),
+        # A recommendation is only reviewable if the row says what it read, which job
+        # produced it, and which deployment answered. A successful run missing any of
+        # those is not an audit record, and the database is where that is settled.
+        CheckConstraint(
+            "status <> 'succeeded' OR ("
+            "ledger_version_id IS NOT NULL AND ledger_version IS NOT NULL "
+            "AND job_id IS NOT NULL "
+            "AND provider IS NOT NULL AND model IS NOT NULL "
+            "AND session_blob_key IS NOT NULL "
+            # jsonb_exists, not the `?` operator: `?` is a bind parameter to the driver.
+            "AND jsonb_exists(bundle, 'inputs'))",
+            name="successful_runs_are_reviewable",
+        ),
+        # Both halves of the version reference travel together or not at all.
+        CheckConstraint(
+            "(ledger_version_id IS NULL) = (ledger_version IS NULL)",
+            name="ledger_version_reference_is_complete",
+        ),
+        CheckConstraint(
+            "session_archived = false OR session_blob_key IS NOT NULL",
+            name="an_archived_transcript_has_a_key",
         ),
         Index("ix_agent_runs_case_id_created_at", "case_id", "created_at"),
         Index("ix_agent_runs_case_id_agent_role", "case_id", "agent_role"),
@@ -598,6 +639,10 @@ class AnalysisJob(TimestampMixin, Base):
         _enum(JobStatus, "job_status"), nullable=False, default=JobStatus.queued
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # Identifies work that must not be queued twice — "this agent, on this case". A
+    # partial unique index over the live statuses makes that a database guarantee rather
+    # than a check the request performs and a concurrent request invalidates.
+    dedupe_key: Mapped[str | None] = mapped_column(String(200))
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=3, server_default=text("3")
@@ -644,6 +689,17 @@ class AnalysisJob(TimestampMixin, Base):
             "ix_analysis_jobs_running_lease_expires_at",
             "lease_expires_at",
             postgresql_where=text("status = 'running'"),
+        ),
+        # At most one live job per dedupe key. Finished jobs are excluded, so the same
+        # work can be requested again once the previous run has settled.
+        Index(
+            "uq_analysis_jobs_live_dedupe_key",
+            "dedupe_key",
+            unique=True,
+            postgresql_where=text(
+                "dedupe_key IS NOT NULL "
+                "AND status IN ('queued', 'running', 'waiting_for_user')"
+            ),
         ),
     )
 

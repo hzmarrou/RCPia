@@ -13,6 +13,7 @@ an instruction in `brain.md` asking the model to ignore something it can see.
 Clinical text is French; JSON keys are English, because they are code.
 """
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -20,6 +21,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # One A4 page, the limit the design fixes for each agent's rationale.
 MAX_RATIONALE_CHARACTERS = 3000
 MAX_TEXT = 4000
+
+# The shape of an id RCPia hands out. Used to catch citations written into prose, where
+# no allowlist would otherwise look.
+CITATION_IN_PROSE = re.compile(r"\b(?:snip|ev)-\d{1,6}\b")
 
 
 class Strict(BaseModel):
@@ -42,7 +47,9 @@ class SourceSnippet(Strict):
 
     id: str = Field(min_length=1, max_length=64)
     text: str = Field(min_length=1, max_length=MAX_TEXT)
-    source_document_id: str
+    # A snippet with no document behind it is not traceable, which is the only reason
+    # snippets exist.
+    source_document_id: str = Field(min_length=1, max_length=64)
     source_chunk_id: str | None = None
     page: int | None = None
     section: str | None = None
@@ -68,13 +75,25 @@ class ConflictingField(Strict):
 
 
 class LedgerField(Strict):
-    """One field of the case ledger as the agent sees it."""
+    """One field of the case ledger as the agent sees it.
+
+    `origin` distinguishes a value a regex scraped off a form from one a clinician
+    deliberately entered, and `correction_note` carries the reason they gave. A human
+    correction has no source excerpt to cite, so without these two fields it would arrive
+    looking like an unsourced machine reading — which is the opposite of what it is.
+
+    Being clinician-entered is *provenance*, not proof: the agent is told who recorded a
+    value, and is told in the constraints not to treat that as stronger evidence than the
+    dossier itself.
+    """
 
     key: str
     label: str
     value: str | None = None
     unit: str | None = None
     status: str
+    origin: Literal["machine", "human"] = "machine"
+    correction_note: str | None = Field(default=None, max_length=MAX_TEXT)
     source_ids: list[str] = Field(default_factory=list)
 
 
@@ -88,7 +107,12 @@ class BundleInputs(Strict):
     case_id: str
     agent_role: str
     cancer_type: str
-    clinical_question: str | None = None
+    # Free text an operator may supply. It is the one channel through which another
+    # agent's opinion could still reach a first pass — nothing can stop someone pasting
+    # one in — so a bundle carrying a custom question is not an independent first pass
+    # and says so here rather than pretending otherwise.
+    clinical_question: str | None = Field(default=None, max_length=MAX_TEXT)
+    first_pass: bool = True
     ledger_version: int
     case_ledger: list[LedgerField] = Field(default_factory=list)
     source_snippets: list[SourceSnippet] = Field(default_factory=list)
@@ -98,13 +122,47 @@ class BundleInputs(Strict):
     safety_constraints: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def snippet_ids_are_unique(self) -> "BundleInputs":
+    def citable_ids_are_unique(self) -> "BundleInputs":
+        """Across both collections, not within each.
+
+        An id shared by a snippet and a guideline passage would make every citation of it
+        ambiguous, and a reviewer checking the reference would have no way to tell which
+        of the two the agent meant.
+        """
+        snippets = [item.id for item in self.source_snippets]
+        passages = [item.id for item in self.guideline_passages]
+
         for label, items in (
-            ("source_snippets", [item.id for item in self.source_snippets]),
-            ("guideline_passages", [item.id for item in self.guideline_passages]),
+            ("source_snippets", snippets),
+            ("guideline_passages", passages),
         ):
             if len(items) != len(set(items)):
                 raise ValueError(f"{label} contains duplicate ids")
+
+        shared = sorted(set(snippets) & set(passages))
+        if shared:
+            raise ValueError(
+                "the same id is used by a snippet and a guideline passage, making a "
+                f"citation ambiguous: {', '.join(shared)}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def a_custom_question_is_not_a_first_pass(self) -> "BundleInputs":
+        """`first_pass` states a fact about the bundle rather than accepting a claim.
+
+        It is derived from whether an operator supplied a question, so it cannot drift
+        out of step with the thing it describes. Setting it explicitly to the wrong value
+        is rejected rather than quietly corrected: silently fixing a safety flag would
+        hide a caller that misunderstood what it means.
+        """
+        derived = not self.clinical_question
+        if "first_pass" in self.model_fields_set and self.first_pass != derived:
+            raise ValueError(
+                "clinical_question is operator-supplied free text, so a bundle carrying "
+                f"one cannot declare first_pass={self.first_pass}"
+            )
+        self.first_pass = derived
         return self
 
 
@@ -201,11 +259,38 @@ class UncitedEvidence(ValueError):
     """The agent cited an id it was never given."""
 
 
+class UngroundedRecommendation(ValueError):
+    """The agent recommended something without citing any of the evidence it was given."""
+
+
+def _prose_of(output: AgentOutput) -> list[str]:
+    """Every free-text field an agent could write a citation into."""
+    return [
+        output.recommendation,
+        output.rationale,
+        *output.key_facts_used,
+        *output.contraindications,
+        *output.uncertainty_notes,
+        *output.missing_information,
+        *(reference.supports for reference in output.evidence_references),
+        *(
+            text
+            for option in (*output.alternatives, *output.rejected_options)
+            for text in (option.option, option.rationale or "")
+        ),
+    ]
+
+
 def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
-    """Reject citations the agent invented.
+    """Reject citations the agent invented, and recommendations grounded in nothing.
 
     A fabricated reference is worse than no reference: it looks like grounding while
     being none, and a reviewer would have to check every id by hand to notice.
+
+    Prose is scanned too. `evidence_references` is the structured channel, but an agent
+    that writes "selon snip-999" into its rationale has made a claim of provenance that no
+    allowlist would otherwise inspect — and a reviewer reading the text would take it at
+    face value.
     """
     allowed = bundle.citable_ids()
     cited = {reference.id for reference in output.evidence_references}
@@ -214,11 +299,23 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
         for option in (*output.alternatives, *output.rejected_options)
         for evidence_id in option.evidence_ids
     }
+    in_prose = {
+        found for text in _prose_of(output) for found in CITATION_IN_PROSE.findall(text)
+    }
 
-    invented = sorted(cited - allowed)
+    invented = sorted((cited | in_prose) - allowed)
     if invented:
         raise UncitedEvidence(
-            "Agent cited evidence it was not given: " + ", ".join(invented)
+            "L'agent a cité des preuves qui ne lui ont pas été fournies : "
+            + ", ".join(invented)
+        )
+
+    # Citing nothing is honest only when there was nothing to cite. With evidence in the
+    # bundle, an uncited recommendation is an assertion, and RCPia cannot stand behind it.
+    if allowed and not cited and not output.recommendation_withheld:
+        raise UngroundedRecommendation(
+            f"L'agent a formulé une recommandation sans citer aucune des {len(allowed)} "
+            "sources qui lui ont été fournies."
         )
 
 

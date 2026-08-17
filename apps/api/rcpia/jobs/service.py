@@ -48,12 +48,20 @@ async def enqueue(
     payload: dict | None = None,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     available_at: datetime | None = None,
+    dedupe_key: str | None = None,
 ) -> AnalysisJob:
+    """Queue a job.
+
+    `dedupe_key` names work that must not be queued twice while a previous request is
+    still live. A partial unique index enforces it, so a second caller raises
+    `IntegrityError` rather than quietly creating a duplicate.
+    """
     job = AnalysisJob(
         case_id=case_id,
         organization_id=organization_id,
         job_type=job_type,
         payload=payload or {},
+        dedupe_key=dedupe_key,
         max_attempts=max_attempts,
         status=JobStatus.queued,
         available_at=available_at or DB_NOW,

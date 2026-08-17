@@ -228,6 +228,48 @@ async def test_a_fenced_code_block_is_unwrapped(
     assert result.output_json()["case_id"] == str(CASE_ID)
 
 
+async def test_an_answer_split_across_text_parts_is_rejoined(
+    adapter: PiAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A provider may stream one JSON answer as several parts of the same message.
+    Keeping only the final part would leave a fragment that parses as nothing."""
+    result = await run(adapter, monkeypatch, mode="split")
+
+    assert result.output_json()["case_id"] == str(CASE_ID)
+
+
+def test_parts_are_joined_within_a_message_but_not_across_messages() -> None:
+    """The two mistakes are opposites: joining across messages would concatenate a
+    preamble onto the answer, and not joining within one would truncate it."""
+    session = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Je vais analyser."}],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": '{"a":'},
+                            {"type": "text", "text": ' "b"}'},
+                        ],
+                    },
+                }
+            ),
+        ]
+    )
+
+    assert parse_session(session).output_text == '{"a": "b"}'
+
+
 async def test_thinking_and_tool_calls_are_not_part_of_the_answer(
     adapter: PiAdapter, monkeypatch: pytest.MonkeyPatch
 ) -> None:

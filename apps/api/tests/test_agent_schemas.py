@@ -20,6 +20,7 @@ from rcpia.agents.schemas import (
     TaskBundle,
     TreatmentOption,
     UncitedEvidence,
+    UngroundedRecommendation,
     agent_output_json_schema,
     check_citations,
 )
@@ -28,13 +29,13 @@ CASE_ID = "6f1b2c3d-4e5f-4071-8293-a4b5c6d7e8f9"
 
 
 def bundle(**overrides) -> TaskBundle:
-    inputs = BundleInputs(
-        case_id=CASE_ID,
-        agent_role="urology_oncology",
-        cancer_type="bladder",
-        clinical_question="Stratégie thérapeutique pour TVIM ?",
-        ledger_version=1,
-        case_ledger=[
+    values: dict = {
+        "case_id": CASE_ID,
+        "agent_role": "urology_oncology",
+        "cancer_type": "bladder",
+        "clinical_question": "Stratégie thérapeutique pour TVIM ?",
+        "ledger_version": 1,
+        "case_ledger": [
             LedgerField(
                 key="muscle_invasion",
                 label="Infiltration du muscle",
@@ -43,7 +44,7 @@ def bundle(**overrides) -> TaskBundle:
                 source_ids=["snip-001"],
             )
         ],
-        source_snippets=[
+        "source_snippets": [
             SourceSnippet(
                 id="snip-001",
                 text="Infiltration du muscle : Oui",
@@ -52,8 +53,9 @@ def bundle(**overrides) -> TaskBundle:
                 page=2,
             )
         ],
-        **overrides,
-    )
+    }
+    values.update(overrides)
+    inputs = BundleInputs(**values)
     return TaskBundle(
         goal="Produire un avis urologique structuré et provisoire.",
         audience="Agent de synthèse RCP et relecteurs experts humains",
@@ -269,15 +271,93 @@ def test_valid_citations_pass() -> None:
 
 
 def test_an_agent_may_cite_nothing_when_it_was_given_nothing() -> None:
-    """Until evidence ingestion exists, guideline_passages is empty; that must not force
-    the agent to invent a citation."""
-    task = bundle()
+    """A dossier RCPia could not quote must not force the agent to invent a citation."""
+    task = bundle(source_snippets=[])
     ungrounded = output(
         evidence_references=[],
-        uncertainty_notes=["Aucun référentiel fourni : avis fondé sur le dossier seul."],
+        uncertainty_notes=["Aucune source citable : avis fondé sur le tableau seul."],
     )
 
     check_citations(ungrounded, task)
+
+
+def test_a_recommendation_must_cite_something_when_there_was_something_to_cite() -> None:
+    """An uncited recommendation drawn from evidence in hand is an assertion, and looks
+    identical to a grounded one on the page."""
+    task = bundle()
+    ungrounded = output(evidence_references=[])
+
+    with pytest.raises(UngroundedRecommendation):
+        check_citations(ungrounded, task)
+
+
+def test_withholding_a_recommendation_needs_no_citation() -> None:
+    """"I cannot advise" is a refusal to recommend, not an ungrounded recommendation."""
+    task = bundle()
+    withheld = output(
+        evidence_references=[],
+        recommendation="Aucune recommandation possible en l'état.",
+        recommendation_withheld=True,
+        missing_information=["Statut d'infiltration du muscle non documenté"],
+    )
+
+    check_citations(withheld, task)
+
+
+def test_a_citation_written_into_prose_is_checked_too() -> None:
+    """`evidence_references` is the structured channel, but a reviewer reads the prose,
+    and "selon snip-999" is a claim of provenance no allowlist would otherwise inspect."""
+    task = bundle()
+    smuggled = output(
+        evidence_references=[EvidenceReference(id="snip-001", supports="Muscle infiltré")],
+        rationale="Selon snip-999, la fonction rénale contre-indique le cisplatine.",
+    )
+
+    with pytest.raises(UncitedEvidence, match="snip-999"):
+        check_citations(smuggled, task)
+
+
+def test_an_id_cannot_belong_to_both_a_snippet_and_a_guideline() -> None:
+    """A citation of a shared id would be ambiguous, and unresolvably so for a reviewer."""
+    with pytest.raises(ValidationError, match="ambiguous"):
+        BundleInputs(
+            case_id=CASE_ID,
+            agent_role="urology_oncology",
+            cancer_type="bladder",
+            ledger_version=1,
+            source_snippets=[
+                SourceSnippet(id="x-1", text="a", source_document_id="doc-1")
+            ],
+            guideline_passages=[GuidelinePassage(id="x-1", text="b", source="EAU 2026")],
+        )
+
+
+def test_a_snippet_needs_a_document_behind_it() -> None:
+    """Traceability is the only reason snippets exist."""
+    with pytest.raises(ValidationError):
+        SourceSnippet(id="snip-001", text="…", source_document_id="")
+
+
+def test_a_bundle_carrying_an_operator_question_is_not_a_first_pass() -> None:
+    """Free text is the one channel through which another agent's opinion could still
+    reach a first pass, so the bundle records that it is no longer one."""
+    assert bundle().inputs.first_pass is False, "the fixture supplies a question"
+
+    without = bundle(clinical_question=None)
+    assert without.inputs.first_pass is True
+
+
+def test_claiming_independence_alongside_a_question_is_refused() -> None:
+    """Silently correcting a safety flag would hide a caller that misunderstood it."""
+    with pytest.raises(ValidationError, match="first_pass"):
+        BundleInputs(
+            case_id=CASE_ID,
+            agent_role="urology_oncology",
+            cancer_type="bladder",
+            ledger_version=1,
+            clinical_question="Que pensez-vous de l'avis de l'oncologue ?",
+            first_pass=True,
+        )
 
 
 def test_the_schema_given_to_the_agent_describes_the_output_model() -> None:

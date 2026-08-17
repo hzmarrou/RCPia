@@ -11,6 +11,7 @@ The properties that carry clinical weight here:
 - an opinion, once recorded, cannot be edited into a different opinion.
 """
 
+import asyncio
 import sys
 import uuid
 from pathlib import Path
@@ -18,11 +19,12 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from rcpia.agents.bundle import build_bundle
+from rcpia.agents.bundle import BundleTooLarge, build_bundle
 from rcpia.agents.pi_adapter import PiAdapter
+from rcpia.agents.routes import dedupe_key_for
 from rcpia.agents.service import run_agent
 from rcpia.auth import security, throttle
 from rcpia.cases.facts import extract_case_facts
@@ -48,6 +50,7 @@ from rcpia.core.models import (
 )
 from rcpia.jobs.models import JobType
 from rcpia.main import app
+from rcpia.storage.base import StorageError
 from rcpia.storage.keys import pi_session_key
 from rcpia.storage.local import LocalBlobStore
 
@@ -196,11 +199,13 @@ async def agent_job(
     factory: async_sessionmaker[AsyncSession], case: Case, **payload
 ) -> uuid.UUID:
     async with factory() as session:
+        role = str(payload.get("agent_role", "urology_oncology"))
         job = AnalysisJob(
             case_id=case.id,
             organization_id=case.organization_id,
             job_type=JobType.RUN_AGENT,
             payload={"agent_role": "urology_oncology", **payload},
+            dedupe_key=dedupe_key_for(case.id, role),
             status=JobStatus.running,
         )
         session.add(job)
@@ -312,6 +317,85 @@ async def test_a_contradiction_reaches_the_agent_as_a_contradiction(
     assert set(conflicts["creatinine"].values) == {"17.33", "173.3"}
     # Both readings are citable, each with its own source.
     assert len(conflicts["creatinine"].source_ids) == 2
+
+
+async def test_a_clinicians_correction_arrives_as_a_clinicians_correction(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A correction has no excerpt to cite, so without its origin and its reason it would
+    reach the agent looking like an unsourced machine reading — the opposite of what it
+    is."""
+    user, case = await seed_case(session_factory)
+
+    async with session_factory() as session:
+        stored_user = await session.get(User, user.id)
+        stored_case = await session.get(Case, case.id)
+        assert stored_user is not None and stored_case is not None
+        await apply_correction(
+            session,
+            case=stored_case,
+            user=stored_user,
+            fact_type="who_status",
+            value="1",
+            note="Relevé au dossier papier lors de la consultation.",
+        )
+        await record_version(session, case=stored_case, change_reason="Correction")
+        await session.commit()
+
+        built = await build_bundle(
+            session,
+            case=case,
+            agent_role="urology_oncology",
+            version=await _latest_version(session, case),
+        )
+
+    fields = {field.key: field for field in built.bundle.inputs.case_ledger}
+    assert fields["who_status"].value == "1"
+    assert fields["who_status"].origin == "human"
+    assert "dossier papier" in (fields["who_status"].correction_note or "")
+    # Machine readings stay marked as such.
+    assert fields["muscle_invasion"].origin == "machine"
+
+
+async def test_a_large_dossier_loses_its_least_important_sources_and_says_so(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bundle has to fit in a context window. What it drops is chosen, and declared."""
+    monkeypatch.setattr("rcpia.agents.bundle.MAX_SNIPPETS", 2)
+    user, case = await seed_case(session_factory)
+
+    async with session_factory() as session:
+        built = await build_bundle(
+            session,
+            case=case,
+            agent_role="urology_oncology",
+            version=await _latest_version(session, case),
+        )
+
+    assert len(built.bundle.inputs.source_snippets) == 2
+    fields = {field.key: field for field in built.bundle.inputs.case_ledger}
+    # Muscle invasion decides the whole strategy, so it keeps its source.
+    assert fields["muscle_invasion"].source_ids
+    assert any("omis" in constraint for constraint in built.bundle.constraints)
+
+
+async def test_a_dossier_too_large_to_send_is_refused_not_truncated(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider error would tell nobody why. This does."""
+    monkeypatch.setattr("rcpia.agents.bundle.MAX_BUNDLE_BYTES", 500)
+    user, case = await seed_case(session_factory)
+
+    async with session_factory() as session:
+        with pytest.raises(BundleTooLarge, match="dépasse"):
+            await build_bundle(
+                session,
+                case=case,
+                agent_role="urology_oncology",
+                version=await _latest_version(session, case),
+            )
 
 
 async def test_the_bundle_has_no_room_for_another_agents_opinion(
@@ -512,6 +596,97 @@ async def test_a_crashed_run_is_retryable_and_leaves_a_record(
     assert list(adapter.work_root.rglob("*.json")) == []
 
 
+async def test_an_agent_role_cannot_walk_out_of_the_agents_directory(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`agent_role` becomes a directory name and originates in an HTTP request."""
+    user, case = await seed_case(session_factory)
+    job_id = await agent_job(session_factory, case, agent_role="../../etc")
+
+    outcome = await execute(session_factory, job_id, adapter, blobs, monkeypatch)
+
+    assert outcome is not None
+    assert outcome.retryable is False
+    assert "Unsafe agent name" in (outcome.error_message or "")
+
+
+async def test_the_api_refuses_an_agent_role_that_is_not_a_plain_name(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Checked at the edge as well, because the value crosses a process boundary."""
+    user, case = await seed_case(session_factory)
+    await sign_in(client, user)
+
+    response = await client.post(
+        f"/cases/{case.id}/analysis", json={"agent_role": "../../etc/passwd"}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_a_crashed_run_keeps_the_transcript_that_explains_it(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider error partway through writes the transcript someone needs to debug it;
+    discarding it would leave them with an exit code."""
+    user, case = await seed_case(session_factory)
+    job_id = await agent_job(session_factory, case)
+
+    await execute(session_factory, job_id, adapter, blobs, monkeypatch, mode="dieslate")
+
+    run = (await runs_for(session_factory, case))[0]
+    assert run.status is AgentRunStatus.failed
+    assert run.session_archived is True
+    assert run.session_blob_key is not None
+    assert b"assistant" in await blobs.get_bytes(run.session_blob_key)
+
+
+async def test_a_run_whose_transcript_never_landed_does_not_claim_one(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A key is a claim about another system; `session_archived` is what the row knows."""
+    user, case = await seed_case(session_factory)
+    job_id = await agent_job(session_factory, case)
+
+    async def refuse(*args, **kwargs):
+        raise StorageError("blob store unavailable")
+
+    monkeypatch.setattr(blobs, "put_bytes", refuse)
+    outcome = await execute(session_factory, job_id, adapter, blobs, monkeypatch)
+
+    assert outcome is None, "losing the transcript must not lose the opinion"
+    run = (await runs_for(session_factory, case))[0]
+    assert run.status is AgentRunStatus.succeeded
+    assert run.session_archived is False
+
+
+async def test_an_uncited_recommendation_is_refused(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With evidence in the bundle, a recommendation citing none of it is an assertion."""
+    user, case = await seed_case(session_factory)
+    job_id = await agent_job(session_factory, case)
+
+    outcome = await execute(
+        session_factory, job_id, adapter, blobs, monkeypatch, mode="uncited"
+    )
+
+    assert outcome is not None and outcome.status is JobStatus.failed
+    assert "sans citer" in (outcome.error_message or "")
+
+
 async def test_a_missing_agent_folder_is_not_retried(
     session_factory: async_sessionmaker[AsyncSession],
     adapter: PiAdapter,
@@ -612,6 +787,53 @@ async def test_a_recorded_opinion_cannot_be_edited_into_another_one(
         await session.rollback()
 
 
+async def test_the_database_refuses_a_successful_run_that_cannot_be_reviewed(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A recommendation is only reviewable if the row says what it read, which job
+    produced it, and which deployment answered. That is settled in PostgreSQL, because
+    application code is what would be bypassed."""
+    user, case = await seed_case(session_factory)
+
+    async with session_factory() as session:
+        session.add(
+            AgentRun(
+                case_id=case.id,
+                organization_id=case.organization_id,
+                agent_role="urology_oncology",
+                status=AgentRunStatus.succeeded,
+                bundle={},
+                output={"recommendation": "Cystectomie"},
+            )
+        )
+        with pytest.raises(IntegrityError, match="successful_runs_are_reviewable"):
+            await session.commit()
+
+
+async def test_a_run_cannot_record_a_version_number_that_is_not_its_snapshots(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Otherwise a run could claim to have read version 1 while pointing at version 7."""
+    user, case = await seed_case(session_factory)
+
+    async with session_factory() as session:
+        version = await _latest_version(session, case)
+        session.add(
+            AgentRun(
+                case_id=case.id,
+                organization_id=case.organization_id,
+                agent_role="urology_oncology",
+                status=AgentRunStatus.failed,
+                ledger_version_id=version.id,
+                ledger_version=version.version + 99,
+                bundle={},
+                error_message="…",
+            )
+        )
+        with pytest.raises(IntegrityError, match="ledger_version_number_matches"):
+            await session.commit()
+
+
 async def test_a_second_delivery_of_the_same_job_does_not_buy_a_second_opinion(
     session_factory: async_sessionmaker[AsyncSession],
     adapter: PiAdapter,
@@ -659,6 +881,52 @@ async def test_asking_twice_does_not_queue_two_runs(
     second = await client.post(f"/cases/{case.id}/analysis", json={})
 
     assert first.json()["job_id"] == second.json()["job_id"]
+
+
+async def test_twelve_simultaneous_requests_queue_exactly_one_run(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """The check-then-insert is a fast path; the partial unique index is the guarantee.
+
+    Without it, concurrent requests each see no live job and each create one — and a case
+    quietly buys a dozen opinions on the same question.
+    """
+    user, case = await seed_case(session_factory)
+    await sign_in(client, user)
+
+    responses = await asyncio.gather(
+        *(client.post(f"/cases/{case.id}/analysis", json={}) for _ in range(12))
+    )
+
+    assert {response.status_code for response in responses} == {202}
+    assert len({response.json()["job_id"] for response in responses}) == 1
+
+    async with session_factory() as session:
+        queued = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AnalysisJob)
+            .where(
+                AnalysisJob.case_id == case.id,
+                AnalysisJob.job_type == JobType.RUN_AGENT,
+            )
+        )
+    assert queued == 1
+
+
+async def test_a_second_agent_may_run_on_the_same_case(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """The key is per agent: hub-and-spoke needs several specialists at once."""
+    user, case = await seed_case(session_factory)
+    await sign_in(client, user)
+
+    first = await client.post(f"/cases/{case.id}/analysis", json={})
+    second = await client.post(
+        f"/cases/{case.id}/analysis", json={"agent_role": "medical_oncology"}
+    )
+
+    assert second.status_code == 202
+    assert first.json()["job_id"] != second.json()["job_id"]
 
 
 async def test_filling_the_missing_field_releases_the_parked_job(

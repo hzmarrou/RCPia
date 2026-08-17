@@ -16,6 +16,9 @@ provider, a network, or a key. Behaviour is chosen with RCPIA_FAKE_PI_MODE:
     invented     an answer citing evidence the bundle never contained
     wrongcase    an answer about a different case
     offschema    valid JSON that does not match AgentOutput
+    uncited      a recommendation citing nothing, with evidence available
+    split        one JSON answer split across two text parts of one message
+    dieslate     writes a session, then exits non-zero
 
 The answer echoes the case, role and first snippet id found in the task bundle, the way
 a cooperating model would. That makes the fake exercise the real path — a bundle that
@@ -61,8 +64,10 @@ def answer_for(bundle: dict, mode: str) -> dict:
         ),
     }
 
-    if mode == "invented":
-        answer["evidence_references"] = [{"id": "ev-999", "supports": "Inventé"}]
+    if mode in ("invented", "uncited"):
+        answer["evidence_references"] = (
+            [] if mode == "uncited" else [{"id": "ev-999", "supports": "Inventé"}]
+        )
     elif mode == "wrongcase":
         answer["case_id"] = "00000000-0000-4000-8000-000000000000"
     elif mode == "offschema":
@@ -128,8 +133,19 @@ def main() -> int:
 
     answer = json.dumps(answer_for(read_bundle(), mode), ensure_ascii=False)
 
-    if mode in ("ok", "invented", "wrongcase", "offschema"):
+    if mode in ("ok", "invented", "wrongcase", "offschema", "uncited", "dieslate"):
         lines.append(assistant([{"type": "text", "text": answer}]))
+    elif mode == "split":
+        # One answer, two parts of the *same* message: a provider may stream it that way.
+        half = len(answer) // 2
+        lines.append(
+            assistant(
+                [
+                    {"type": "text", "text": answer[:half]},
+                    {"type": "text", "text": answer[half:]},
+                ]
+            )
+        )
     elif mode == "preamble":
         # Two assistant messages: chatter first, the real answer second.
         lines.append(assistant([{"type": "text", "text": "Je vais analyser ce dossier."}]))
@@ -158,6 +174,11 @@ def main() -> int:
 
     # The real Pi echoes its startup line to stderr under --verbose.
     print("provider=azure-openai-responses model=gpt-5.6-sol", file=sys.stderr)
+
+    if mode == "dieslate":
+        # A provider error after the transcript was written.
+        print("azure: connection reset", file=sys.stderr)
+        return 1
     return 0
 
 

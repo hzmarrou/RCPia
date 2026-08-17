@@ -33,6 +33,10 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 
 JSON_FENCE = re.compile(r"^\s*```(?:json)?\s*(?P<body>.*?)\s*```\s*$", re.DOTALL)
 
+# Agent folder names, and therefore path segments. Deliberately narrow: this value
+# arrives from an HTTP request.
+SAFE_AGENT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,49}$")
+
 
 class PiError(Exception):
     """Base class for Pi runtime failures."""
@@ -43,7 +47,17 @@ class PiNotConfigured(PiError):
 
 
 class PiRunFailed(PiError):
-    """Pi exited non-zero, timed out, or produced no usable output."""
+    """Pi exited non-zero, timed out, or produced no usable output.
+
+    Carries whatever session was written before the failure. A provider error partway
+    through a run leaves a transcript that explains it, and that transcript is exactly
+    what someone debugging the failure will want; discarding it would leave them with an
+    exit code.
+    """
+
+    def __init__(self, message: str, *, session_bytes: bytes | None = None) -> None:
+        super().__init__(message)
+        self.session_bytes = session_bytes
 
 
 class PiOutputInvalid(PiError):
@@ -140,7 +154,21 @@ class PiAdapter:
     # ---------------------------------------------------------------- paths
 
     def agent_dir(self, agent_name: str) -> Path:
+        # `agent_name` originates in a job payload, which originates in an HTTP request.
+        # Without this, `../../etc` would walk straight out of the agents directory and
+        # RCPia would run whatever it found. The pattern is checked first because it is
+        # the cheap and total answer; containment is verified afterwards in case a link
+        # inside the directory points outward.
+        if not SAFE_AGENT_NAME.fullmatch(agent_name):
+            raise PiNotConfigured(f"Unsafe agent name: {agent_name!r}")
+
         agent_dir = self.agents_root / agent_name
+        root = os.path.normpath(str(self.agents_root))
+        # Lexical, not `resolve()`: on Windows the short and long forms of a path differ,
+        # and comparing resolved paths raced when the directory was created concurrently.
+        if os.path.commonpath([root, os.path.normpath(str(agent_dir))]) != root:
+            raise PiNotConfigured(f"Agent folder escapes AGENTS_ROOT: {agent_name!r}")
+
         if not (agent_dir / "brain.md").is_file():
             raise PiNotConfigured(f"Agent folder has no brain.md: {agent_dir}")
         if not (agent_dir / ".pi" / "APPEND_SYSTEM.md").is_file():
@@ -275,22 +303,30 @@ class PiAdapter:
         ).strip()
         returncode = completed.returncode
 
+        # Read the session before judging the exit code: a run that failed partway may
+        # still have written the transcript that explains why.
+        written = session_path.read_bytes() if session_path.exists() else None
+
         if returncode != 0:
             raise PiRunFailed(
                 f"L'agent {agent_name} s'est terminé avec le code {returncode}. "
-                f"{stderr[:500]}"
+                f"{stderr[:500]}",
+                session_bytes=written,
             )
 
-        if not session_path.exists():
+        if written is None:
             raise PiRunFailed(
                 f"L'agent {agent_name} n'a produit aucun journal de session : {session_path}"
             )
 
-        session_bytes = session_path.read_bytes()
+        session_bytes = written
         parsed = parse_session(session_bytes)
 
         if not parsed.output_text.strip():
-            raise PiRunFailed(f"L'agent {agent_name} n'a produit aucune réponse.")
+            raise PiRunFailed(
+                f"L'agent {agent_name} n'a produit aucune réponse.",
+                session_bytes=session_bytes,
+            )
 
         return PiRunResult(
             agent_name=agent_name,
@@ -394,11 +430,19 @@ def parse_session(session: bytes | str) -> ParsedSession:
             if isinstance(money, dict):
                 cost += float(money.get("total") or 0.0)
 
-        for part in message.get("content") or []:
-            if isinstance(part, dict) and part.get("type") == "text":
-                candidate = str(part.get("text") or "")
-                if candidate.strip():
-                    last_text = candidate
+        # Text parts are joined *within* a message and the last message wins. A provider
+        # may split one JSON answer across several parts of the same message, and taking
+        # only the final part would keep a fragment that parses as nothing. Joining
+        # across messages would be the opposite mistake: a preamble message followed by
+        # the answer would concatenate into something equally unparseable.
+        parts = [
+            str(part.get("text") or "")
+            for part in message.get("content") or []
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        joined = "".join(parts)
+        if joined.strip():
+            last_text = joined
 
     return ParsedSession(
         output_text=last_text or "",
