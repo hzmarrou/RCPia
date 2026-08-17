@@ -104,6 +104,33 @@ def test_a_report_beneath_its_label_is_captured() -> None:
     assert "Créatinine" not in (candidates["ct_tap"].value or ""), "stops at the next label"
 
 
+def test_a_label_nested_in_another_value_is_still_read() -> None:
+    """Real dossiers write `Autres : ALAT : 5`, and the ALAT is the part that matters."""
+    candidates = {c.key: c for c in extract_from_text("Autres : ALAT : 5")}
+
+    assert candidates["alat"].value == "5"
+
+
+def test_a_score_written_without_a_colon_is_read() -> None:
+    """The examination block writes `OMS 1`, not `OMS : 1`."""
+    candidates = {c.key: c for c in extract_from_text("Pâleur cutanéo-muqueuse\nOMS 1")}
+
+    assert candidates["who_status"].value == "1"
+
+
+def test_a_report_continuing_into_the_next_chunk_is_captured() -> None:
+    """The parser can end a chunk on a bare label and open the next with its report."""
+    candidates = {
+        c.key: c
+        for c in extract_from_text(
+            "**Evaluation cardiaque** :",
+            following_text="VG de taille et de fonction systolique conservée.\nFEVG à 60%.",
+        )
+    }
+
+    assert "FEVG" in (candidates["cardiac_assessment"].value or "")
+
+
 def test_ras_is_recorded_as_reported_absent_not_as_a_value() -> None:
     """`RAS` means the clinician looked and found nothing — that is information."""
     candidates = {c.key: c for c in extract_from_text(SAMPLE)}

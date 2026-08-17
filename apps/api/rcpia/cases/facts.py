@@ -99,9 +99,17 @@ async def _extract_document(
     )
 
     candidates = []
-    for chunk in chunks:
+    for position, chunk in enumerate(chunks):
+        # A label can end one chunk with its report opening the next, so each chunk is
+        # given a look at the one after it.
+        following = chunks[position + 1].text if position + 1 < len(chunks) else None
         candidates.extend(
-            extract_from_text(chunk.text, chunk_id=chunk.id, document_id=document.id)
+            extract_from_text(
+                chunk.text,
+                chunk_id=chunk.id,
+                document_id=document.id,
+                following_text=following,
+            )
         )
 
     resolved = resolve(candidates, cancer_type=case.cancer_type)

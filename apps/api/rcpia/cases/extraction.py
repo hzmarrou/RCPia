@@ -34,6 +34,11 @@ def normalize_label(label: str) -> str:
     return " ".join(without_accents.replace("’", "'").split())
 
 
+# Written without a colon in real dossiers, inside the examination block.
+BARE_SCORE_PATTERNS: dict[str, re.Pattern[str]] = {
+    "who_status": re.compile(r"\bOMS\s+([0-4])\b", re.IGNORECASE),
+}
+
 LABEL_INDEX: dict[str, FactField] = {}
 for field_spec in FIELDS:
     for label in field_spec.labels:
@@ -57,12 +62,16 @@ def extract_from_text(
     *,
     chunk_id: object | None = None,
     document_id: object | None = None,
+    following_text: str | None = None,
 ) -> list[FactCandidate]:
     """Find every recognised field in one chunk of dossier text.
 
-    A label whose value is empty takes the following lines as its value, which is how
-    the reference dossiers write imaging reports: the label on one line, the report
-    beneath it.
+    Three shapes seen in real dossiers are handled beyond the plain `Label : value`:
+
+    - a label whose report sits on the following lines (`Evaluation cardiaque :`), which
+      the parser may split across chunks — hence `following_text`;
+    - a label nested inside another's value (`Autres : ALAT : 5`);
+    - a score written without a colon (`OMS 1`).
     """
     lines = text.splitlines()
     candidates: list[FactCandidate] = []
@@ -70,17 +79,28 @@ def extract_from_text(
     for index, line in enumerate(lines):
         match = LABEL_LINE.match(line)
         if match is None:
+            candidates.extend(_bare_scores(line, chunk_id, document_id))
             continue
 
         field_spec = LABEL_INDEX.get(normalize_label(match.group("label")))
+        value = match.group("value").strip().strip("*").strip()
+
         if field_spec is None:
+            # An unrecognised label may still carry a recognised one: `Autres : ALAT : 5`.
+            candidates.extend(
+                extract_from_text(value, chunk_id=chunk_id, document_id=document_id)
+                if _looks_like_label_line(value)
+                else _bare_scores(line, chunk_id, document_id)
+            )
             continue
 
-        value = match.group("value").strip().strip("*").strip()
         excerpt = line.strip()
 
         if not value:
             continuation, consumed = _read_continuation(lines, index + 1)
+            if not continuation and following_text:
+                # The label ended this chunk; its report opens the next one.
+                continuation, consumed = _read_continuation(following_text.splitlines(), 0)
             if continuation:
                 value = continuation
                 excerpt = "\n".join([line.strip(), *consumed]).strip()
@@ -101,7 +121,39 @@ def extract_from_text(
             )
         )
 
+        # `Autres : ALAT : 5` also occurs under a *recognised* label.
+        if _looks_like_label_line(value):
+            candidates.extend(
+                extract_from_text(value, chunk_id=chunk_id, document_id=document_id)
+            )
+
     return candidates
+
+
+def _looks_like_label_line(value: str) -> bool:
+    match = LABEL_LINE.match(value)
+    return match is not None and normalize_label(match.group("label")) in LABEL_INDEX
+
+
+def _bare_scores(
+    line: str, chunk_id: object | None, document_id: object | None
+) -> list[FactCandidate]:
+    """Scores clinicians write without a colon, e.g. `OMS 1` in the examination block."""
+    found: list[FactCandidate] = []
+    for key, pattern in BARE_SCORE_PATTERNS.items():
+        match = pattern.search(line)
+        if match is None:
+            continue
+        found.append(
+            FactCandidate(
+                key=key,
+                value=match.group(1),
+                excerpt=line.strip()[:MAX_VALUE_LENGTH],
+                chunk_id=chunk_id,
+                document_id=document_id,
+            )
+        )
+    return found
 
 
 def _read_continuation(lines: list[str], start: int) -> tuple[str, list[str]]:
