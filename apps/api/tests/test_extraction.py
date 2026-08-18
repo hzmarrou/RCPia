@@ -131,6 +131,57 @@ def test_a_report_continuing_into_the_next_chunk_is_captured() -> None:
     assert "FEVG" in (candidates["cardiac_assessment"].value or "")
 
 
+def test_a_report_written_in_paragraphs_keeps_its_findings() -> None:
+    """Stopping at the first blank line kept the acquisition technique and threw away the
+    tumour. The field still looked filled in, and the agent reading it reported that the
+    dossier gave no results — true of what we handed it, false of the dossier."""
+    candidates = {
+        c.key: c
+        for c in extract_from_text(
+            "TDM TAP :\n"
+            "Acquisition spiralée en coupes millimétriques après injection.\n"
+            "\n"
+            "A l'étage abdomino-pelvien :\n"
+            "Majoration de l'épaississement pariétal vésical mesurant 43x41mm "
+            "versus 33x21mm, envahissant le méat urétral gauche.\n"
+            "\n"
+            "Scintigraphie osseuse : RAS\n"
+        )
+    }
+
+    report = candidates["ct_tap"].value or ""
+    assert "43x41mm" in report, "the tumour and its growth are the point of the report"
+    assert "méat urétral" in report
+    # The next recognised label ends the report and is read as its own field.
+    assert "Scintigraphie" not in report
+    assert candidates["bone_scan"].value == "RAS"
+
+
+def test_a_multi_paragraph_report_stops_at_the_next_known_label() -> None:
+    """Over-capturing an unrecognised sub-heading is the accepted trade; running into the
+    next real field would not be."""
+    candidates = {
+        c.key: c
+        for c in extract_from_text(
+            "IRM prostatique multiparamétrique :\n"
+            "\n"
+            "Technique :\n"
+            "Séquence T2 dans les 3 plans.\n"
+            "\n"
+            "Résultat :\n"
+            "Lésion classée PIRADS 5 avec bombement capsulaire.\n"
+            "\n"
+            "PSA totale : 8.89\n"
+        )
+    }
+
+    mri = candidates["prostate_mri"].value or ""
+    assert "PIRADS 5" in mri, "the lesion, not the acquisition protocol"
+    assert "Technique" in mri, "sub-headings belong to the report"
+    assert "8.89" not in mri
+    assert candidates["psa_total"].value == "8.89"
+
+
 def test_ras_is_recorded_as_reported_absent_not_as_a_value() -> None:
     """`RAS` means the clinician looked and found nothing — that is information."""
     candidates = {c.key: c for c in extract_from_text(SAMPLE)}

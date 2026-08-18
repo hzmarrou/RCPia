@@ -165,13 +165,31 @@ def _bare_scores(
 
 
 def _read_continuation(lines: list[str], start: int) -> tuple[str, list[str]]:
-    """Collect the lines under a bare label, stopping at the next recognised label."""
+    """Collect the lines under a bare label, stopping at the next recognised label.
+
+    **Blank lines do not end the report.** Radiology and pathology reports are written in
+    paragraphs, and the first one is almost always boilerplate:
+
+        TDM TAP :
+        Acquisition spiralée en coupe millimétriques…
+
+        A l'étage abdomino-pelvien :
+        - Majoration en taille de l'épaississement pariétal vésical… 43x41mm versus 33x21mm
+
+    Stopping at the first blank line kept the acquisition technique and discarded the
+    tumour, its growth, and the ureteral invasion — while the field still looked filled in.
+    The agent reading that dossier reported "la description technique de la TDM TAP, sans
+    ses résultats", which was true of what we handed it and false of the dossier.
+
+    The report therefore runs to the next label the catalogue knows, or to the end of the
+    chunk, capped by `MAX_VALUE_LENGTH`. That can absorb an unrecognised sub-heading —
+    `Technique :`, `Résultat :` — which is the right trade: those belong to the report, and
+    over-capturing costs a longer quotation while under-capturing loses the diagnosis.
+    """
     collected: list[str] = []
     for line in lines[start:]:
         stripped = line.strip()
         if not stripped:
-            if collected:
-                break
             continue
         match = LABEL_LINE.match(line)
         if match is not None and normalize_label(match.group("label")) in LABEL_INDEX:
