@@ -66,8 +66,36 @@ is what lets the worker container behave identically.
 | Model | the **deployment name**, e.g. `gpt-5.6-sol` | Azure routes by deployment. `gpt-5.6` alone does not exist |
 
 Deployments available in the workspace: `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.6-terra`,
-`DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `Kimi-K2.6`, and `text-embedding-ada-002`
-(1536 dimensions, for Phase 6 retrieval).
+`DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `Kimi-K2.6`, `text-embedding-3-large`,
+`text-embedding-3-small`, `text-embedding-ada-002`, and `Cohere-rerank-v4.0-pro`.
+
+### The retrieval surfaces are two different base paths
+
+Verified against the live workspace on 19 August 2026. Both take the same `api-key`.
+
+| Purpose | Endpoint | Body |
+|---|---|---|
+| Embeddings | `…/openai/v1/embeddings` | `{"model": "text-embedding-3-large", "input": …, "dimensions": 1536}` |
+| Reranking | `…/models/v1/rerank` | `{"model": "Cohere-rerank-v4.0-pro", "query": …, "documents": [...], "top_n": …}` |
+
+Three things worth knowing before writing the client:
+
+- **Reranking is not on `/openai/v1`.** Cohere models keep Cohere's own API shape, so
+  `/openai/v1/rerank`, `/v1/rerank` and `/models/rerank` all return 404. Phase 6 needs a
+  second base URL in configuration, not just a second deployment name.
+- **`dimensions` is honoured on `text-embedding-3-large`.** It returns 3072 by default, and
+  pgvector's HNSW and IVFFlat indexes cap at 2000 — so a `vector(3072)` column stores fine
+  and then refuses an index. Ask for 1536 and the problem does not arise.
+- **Rerank bills per call, not per document** (`meta.billed_units.search_units`), so sending
+  50 candidates costs the same as sending 5.
+
+Sanity check on a real French clinical pair — query *cisplatine et insuffisance rénale*:
+the contraindication passage scored `0.808`, an unrelated radiotherapy passage `0.153`. That
+separation is what makes a relevance floor workable, so a weak match can be reported as
+*aucune preuve pertinente* instead of becoming a citation.
+
+`text-embedding-ada-002` remains deployed but should not be used: it is English-centric and
+superseded by both `-3` models.
 
 Verified working with a real call:
 
