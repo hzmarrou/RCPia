@@ -28,8 +28,19 @@ class Approval:
     approved_by: str | None = None
     approved_on: date | None = None
 
+    # True when the threshold is a project decision rather than a clinician's. Such a
+    # rule may answer — otherwise the POC has nothing to show anyone — but the document
+    # must never let it read as clinically validated.
+    provisional: bool = False
+
     def caveat(self) -> str:
         """What the document says about this rule's standing."""
+        if self.approved and self.provisional:
+            return (
+                "Seuil conventionnel retenu par l'équipe RCPia pour cette version "
+                "d'évaluation, **non validé cliniquement** : à confirmer ou corriger en RCP."
+                + (f" Référence : {self.source}." if self.source else "")
+            )
         if self.approved:
             return f"Critère validé — {self.source}" if self.source else "Critère validé"
         return (
@@ -38,6 +49,19 @@ class Approval:
         )
 
 
-# Nothing is approved yet. Every rule in this package therefore observes rather than
-# answers. Changing one of these is a clinical decision, not a code change.
 UNAPPROVED = Approval(approved=False)
+
+# Thresholds chosen by the project so the proof of concept can answer at all. They are
+# conventional, and two of them are published; none has a clinician's name against it.
+#
+# `approved_by` deliberately does not name a person. Writing one in would produce a record
+# indistinguishable from a real sign-off, and the whole purpose of this module is that a
+# threshold carries the name of whoever accepted responsibility for it. When a clinician
+# does, replace these with `provisional=False` and their name.
+POC_PROJECT_CHOICE = Approval(
+    approved=True,
+    provisional=True,
+    source="seuils conventionnels de la littérature",
+    approved_by="Équipe RCPia — décision projet, en attente de validation clinicienne",
+    approved_on=date(2026, 8, 19),
+)

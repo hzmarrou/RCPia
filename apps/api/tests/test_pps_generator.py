@@ -853,16 +853,52 @@ async def test_section_six_does_not_claim_a_guideline_it_never_had(
         fertility_referral(age="85 ans", sex="Femme"),
     ],
 )
-def test_no_unapproved_rule_answers_a_clinical_question(referral) -> None:
-    """The thresholds behind these are conventional or invented, and none is signed off.
+def test_no_rule_claims_a_clinician_approved_it(referral) -> None:
+    """The thresholds are project choices, not sign-off.
 
-    A ticked *Non* for fertility preservation on a 46-year-old woman is permanent harm,
-    and the form gives it the same weight as a decision a room of oncologists took. Until
-    a clinician approves the criterion, RCPia observes and the RCP answers.
+    A row may answer, because a proof of concept that answers nothing gives a reviewer
+    nothing to correct. What it may never do is read as clinically validated — so every
+    answer carries the caveat, and `approved` stays False until a clinician's name is
+    against it.
     """
-    assert referral.answer == "a_determiner"
     assert referral.approved is False
+    assert referral.provisional is True
     assert "non validé" in referral.justification
+
+
+def test_a_provisional_answer_must_carry_its_caveat() -> None:
+    """A ticked box with neither sign-off nor caveat is a decision nobody made."""
+    document = _minimal_document()
+    document.decision.referrals = [
+        Referral(
+            label="Avis oncogériatrique",
+            answer="oui",
+            justification="Score G8 à 5.",  # no caveat
+            provisional=True,
+        )
+    ]
+
+    with pytest.raises(DocumentAssertsADecision, match="without saying so"):
+        document.assert_provisional()
+
+
+def test_fertility_preservation_is_never_closed() -> None:
+    """Wrongly declining to raise it is permanent; wrongly raising it costs a conversation.
+    So the rule opens the question or leaves it open — it never answers Non."""
+    for age, sex in [("34 ans", "Homme"), ("46 ans", "Femme"), ("85 ans", "Femme"),
+                     ("62 ans", "Homme"), (None, "Femme"), ("70 ans", None)]:
+        referral = fertility_referral(age=age, sex=sex)
+        assert referral.answer != "non", f"{age} {sex} closed the question"
+
+    assert fertility_referral(age="34 ans", sex="Homme").answer == "oui"
+    assert fertility_referral(age="85 ans", sex="Femme").answer == "a_determiner"
+
+
+def test_a_low_g8_now_proposes_the_assessment() -> None:
+    referral = geriatric_referral(age="62 ans", g8="5")
+
+    assert referral.answer == "oui"
+    assert referral.basis == "G8 : 5"
 
 
 def test_an_observation_still_puts_the_evidence_in_front_of_the_rcp() -> None:
@@ -876,13 +912,15 @@ def test_an_observation_still_puts_the_evidence_in_front_of_the_rcp() -> None:
 
 
 def test_a_family_history_of_hypertension_is_not_read_as_oncological() -> None:
-    """The rule used to propose a genetics referral for `Père : HTA`. Judging relevance
-    needs a clinician, so the recorded text is shown and the question is put."""
-    referral = genetic_referral(family_history="Père : HTA")
+    """The rule used to propose a genetics referral for `Père : HTA` — a family history of
+    high blood pressure. It now looks for an oncological term, and still shows the recorded
+    text so the RCP can overrule it."""
+    hypertension = genetic_referral(family_history="Père : HTA")
+    cancer = genetic_referral(family_history="Mère : cancer du sein à 45 ans")
 
-    assert referral.answer == "a_determiner"
-    assert "Père : HTA" in referral.justification
-    assert "pertinence" in referral.justification
+    assert hypertension.answer == "non"
+    assert "Père : HTA" in hypertension.justification
+    assert cancer.answer == "oui"
 
 
 def test_ras_and_an_empty_field_remain_distinguishable() -> None:

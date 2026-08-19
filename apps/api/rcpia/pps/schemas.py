@@ -57,15 +57,20 @@ class Field2(Strict):
 
 
 class Referral(Strict):
-    """A referral question, and what the dossier says that bears on it.
+    """A referral question, what the dossier says that bears on it, and how far RCPia is
+    entitled to go in answering it.
 
-    RCPia does not answer these. The thresholds behind them are conventional or invented
-    and none has been approved by a clinician, so `answer` is `a_determiner` and the
-    justification is an *observation* — the recorded value plus the criterion that bears
-    on it, with the decision left to the RCP.
+    Three states, and the difference between the last two is the point:
 
-    `approved` records whether the rule behind this row has been signed off. Only an
-    approved rule may answer, and `PpsDocument.assert_provisional` enforces that.
+    - **approved** — a clinician signed the threshold off. The answer stands on its own.
+    - **provisional** — the threshold is a project choice. The answer is shown *with* the
+      caveat that it is not clinically validated, because a proof of concept that answers
+      nothing gives a reviewer nothing to correct.
+    - **neither** — the rule may not answer at all, and `answer` is `a_determiner`.
+
+    `PpsDocument.assert_provisional` enforces this, including that a provisional answer
+    carries its caveat. A ticked box with neither sign-off nor caveat is a decision nobody
+    made, in a form where a tick means a decision.
 
     `basis` names the recorded value the observation came from. An observation whose basis
     a reader cannot see is indistinguishable from an assertion, and this document must
@@ -76,7 +81,12 @@ class Referral(Strict):
     answer: Answer
     justification: str
     basis: str | None = None
+    # A clinician has signed this threshold off. Only then does the answer stand on its
+    # own authority.
     approved: bool = False
+    # The threshold is a project choice: good enough to answer with, never good enough to
+    # present as validated. The justification carries the caveat, and the page shows it.
+    provisional: bool = False
 
 
 class TreatmentStep(Strict):
@@ -263,12 +273,19 @@ class PpsDocument(Strict):
                 "a withheld recommendation is carrying treatment content"
             )
 
-        # A referral may only be answered by an approved rule. Nothing is approved, so a
-        # ticked box here means a rule started answering without being signed off.
+        # A referral may be answered by an approved rule, or by a provisional one that
+        # says so. What it may never do is answer while claiming an authority it lacks:
+        # a ticked box with neither sign-off nor caveat is a decision nobody made.
         for referral in self.decision.referrals:
-            if referral.answer != "a_determiner" and not referral.approved:
+            if referral.answer == "a_determiner":
+                continue
+            if not (referral.approved or referral.provisional):
                 raise DocumentAssertsADecision(
                     f"{referral.label}: an unapproved rule answered {referral.answer!r}"
+                )
+            if referral.provisional and "non validé" not in referral.justification:
+                raise DocumentAssertsADecision(
+                    f"{referral.label}: a provisional rule answered without saying so"
                 )
 
         # Prose RCPia authors must not carry the phrases that mean "decided" and
