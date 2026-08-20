@@ -57,7 +57,7 @@ cp .env.example .env        # then fill in secrets
 docker compose -f infra/docker-compose.yml up --build
 # web  -> http://localhost:3000
 # api  -> http://localhost:8000/health
-# db   -> localhost:5432 (pgvector/pgvector:pg16)
+# db   -> localhost:5432 (pgvector/pgvector:pg17)
 ```
 
 If another PostgreSQL already owns host port 5432, set `POSTGRES_PORT` (e.g.
@@ -117,5 +117,5 @@ cd apps/web && pnpm test
 ## Status
 
 Phase 0 (repository and local runtime) is implemented: monorepo skeleton, FastAPI
-`/health`, Next.js shell, Docker Compose with `pgvector/pgvector:pg16`, and CI.
+`/health`, Next.js shell, Docker Compose with `pgvector/pgvector:pg17`, and CI.
 Later phases are described in `docs/RCPia-v1-implementation-plan.md`.

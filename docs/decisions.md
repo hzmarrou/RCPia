@@ -46,6 +46,30 @@ Dossiers, PPS documents, agent reasoning, and rationale appendices are French. C
 identifiers, database columns, and developer documentation stay English. See
 `docs/reference/pps-format.md`.
 
+## 2026-08-20 — PostgreSQL 17, not 16
+
+`RCPia-v1-implementation-plan.md` and the agent prompt both specify
+`pgvector/pgvector:pg16`. Their stated reason is only that the standard `postgres` image
+lacks `pgvector`; the major version was whatever was current when the brief was written,
+and nothing in the design depends on 16.
+
+Moved to `pgvector/pgvector:pg17` before Phase 6, because that is the last moment it is
+cheap. Once a guideline corpus and its embeddings are in the database, a major-version
+bump means dumping and re-embedding rather than dumping and restoring.
+
+It also keeps `pg_textsearch` available as an option — it requires 17 or 18, and provides
+real BM25 ranking rather than `ts_rank_cd`. Not adopted: it needs `shared_preload_libraries`
+and has no phrase search, which matters for compound clinical terms such as
+*BCG-unresponsive*. Revisit if the retrieval evaluation shows keyword recall is the
+limiting factor.
+
+Not 19: unreleased as of this date, and `pgvector` publishes no `pg19` image. Its SQL/PGQ
+property-graph support is processed internally as views over relational queries, so it
+would give nicer traversal syntax rather than new capability — worth revisiting only when
+Wiki Thinking gives us a real traversal use case.
+
+The brief was not amended; this record is the authority.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated

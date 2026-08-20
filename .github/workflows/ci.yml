@@ -15,7 +15,7 @@ jobs:
     services:
       # Same image as local development: the standard postgres image has no pgvector.
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: rcpia
           POSTGRES_PASSWORD: rcpia
