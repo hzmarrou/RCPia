@@ -21,6 +21,7 @@ from rcpia.evidence.ingestion import (
     validate_chunk,
     verify_search_configurations,
 )
+from rcpia.evidence.local_blocks import LOCALLY_BLOCKED
 from rcpia.evidence.models import (
     EMBEDDING_DIMENSIONS,
     EvidenceChunk,
@@ -900,4 +901,52 @@ async def test_the_configuration_check_covers_ascii_tokens(
     )
 
     with pytest.raises(CorpusError, match="has been altered"):
+        await verify_search_configurations(session)
+
+
+async def test_locally_blocked_passages_survive_a_reingest(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """The stopgap has to outlast the release that keeps re-asserting the passage is fine.
+
+    Metadata is written unconditionally on every load, so a block applied by hand would be
+    undone by the next ingest -- silently, since nothing would report it.
+    """
+    blocked_id = next(iter(LOCALLY_BLOCKED))
+    directory = release(tmp_path, [document()], [chunk(blocked_id)])
+
+    first = await ingest_release(session, directory=directory, embedder=FakeEmbedder())
+    assert first.locally_blocked == 1
+
+    second = await ingest_release(session, directory=directory, embedder=FakeEmbedder())
+    assert second.locally_blocked == 1
+
+    stored = await session.scalar(sa.select(EvidenceChunk))
+    assert stored is not None and stored.retrieval_eligible is False
+
+
+async def test_a_passage_not_on_the_list_stays_retrievable(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Over-filtering is the invisible failure, so the list is read as a list, not a rule."""
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk("some.other.chunk.0001")]),
+        embedder=FakeEmbedder(),
+    )
+
+    assert report.locally_blocked == 0
+    stored = await session.scalar(sa.select(EvidenceChunk))
+    assert stored is not None and stored.retrieval_eligible is True
+
+
+async def test_an_altered_dictionary_stops_ingestion(session: AsyncSession) -> None:
+    """`ALTER TEXT SEARCH DICTIONARY french_stem (StopWords = ...)` changes what every stored
+    vector should have contained without touching a single token mapping, so a fingerprint of
+    the mappings alone would still match."""
+    await session.execute(
+        sa.text("ALTER TEXT SEARCH DICTIONARY french_stem (StopWords = 'english')")
+    )
+
+    with pytest.raises(CorpusError, match="dictionary has been altered"):
         await verify_search_configurations(session)

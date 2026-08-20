@@ -17,6 +17,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rcpia.evidence.ingestion import CorpusError
 from rcpia.evidence.models import (
     EMBEDDING_DIMENSIONS,
     ENGLISH_CONFIG,
@@ -937,3 +938,31 @@ async def test_widening_cannot_reach_a_superseded_passage(session: AsyncSession)
 
     assert report.chunks == []
     assert report.widened == 1
+
+
+async def test_a_search_refuses_an_altered_configuration(session: AsyncSession) -> None:
+    """Verified per search, not once per process.
+
+    "Once per process" is not fail-closed: alter the configuration after the first request
+    and every later search runs against stale vectors, unchecked, for as long as the process
+    lives. The catalogue query costs about 3.6ms, against an embedding call and a rerank call
+    of several hundred milliseconds each.
+    """
+    await add_document(session, "doc")
+    await add_chunk(session, "chunk-1", text="alpha")
+    await session.execute(
+        sa.text(
+            "ALTER TEXT SEARCH CONFIGURATION public.rcpia_fr "
+            "ALTER MAPPING FOR asciiword WITH simple"
+        )
+    )
+
+    with pytest.raises(CorpusError, match="has been altered"):
+        await search_without_reranking(
+            session,
+            question="question de test",
+            concepts=Concepts(french=("alpha",)),
+            embedding=None,
+            embedding_model=MODEL,
+            filter=Filter("prostate"),
+        )

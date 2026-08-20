@@ -42,6 +42,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.evidence.embedding import BATCH_SIZE, Embedder
+from rcpia.evidence.local_blocks import LOCALLY_BLOCKED
 from rcpia.evidence.models import EvidenceChunk, EvidenceDocument
 
 # Every field the loader needs. A record missing one of these cannot be routed or cited,
@@ -284,6 +285,18 @@ _CONFIGURATION_FINGERPRINTS = {
     ),
 }
 
+# The dictionaries themselves, not only which ones a configuration points at.
+#
+# `ALTER TEXT SEARCH DICTIONARY french_stem (StopWords = 'none')` changes what every stored
+# vector should have contained, without altering a single token mapping. The mapping
+# fingerprint alone would still match. `dictinitoption` is where that lives.
+_DICTIONARY_FINGERPRINT = (
+    "english_stem:snowball:language = 'english', stopwords = 'english'|"
+    "french_stem:snowball:language = 'french', stopwords = 'french'|"
+    "simple:simple:|"
+    "unaccent:unaccent:rules = 'unaccent'"
+)
+
 _CONFIGURATION_QUERY = sa.text("""
     SELECT c.cfgname,
            string_agg(t.alias || ':' || d.dictnames, '|' ORDER BY t.alias) AS fingerprint
@@ -298,6 +311,15 @@ _CONFIGURATION_QUERY = sa.text("""
     JOIN pg_catalog.ts_token_type(c.cfgparser) t ON t.tokid = d.maptokentype
     WHERE c.cfgname = ANY(:names)
     GROUP BY c.cfgname
+""")
+
+_DICTIONARY_QUERY = sa.text("""
+    SELECT string_agg(
+               d.dictname || ':' || t.tmplname || ':' || coalesce(d.dictinitoption, ''),
+               '|' ORDER BY d.dictname)
+    FROM pg_ts_dict d
+    JOIN pg_ts_template t ON t.oid = d.dicttemplate
+    WHERE d.dictname = ANY(:names)
 """)
 
 
@@ -318,6 +340,19 @@ async def verify_search_configurations(session: AsyncSession) -> None:
         )
     ).all()
     seen = {name: fingerprint for name, fingerprint in rows}
+
+    dictionaries = await session.scalar(
+        _DICTIONARY_QUERY,
+        {"names": ["english_stem", "french_stem", "simple", "unaccent"]},
+    )
+    if dictionaries != _DICTIONARY_FINGERPRINT:
+        raise CorpusError(
+            "A text search dictionary has been altered since the migration that created "
+            f"these configurations. expected {_DICTIONARY_FINGERPRINT} but found "
+            f"{dictionaries}. Changing a stemmer's stop-word list or a rules file changes "
+            "what every stored vector should have contained, without touching a single "
+            "token mapping. Rebuild the vectors in a migration."
+        )
 
     for name, expected in _CONFIGURATION_FINGERPRINTS.items():
         actual = seen.get(name)
@@ -349,6 +384,7 @@ class IngestionReport:
     chunks_updated: int = 0
     chunks_unchanged: int = 0
     metadata_updated: int = 0
+    locally_blocked: int = 0
     chunks_removed: int = 0
     documents_removed: int = 0
     embedded: int = 0
@@ -659,6 +695,25 @@ async def ingest_release(
                 session.add(EvidenceChunk(**row))
                 report.chunks_inserted += 1
         await session.flush()
+
+    # Applied after the release's own metadata, so a re-ingest cannot quietly restore a
+    # passage we have refused. Stopgap until the corpus is corrected -- see `local_blocks`.
+    blocking = (
+        sa.update(EvidenceChunk)
+        .where(EvidenceChunk.chunk_id.in_(LOCALLY_BLOCKED))
+        .values(
+            retrieval_eligible=False,
+            retrieval_exclusion_reason=sa.case(
+                *[
+                    (EvidenceChunk.chunk_id == chunk_id, reason)
+                    for chunk_id, reason in LOCALLY_BLOCKED.items()
+                ],
+                else_=EvidenceChunk.retrieval_exclusion_reason,
+            ),
+        )
+        .returning(EvidenceChunk.chunk_id)
+    )
+    report.locally_blocked = len((await session.execute(blocking)).scalars().all())
 
     # Reconcile every declared document, including one whose chunks were all rejected: a
     # release that declares a document and supplies nothing valid for it has emptied it, and

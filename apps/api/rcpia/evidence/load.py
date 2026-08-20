@@ -66,6 +66,11 @@ async def run(directory: Path, *, dry_run: bool) -> int:
     print(f"  embedded       {report.embedded}  ({embedder.model})")
     # Removals are the consequence worth reading twice: a release replaces its documents,
     # so anything the corpus agent withdrew disappears here rather than lingering, citable.
+    if report.locally_blocked:
+        print(
+            f"  blocked here   {report.locally_blocked} passages "
+            "(local stopgap, see rcpia.evidence.local_blocks)"
+        )
     if report.chunks_removed or report.documents_removed:
         print(f"  removed        {report.chunks_removed} passages"
               + (f", {report.documents_removed} documents" if report.documents_removed else ""))

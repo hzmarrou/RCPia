@@ -85,23 +85,18 @@ RELEVANCE_FLOOR = 0.5
 # one would split into two. Concepts are clinical phrases and never need internal quotes.
 _QUOTES = re.compile(r'["“”]')
 
-# Verified once per process, before the first search.
+# Verified before every search.
 #
-# Checking only at ingestion left a gap: an alteration made after the last import leaves live
-# retrieval querying with rules the stored vectors were never built under, and nothing raises.
-# Checking on every query would cost a catalogue round trip per search for a condition that
-# changes at most once in a process's life, so it is checked once and remembered.
+# It was once per process, on the argument that the condition changes at most once in a
+# process's lifetime. That is not fail-closed: alter a configuration after the first request
+# and every later search runs against stale vectors, unchecked, for as long as the process
+# lives.
 #
-# It fails closed. A search against a configuration we do not recognise returns nothing
-# useful, and returning nothing is the correct answer when we cannot trust the index.
-_configuration_verified = False
-
-
-async def _ensure_configuration(session: AsyncSession) -> None:
-    global _configuration_verified
-    if not _configuration_verified:
-        await verify_search_configurations(session)
-        _configuration_verified = True
+# The cost argument was also wrong. The catalogue query measures at ~3.6ms, against an
+# embedding call and a rerank call of several hundred milliseconds each. It is noise.
+#
+# This stays until the runtime database role is separated from configuration ownership, at
+# which point the alteration becomes impossible rather than merely detected.
 
 
 _FRENCH: sa.ColumnClause[str] = sa.literal_column(f"'{FRENCH_CONFIG}'::regconfig")
@@ -419,7 +414,7 @@ async def _search(
     happened.
 
     """
-    await _ensure_configuration(session)
+    await verify_search_configurations(session)
 
     report = RetrievalReport(keyword_skipped=not concepts)
     current: Filter | None = filter
