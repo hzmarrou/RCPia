@@ -29,12 +29,35 @@ all. Keep it.
 
 ## Part 1 — Blocking: the corpus contains diseases we do not treat
 
+> **Correction, added after implementing our own guard.** We first reported 38 chunks. That
+> figure came from matching `UTUC`, `renal pelvis` and similar against the passage *text*,
+> and it is wrong: **the correct figure is 16**, being the chunks whose *section* is about
+> those diseases. Of the 38, only 14 overlap; **24 are ordinary bladder content** that merely
+> mentions the terms —
+> `ABBREVIATIONS`, which defines `UTUC`; `Adjuvant Systemic Therapy`; `Workup`; and
+> `Urethrectomy`, which is a step of a radical cystectomy.
+>
+> This matters for your item 7. A negative test reading *"no UTUC/urethral chunks"* will fail
+> on `ABBREVIATIONS` and would push you to exclude content that should stay. Please assert
+> instead that **no chunk sits in a section about those diseases**, and keep the passages that
+> merely name them. Excluding those 24 would be over-filtering, and over-filtering is
+> invisible: the system reports no relevant evidence, which reads as a gap in the guideline
+> rather than a bug in the metadata.
+>
+> Out-of-scope sections we identified in `nccn.bladder.3.2026`:
+> `Upper Tract Urothelial Carcinoma` (and its children `Renal Pelvis Tumors`, `Workup`);
+> `Upper GU Tract Tumors > MANAGEMENT PER UTUC RISK GROUP`;
+> `Primary Carcinoma of the Urethra`;
+> `Table 3. AJCC TNM Staging System for Renal Pelvis and Ureter Cancer` (and its children);
+> `PRINCIPLES OF INSTILLATION THERAPY > Intrapelvic and Intravesical Therapy for Upper Tract Tumors`;
+> `PRINCIPLES OF INSTILLATION THERAPY > Postsurgical Intraurethral Therapy for Primary Carcinoma of the Urethra`.
+
 The NCCN "Bladder Cancer" guideline also covers **upper tract urothelial carcinoma** and
 **carcinoma of the urethra** in the same PDF. Those sections were chunked and shipped:
 
 ```
-38 chunks matching 'upper tract urothelial | UTUC | renal pelvis | carcinoma of the urethra'
-    -> cancer_types = ['bladder']   (all 38)
+16 chunks whose section is about upper tract urothelial or urethral carcinoma
+    -> cancer_types = ['bladder']   (all 16)
     -> disease_setting = 'not_specified'
 ```
 

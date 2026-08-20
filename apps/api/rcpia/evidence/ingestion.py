@@ -19,9 +19,15 @@ corpus.
 
 **A passage is stored with the model that embedded it.** Vectors from different models are
 not comparable, so a table holding both would rank nonsense with nothing to show for it.
+
+**A release replaces its own documents, rather than adding to them.** A passage the corpus
+agent removed must disappear here too, and a passage whose id changed must replace the old
+row rather than sit beside it. Only documents named in the release are touched, so loading a
+six-document slice does not delete the rest of the corpus.
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -49,6 +55,48 @@ REQUIRED_CHUNK_FIELDS = (
     "clinical_status",
     "content_sha256",
 )
+
+# Sections about diseases RCPia does not cover. The NCCN "Bladder Cancer" guideline also
+# documents upper tract urothelial carcinoma and carcinoma of the urethra, and those sections
+# arrived tagged `cancer_types = ['bladder']` — passing every bladder filter we can write, so
+# a patient with a bladder tumour could be shown nephron-preserving criteria for a tumour of
+# the renal pelvis.
+#
+# **Matched against section headings, never against the passage text.** A text rule looks
+# obvious and is wrong: 38 chunks mention `UTUC` or `renal pelvis` somewhere in their body,
+# but only 16 sit in a section *about* those diseases; the two rules overlap on 14. The
+# other 24 are ordinary bladder
+# content — `ABBREVIATIONS`, which defines the term; `Adjuvant Systemic Therapy`;
+# `Urethrectomy`, which is part of a cystectomy. Dropping them would be over-filtering, and
+# over-filtering is invisible: the system reports no relevant evidence, which reads as a gap
+# in the guideline rather than a bug in ours.
+#
+# This is defence in depth. The corpus agent is excluding these sections at source in v3,
+# where the document structure is still available; we only have the flattened path. If they
+# rename a section this stops matching, which is the correct failure — by then the section is
+# already gone.
+OUT_OF_SCOPE_SECTIONS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^upper tract urothelial carcinoma$",
+        r"^upper gu tract tumors$",
+        r"utuc risk group",
+        r"^primary carcinoma of the urethra$",
+        r"renal pelvis and ureter cancer",
+        r"therapy for upper tract tumors$",
+        r"intraurethral therapy for primary carcinoma",
+    )
+)
+
+
+def names_an_out_of_scope_disease(section_path: list[str]) -> str | None:
+    """The heading that puts this passage outside the corpus scope, or None."""
+    for heading in section_path:
+        text = str(heading).strip()
+        if any(pattern.search(text) for pattern in OUT_OF_SCOPE_SECTIONS):
+            return text
+    return None
+
 
 def claims_exclusive_settings(setting: str) -> bool:
     """Whether one setting string claims two states that cannot both hold.
@@ -99,6 +147,8 @@ class IngestionReport:
     chunks_inserted: int = 0
     chunks_updated: int = 0
     chunks_unchanged: int = 0
+    chunks_removed: int = 0
+    documents_removed: int = 0
     embedded: int = 0
     rejected: list[str] = field(default_factory=list)
 
@@ -134,6 +184,10 @@ def validate_chunk(record: dict[str, Any]) -> str | None:
 
     if not isinstance(record.get("cancer_types"), list):
         return "cancer_types is not a list"
+
+    heading = names_an_out_of_scope_disease(list(record.get("section_path") or []))
+    if heading is not None:
+        return f"section {heading!r} is about a disease RCPia does not cover"
     return None
 
 
@@ -207,10 +261,13 @@ async def ingest_release(
         raise CorpusError(f"{directory} holds no documents")
 
     # ------------------------------------------------------------------ documents
+    excluded: list[str] = []
     for record in documents:
         # A document the release itself excluded should not be loaded, however tidy the
-        # record looks.
+        # record looks — and if a previous release loaded it, it must now be removed.
+        # Skipping it would leave withdrawn guidance in place, citable and looking current.
         if record.get("clinical_status") == "excluded":
+            excluded.append(record["document_id"])
             continue
         row = _document_row(record, release_id)
         existing = await session.get(EvidenceDocument, row["document_id"])
@@ -220,6 +277,13 @@ async def ingest_release(
             for key, value in row.items():
                 setattr(existing, key, value)
         report.documents += 1
+
+    for document_id in excluded:
+        # The chunks go with it: the foreign key cascades.
+        existing_excluded = await session.get(EvidenceDocument, document_id)
+        if existing_excluded is not None:
+            await session.delete(existing_excluded)
+            report.documents_removed += 1
 
     await session.flush()
     known = {
@@ -239,6 +303,11 @@ async def ingest_release(
         ).all()
     }
 
+    # Every chunk this release declares for a document it also declares. Anything else
+    # belonging to those documents is stale and removed at the end.
+    release_documents: set[str] = set()
+    seen_chunks: set[str] = set()
+
     pending: list[tuple[dict[str, Any], bool]] = []
     for record in chunks:
         problem = validate_chunk(record)
@@ -253,6 +322,9 @@ async def ingest_release(
             continue
 
         row = _chunk_row(record)
+        release_documents.add(row["document_id"])
+        seen_chunks.add(row["chunk_id"])
+
         previous = stored_hashes.get(row["chunk_id"])
         if previous == row["content_sha256"]:
             report.chunks_unchanged += 1
@@ -277,5 +349,19 @@ async def ingest_release(
                 session.add(EvidenceChunk(**row))
                 report.chunks_inserted += 1
         await session.flush()
+
+    # A rejected chunk is deliberately absent from `seen_chunks`: if it was stored by an
+    # earlier release and has since become invalid, it should go rather than linger.
+    if release_documents:
+        removal = (
+            sa.delete(EvidenceChunk)
+            .where(
+                EvidenceChunk.document_id.in_(release_documents),
+                sa.not_(EvidenceChunk.chunk_id.in_(seen_chunks)),
+            )
+            .returning(EvidenceChunk.chunk_id)
+        )
+        removed = (await session.execute(removal)).scalars().all()
+        report.chunks_removed = len(removed)
 
     return report

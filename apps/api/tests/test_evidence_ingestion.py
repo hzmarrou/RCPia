@@ -16,6 +16,7 @@ from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.ingestion import (
     CorpusError,
     ingest_release,
+    names_an_out_of_scope_disease,
     validate_chunk,
 )
 from rcpia.evidence.models import (
@@ -291,3 +292,149 @@ async def test_only_changed_passages_are_embedded_in_a_mixed_release(
     assert report.chunks_unchanged == 1
     assert report.chunks_updated == 1
     assert len(embedder.embedded) == 1
+
+
+# --------------------------------------------------------------------------------------
+# Diseases the corpus covers but RCPia does not
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "Upper Tract Urothelial Carcinoma",
+        "Upper GU Tract Tumors",
+        "MANAGEMENT PER UTUC RISK GROUP",
+        "Primary Carcinoma of the Urethra",
+        "Table 3. American Joint Committee on Cancer (AJCC) TNM Staging System for "
+        "Renal Pelvis and Ureter Cancer (8th ed., 2017)",
+    ],
+)
+def test_a_passage_from_another_disease_is_refused(section: str) -> None:
+    """The NCCN bladder guideline also documents upper tract and urethral cancers, and those
+    sections arrived tagged `bladder`. They pass every bladder filter, so a bladder patient
+    could be shown nephron-preserving criteria for a tumour of the renal pelvis."""
+    problem = validate_chunk(chunk(section_path=["Bladder Cancer", section]))
+
+    assert problem is not None and "does not cover" in problem
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "ABBREVIATIONS",
+        "Adjuvant Systemic Therapy",
+        "Primary Treatment",
+        "Workup",
+        "Urethrectomy",
+        "PRINCIPLES OF SURGICAL MANAGEMENT",
+    ],
+)
+def test_ordinary_bladder_content_is_not_refused(section: str) -> None:
+    """The reason the rule reads headings and not passage text.
+
+    38 chunks mention `UTUC` or `renal pelvis` somewhere in their body; only 16 sit in a
+    section about those diseases, and the two rules overlap on only 14. `ABBREVIATIONS` defines
+    the term, `Urethrectomy` is part of
+    a cystectomy. Refusing these would be over-filtering, which is invisible — the system
+    reports no relevant evidence, and that reads as a gap in the guideline.
+    """
+    assert names_an_out_of_scope_disease(["Bladder Cancer", section]) is None
+
+
+# --------------------------------------------------------------------------------------
+# A release replaces its own documents
+# --------------------------------------------------------------------------------------
+
+
+async def test_a_passage_dropped_from_a_release_is_removed(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Otherwise a passage the corpus agent withdrew stays citable and looks current."""
+    keep = chunk("afu.prostate.2024-2026.localise.01.0001")
+    drop = chunk("afu.prostate.2024-2026.localise.01.0002", content_sha256="b" * 64)
+    await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [keep, drop]),
+        embedder=FakeEmbedder(),
+    )
+
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [keep]),
+        embedder=FakeEmbedder(),
+    )
+
+    assert report.chunks_removed == 1
+    remaining = (await session.execute(sa.select(EvidenceChunk.chunk_id))).scalars().all()
+    assert list(remaining) == ["afu.prostate.2024-2026.localise.01.0001"]
+
+
+async def test_a_renamed_chunk_id_replaces_rather_than_duplicates(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """The corpus agent's ids embed the section slug, and correcting section hierarchy
+    changes them. Without removal a corrected release inserts a second copy of the corpus
+    beside the first, and nothing errors."""
+    await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk("old.id.0001")]),
+        embedder=FakeEmbedder(),
+    )
+
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk("new.id.0001")]),
+        embedder=FakeEmbedder(),
+    )
+
+    assert (report.chunks_inserted, report.chunks_removed) == (1, 1)
+    assert await session.scalar(sa.select(sa.func.count()).select_from(EvidenceChunk)) == 1
+
+
+async def test_a_release_does_not_touch_documents_it_does_not_name(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """We load slices. Deleting everything absent from a six-document slice would wipe the
+    rest of the corpus."""
+    other = document("eau.prostate.2026")
+    await ingest_release(
+        session,
+        directory=release(
+            tmp_path,
+            [document(), other],
+            [chunk(), chunk("eau.chunk.0001", document_id="eau.prostate.2026",
+                            content_sha256="c" * 64)],
+        ),
+        embedder=FakeEmbedder(),
+    )
+
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk()]),
+        embedder=FakeEmbedder(),
+    )
+
+    assert report.chunks_removed == 0
+    assert await session.scalar(sa.select(sa.func.count()).select_from(EvidenceChunk)) == 2
+
+
+async def test_a_document_marked_excluded_is_removed_with_its_passages(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Withdrawn guidance must not stay citable."""
+    await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk()]),
+        embedder=FakeEmbedder(),
+    )
+
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document(clinical_status="excluded")], []),
+        embedder=FakeEmbedder(),
+    )
+
+    assert report.documents_removed == 1
+    assert await session.scalar(sa.select(sa.func.count()).select_from(EvidenceChunk)) == 0
+    assert await session.get(EvidenceDocument, "afu.prostate.2024-2026") is None
