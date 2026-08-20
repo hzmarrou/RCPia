@@ -14,6 +14,7 @@ from alembic import context
 from rcpia.core import models  # noqa: F401
 from rcpia.core.config import get_settings
 from rcpia.core.db import Base
+from rcpia.evidence import models as evidence_models  # noqa: F401
 
 config = context.config
 

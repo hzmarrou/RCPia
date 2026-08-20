@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     azure_openai_base_url: str = ""
     azure_openai_api_key: str = ""
 
+    # Retrieval. Embeddings live on `/openai/v1`; the Cohere reranker keeps Cohere's own
+    # API shape and answers on `/models/v1/rerank`, so it needs its own base URL rather
+    # than another deployment name. Verified against the live workspace — see
+    # `docs/credentials.md`.
+    azure_openai_embedding_deployment: str = "text-embedding-3-large"
+    # 3072 is the model default and pgvector's indexes cap at 2000, so a `vector(3072)`
+    # column stores fine and then refuses an index.
+    embedding_dimensions: int = 1536
+    azure_rerank_base_url: str = ""
+    azure_rerank_deployment: str = "Cohere-rerank-v4.0-pro"
+
     auth_secret: str = DEFAULT_AUTH_SECRET
 
     @model_validator(mode="after")
