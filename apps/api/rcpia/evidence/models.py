@@ -32,6 +32,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -170,6 +171,22 @@ class EvidenceChunk(Base):
     # did not change; treating that as "nothing to do" silently discards the relabelling.
     # Re-embedding keys on this column, and metadata is written unconditionally.
     embedding_sha256: Mapped[str | None] = mapped_column(String(64))
+
+    # Whether this passage may be retrieved at all.
+    #
+    # Distinct from every other field here: the others describe *which* patient a passage
+    # applies to, this one says the passage must not be offered to any patient. Corpus v3.1
+    # uses it for the treatment recommendations in the SIOG 2010 prostate paper, superseded
+    # but published alongside assessment guidance that still stands — a clinician confirmed
+    # that split.
+    #
+    # A superseded recommendation is more dangerous than an irrelevant one. It is on topic,
+    # it reads as authoritative, and it carries a real citation, so nothing downstream would
+    # question it.
+    retrieval_eligible: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa_text("true")
+    )
+    retrieval_exclusion_reason: Mapped[str | None] = mapped_column(String(80))
 
     # Why a passage carries no disease setting: `general_principle` and `spans_settings` are
     # legitimate and apply to every patient; `not_determinable` means the source was not

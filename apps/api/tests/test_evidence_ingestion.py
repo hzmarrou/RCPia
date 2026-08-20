@@ -793,3 +793,56 @@ async def test_an_altered_search_configuration_stops_ingestion(
 async def test_the_expected_configuration_passes(session: AsyncSession) -> None:
     """Both configurations fold accents before stemming, and the check knows it."""
     await verify_search_configurations(session)
+
+
+async def test_a_release_carrying_a_field_we_do_not_implement_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Three times the corpus agent has encoded something that matters in a field this loader
+    discarded without a word. A field we do not implement is a decision nobody has made."""
+    with pytest.raises(CorpusError, match="does not implement"):
+        await ingest_release(
+            session,
+            directory=release(
+                tmp_path, [document()], [{**chunk(), "supersedes_guidance": "x"}]
+            ),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_retrieval_eligibility_is_stored(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    await ingest_release(
+        session,
+        directory=release(
+            tmp_path,
+            [document()],
+            [
+                chunk(
+                    retrieval_eligible=False,
+                    retrieval_exclusion_reason="historical_treatment_guidance_superseded",
+                )
+            ],
+        ),
+        embedder=FakeEmbedder(),
+    )
+
+    stored = await session.scalar(sa.select(EvidenceChunk))
+    assert stored is not None
+    assert stored.retrieval_eligible is False
+    assert stored.retrieval_exclusion_reason == "historical_treatment_guidance_superseded"
+
+
+async def test_a_release_that_says_nothing_leaves_every_passage_retrievable(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Which is how every release before v3.1 behaved."""
+    await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk()]),
+        embedder=FakeEmbedder(),
+    )
+
+    stored = await session.scalar(sa.select(EvidenceChunk))
+    assert stored is not None and stored.retrieval_eligible is True

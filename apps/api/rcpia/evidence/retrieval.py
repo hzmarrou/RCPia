@@ -165,7 +165,11 @@ class Filter:
 
     def as_clauses(self) -> list[sa.ColumnElement[bool]]:
         clauses: list[sa.ColumnElement[bool]] = [
-            EvidenceChunk.cancer_types.contains([self.cancer_type])
+            EvidenceChunk.cancer_types.contains([self.cancer_type]),
+            # Unconditional, and not relaxed by widening. A superseded recommendation is more
+            # dangerous than an irrelevant one: it is on topic, reads as authoritative, and
+            # carries a real citation, so nothing downstream would question it.
+            EvidenceChunk.retrieval_eligible.is_(True),
         ]
         if self.disease_setting is not None:
             universal = sa.and_(

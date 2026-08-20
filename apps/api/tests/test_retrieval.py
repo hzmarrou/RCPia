@@ -68,6 +68,8 @@ async def add_chunk(
     agent_roles: tuple[str, ...] = ("urology_oncology",),
     language: str = "fr",
     not_specified_reason: str | None = None,
+    retrieval_eligible: bool = True,
+    retrieval_exclusion_reason: str | None = None,
     embedding_index: int | None = None,
     embedding_model: str = MODEL,
 ) -> None:
@@ -81,6 +83,8 @@ async def add_chunk(
             cancer_types=list(cancer_types),
             disease_setting=disease_setting,
             not_specified_reason=not_specified_reason,
+            retrieval_eligible=retrieval_eligible,
+            retrieval_exclusion_reason=retrieval_exclusion_reason,
             therapy_line=therapy_line,
             clinical_purpose=["treatment_selection"],
             agent_roles=list(agent_roles),
@@ -879,3 +883,57 @@ def test_the_production_search_cannot_be_called_without_a_reranker() -> None:
     parameter = inspect.signature(search).parameters["reranker"]
 
     assert parameter.default is inspect.Parameter.empty
+
+
+async def test_a_superseded_passage_is_never_retrieved(session: AsyncSession) -> None:
+    """Corpus v3.1 blocks the treatment recommendations of the SIOG 2010 prostate paper while
+    keeping its assessment guidance, a split a clinician confirmed.
+
+    A superseded recommendation is more dangerous than an irrelevant one: it is on topic, it
+    reads as authoritative, and it carries a real citation and page number, so nothing
+    downstream has any reason to question it."""
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "superseded",
+        text="hormonotherapie selon les recommandations de 2010",
+        retrieval_eligible=False,
+        retrieval_exclusion_reason="historical_treatment_guidance_superseded",
+    )
+
+    report = await search_without_reranking(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("hormonotherapie selon les recommandations de 2010",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+    )
+
+    assert report.chunks == []
+
+
+async def test_widening_cannot_reach_a_superseded_passage(session: AsyncSession) -> None:
+    """Relaxation loosens which patient a passage suits. It must never reach a passage that
+    suits no patient at all."""
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "superseded",
+        text="protocole retire",
+        therapy_line="primary",
+        retrieval_eligible=False,
+        retrieval_exclusion_reason="historical_treatment_guidance_superseded",
+    )
+
+    report = await search_without_reranking(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("protocole retire",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate", "prostate_localized_low_risk", "salvage"),
+    )
+
+    assert report.chunks == []
+    assert report.widened == 1

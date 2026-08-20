@@ -119,6 +119,46 @@ _ENUM_ARRAY_FIELDS = ("cancer_types", "clinical_purpose", "agent_roles")
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
+# Every field a release may carry. Anything else stops the load.
+#
+# **This is a guard against silence, not against noise.** Three times now the corpus agent has
+# encoded something that matters in a field, and this loader has discarded it without a word:
+# `not_specified_reason`, which distinguishes a universal passage from an unplaceable one;
+# the metadata corrections of v3, skipped because the passage text had not changed; and
+# `retrieval_eligible`, which marks a superseded recommendation as unusable. Each was
+# invisible until something else surfaced it.
+#
+# A field we do not implement is a decision nobody has made. Refusing to load is how that
+# decision gets made deliberately rather than by omission.
+KNOWN_CHUNK_FIELDS = frozenset(
+    {
+        "agent_roles",
+        "cancer_types",
+        "chunk_id",
+        "citation",
+        "clinical_purpose",
+        "clinical_status",
+        "content_sha256",
+        "contextual_text",
+        "disease_setting",
+        "document_id",
+        "embedding_sha256",
+        "language",
+        "not_specified_reason",
+        "recommendation_number",
+        "ref_id",
+        "retrieval",
+        "retrieval_eligible",
+        "retrieval_exclusion_reason",
+        "section_path",
+        "source_location",
+        "text",
+        "therapy_line",
+        "title",
+        "unit_type",
+    }
+)
+
 
 @dataclass(frozen=True)
 class ReleaseSchema:
@@ -289,6 +329,13 @@ def validate_chunk(
     `disease_setting` or a scalar where an array belongs is stored intact and then matches no
     filter — indistinguishable from a corpus that does not cover the topic.
     """
+    unknown = sorted(set(record) - KNOWN_CHUNK_FIELDS)
+    if unknown:
+        return (
+            f"carries fields this loader does not implement: {', '.join(unknown)}. "
+            "Storing a release while ignoring part of it is how a safety signal goes missing."
+        )
+
     missing = [name for name in REQUIRED_CHUNK_FIELDS if not record.get(name)]
     if missing:
         return f"missing {', '.join(missing)}"
@@ -390,6 +437,9 @@ def _chunk_row(record: dict[str, Any]) -> dict[str, Any]:
             record["contextual_text"].encode("utf-8")
         ).hexdigest(),
         "not_specified_reason": record.get("not_specified_reason"),
+        # Absent means retrievable, which is how every release before v3.1 behaved.
+        "retrieval_eligible": record.get("retrieval_eligible", True),
+        "retrieval_exclusion_reason": record.get("retrieval_exclusion_reason"),
     }
 
 
