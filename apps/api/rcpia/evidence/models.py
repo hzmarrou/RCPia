@@ -22,6 +22,7 @@ from datetime import datetime
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
+    Computed,
     DateTime,
     ForeignKey,
     Index,
@@ -31,7 +32,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from rcpia.core.db import Base
@@ -41,6 +42,24 @@ from rcpia.core.db import Base
 # index. The model honours a `dimensions` parameter, so we ask for 1536 and the problem
 # does not arise.
 EMBEDDING_DIMENSIONS = 1536
+
+# The corpus is 81% English and 19% French, so each passage is stemmed with the stemmer for
+# the language it is written in. Both configurations fold accents before stemming, because
+# French clinical text is written both `métastatique` and `metastatique`.
+#
+# A query must be parsed with the same configuration that built the vector it searches:
+# mismatched configurations return nothing rather than failing, so these names are shared
+# with the query builder rather than repeated.
+FRENCH_CONFIG = "public.rcpia_fr"
+ENGLISH_CONFIG = "public.rcpia_en"
+
+# Kept identical to the migration that created the column. The regconfig literals sit inside
+# the CASE branches on purpose: casting the CASE *result* is a run-time catalogue lookup, and
+# PostgreSQL refuses it in a generated column with `generation expression is not immutable`.
+SEARCH_VECTOR_EXPRESSION = (
+    f"to_tsvector(CASE language WHEN 'fr' THEN '{FRENCH_CONFIG}'::regconfig "
+    f"ELSE '{ENGLISH_CONFIG}'::regconfig END, keyword_text)"
+)
 
 
 class EvidenceDocument(Base):
@@ -131,6 +150,12 @@ class EvidenceChunk(Base):
 
     # ----------------------------------------------------------------- search
     keyword_text: Mapped[str] = mapped_column(Text, nullable=False)
+    # Maintained by PostgreSQL, not by the application. A passage whose vector was not
+    # refreshed after an edit is invisible to keyword search, which reads exactly like a
+    # corpus that does not cover the topic.
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR, Computed(SEARCH_VECTOR_EXPRESSION, persisted=True)
+    )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
     # Which model produced the embedding. Vectors from different models are not comparable,
     # so a mixed table would rank nonsense; this is what lets a model change be detected.
@@ -159,6 +184,19 @@ class EvidenceChunk(Base):
         Index(
             "ix_evidence_chunks_clinical_purpose",
             "clinical_purpose",
+            postgresql_using="gin",
+        ),
+        # Cosine, matching how the vectors are compared. HNSW rather than IVFFlat: it needs
+        # no training set and stays correct as the corpus grows.
+        Index(
+            "ix_evidence_chunks_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "ix_evidence_chunks_search_vector",
+            "search_vector",
             postgresql_using="gin",
         ),
         Index("ix_evidence_chunks_document_id", "document_id"),

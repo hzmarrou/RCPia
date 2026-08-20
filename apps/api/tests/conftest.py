@@ -31,7 +31,10 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 API_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://rcpia:rcpia@localhost:5432/rcpia_test"
+# 5433, not 5432: the compose file publishes PostgreSQL 17 there to stay clear of any
+# other PostgreSQL already listening on the default port. Pointing at 5432 reaches
+# whatever else is running and fails authentication, which reads like a broken suite.
+DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://rcpia:rcpia@localhost:5433/rcpia_test"
 # PostgreSQL identifiers are limited to 63 bytes.
 MAX_DATABASE_NAME_LENGTH = 63
 
