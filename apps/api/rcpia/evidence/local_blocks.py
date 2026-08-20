@@ -14,14 +14,16 @@ retrievable.
 Applied at ingestion, after the release's own metadata is written, so a re-ingest cannot
 quietly restore a passage. The block survives until the id disappears from the list.
 
-**Deliberately narrow.** Nineteen passages, chosen individually rather than by rule. Of the
-21 that matched a keyword screen for systemic or metastatic therapy, seven are *not* listed:
-they are definitions — what a bone scan is, what PSMA-PET measures, what the biomarker
-categories are — which genuinely do apply to every setting. Blocking those would be
-over-filtering, and over-filtering is invisible: the system reports no relevant evidence,
-which reads as a gap in the guideline rather than a mistake of ours.
+**Deliberately narrow, and shrinking.** Nineteen entries against corpus v3.1, ten against
+v4: six were re-routed to real disease settings and three were blocked at source. That is the
+list working as intended — it should get shorter with every release and end empty.
 
-A rule is what produced this problem. Nineteen passages is small enough to read.
+Passages are chosen individually rather than by rule, because a rule is what produced the
+problem. Seven of the twenty-one that matched the original keyword screen were never listed:
+they define what a bone scan is, what PSMA-PET measures, what the biomarker categories are,
+and they genuinely apply to every setting. Blocking those would be over-filtering, which is
+invisible — the system reports no relevant evidence, and that reads as a gap in the guideline
+rather than a mistake of ours.
 """
 
 # Passages whose subject is a disease setting other than the one they claim to serve. Each is
@@ -29,21 +31,16 @@ A rule is what produced this problem. Nineteen passages is small enough to read.
 # reads as "applies to every patient". Their sections say otherwise.
 #
 # Retired by: docs/reviews/corpus-v4-change-request.md, Part 3.
+# Corpus v4 re-routed six of the original eight to real disease settings — metastasis-directed
+# therapy to metastatic hormone-sensitive, PARP inhibitors to castration-resistant, ADT for
+# M0 CSPC to biochemical recurrence — which is a better repair than blocking, because the
+# filter then excludes them correctly rather than universally. Those entries are gone.
+#
+# These two still claim to apply to every patient.
 _MISLABELLED_SETTING = {
-    # PRINCIPLES OF METASTASIS-DIRECTED THERAPY — metastatic by definition.
-    "nccn.prostate.6.2026.general.01.0113",
-    "nccn.prostate.6.2026.radiotherapy-details-also-see-principles-of-radiation-therapy.01.0115",
-    # PARP inhibitors: castration-resistant metastatic disease.
-    "nccn.prostate.6.2026.parp-inhibitors-with-or-without-arpis.01.0120",
-    # "ADT for Patients with M0 CSPC BCR" — biochemical recurrence.
-    "nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.04.0081",
-    # "ADT ... in combination therapy for metastatic castration-sensitive" disease.
-    "nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.06.0083",
     # "Optimal ADT: medical castration ..." — androgen deprivation is not indicated in
     # low-risk localized disease at all, so offering how best to deliver it is misleading.
     "nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.08.0085",
-    # Definitive radiotherapy targets for high-risk disease.
-    "nccn.prostate.6.2026.principles-of-radiation-therapy.03.0104",
     # "Table 1. Advanced Prognostic Tools — High-Risk and Very-High-Risk".
     "nccn.prostate.6.2026.principles-of-risk-stratification-and-biomarkers.05.0091",
 }
@@ -69,12 +66,12 @@ _NOT_GUIDANCE = {
     "nccn.prostate.6.2026.prostate-cancer.05.0009",
     "nccn.prostate.6.2026.prostate-cancer.07.0011",
     "nccn.prostate.6.2026.prostate-cancer.09.0013",
+    # Corpus v4 blocked 179 bibliography-shaped chunks and 8 appendix chunks, which caught
+    # three of the six listed here. These three have a heading its rule does not match — a
+    # sentence fragment, and two statistical-methods lines — so they remain.
     "siog.geriatric-assessment.2014.12-some-studies-found-no-predic.p004.0017",
     "siog.geriatric-assessment.2014.2011-cox-regression-analysis-log-rank.p014.0105",
     "siog.geriatric-assessment.2014.2013-cox-regression-analysis-log-rank.p015.0109",
-    "siog.geriatric-assessment.2014.37-cruz-jentoft-aj-baeyens-jp-bauer-jm-et-al.p008.0066",
-    "siog.geriatric-assessment.2014.42-falandry-c-brain-e-bonnefoy-m-et-al-impact.p008.0069",
-    "siog.geriatric-assessment.2014.appendix.p013.0100",
 }
 
 LOCALLY_BLOCKED: dict[str, str] = {
