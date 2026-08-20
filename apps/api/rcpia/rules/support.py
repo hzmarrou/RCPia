@@ -31,7 +31,13 @@ from dataclasses import dataclass
 
 from rcpia.cases.ledger import display_label
 from rcpia.pps.schemas import SupportItem
+from rcpia.rules.approval import PROJECT_SUGGESTION, SUGGESTION_CAVEAT, Approval
 from rcpia.rules.referrals import number_in
+
+# Support thresholds are governed by the same authority model as the referral rules. None
+# is clinician-approved, so every triggered item is a suggestion carrying the canonical
+# caveat — the wording lives in `approval.py` so no rule here can weaken it.
+SUPPORT_APPROVAL: Approval = PROJECT_SUGGESTION
 
 # Transfusion threshold used by the reference documents, and the nutritional thresholds
 # from the usual scores. Stated here so a clinician can argue with them in one place.
@@ -69,9 +75,11 @@ class Trigger:
             # Named, not bare: "7" tells a reader nothing, "Score MNA : 7" tells them
             # which value called for this and lets them check it.
             trigger=f"{display_label(self.key)} : {raw}{self.unit}",
-            # The threshold is conventional, not approved. Said next to the item, because
-            # a reader deciding whether to act on it needs to know what it rests on.
-            caveat=f"Seuil indicatif non validé : {self.criterion}. À confirmer en RCP.",
+            # The threshold is conventional, not approved, and the boundary is arbitrary:
+            # Hb 9.9 and Hb 10.1 are not different clinical situations. The item is phrased
+            # as an assessment rather than an instruction, and the canonical caveat says
+            # where it stands.
+            caveat=f"{SUGGESTION_CAVEAT} Critère appliqué : {self.criterion}.",
         )
 
 

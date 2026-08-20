@@ -11,9 +11,10 @@ decision-support tool. Analysis is blocked only when a safe provisional output i
 impossible without the field, which is a much smaller list.
 """
 
+import re
 from dataclasses import dataclass
 
-from rcpia.cases.fact_schema import FIELDS_BY_KEY, required_fields_for
+from rcpia.cases.fact_schema import FIELDS_BY_KEY, is_reported_absent, required_fields_for
 from rcpia.cases.ledger import AMBER, RED, LedgerEntry, display_label
 from rcpia.core.models import CancerType
 
@@ -28,6 +29,30 @@ BLOCKING_FIELDS: dict[CancerType, tuple[str, ...]] = {
     # prostate case cannot be risk-stratified, so no safe provisional proposal exists.
     CancerType.prostate: ("histology", "gleason"),
 }
+
+
+# What a blocking field must look like to count as answered. A field absent from this map
+# only has to be non-empty and not `RAS`.
+BLOCKING_VALUE_PATTERNS: dict[str, re.Pattern[str]] = {
+    # Gleason is written `7 (3+4)`, `9 (5+4)`, sometimes `7(4+3)`. Two grades summing to a
+    # total; anything without digits is not a Gleason score.
+    "gleason": re.compile(r"\d"),
+    "isup": re.compile(r"[1-5]"),
+}
+
+
+def satisfies_blocking(key: str, value: str | None) -> bool:
+    """Whether a recorded value actually answers a blocking field.
+
+    `RAS` never does. It means the clinician looked and found nothing to report, which is
+    meaningful for a symptom and meaningless for a histology or a grade — there is no such
+    thing as a tumour with no histological type.
+    """
+    text = (value or "").strip()
+    if not text or is_reported_absent(text):
+        return False
+    pattern = BLOCKING_VALUE_PATTERNS.get(key)
+    return pattern.search(text) is not None if pattern else True
 
 
 @dataclass(frozen=True)
@@ -87,6 +112,31 @@ def assess(entries: list[LedgerEntry], *, cancer_type: CancerType) -> Completene
                             if severity == "blocking"
                             else "."
                         )
+                    ),
+                )
+            )
+
+    # A blocking field can be present, uncontradicted, and still say nothing. `RAS` means
+    # the clinician looked and found nothing to report — which is information about a
+    # symptom and nonsense about a histology. Real dossiers do it: dossier8 records
+    # `Type histologique : RAS`, `Gleason : RAS` and `ISUP : RAS`, and every one was read
+    # as a confirmed value, so the analysis ran on a prostate case with no diagnosis and
+    # no grade.
+    for key in blocking:
+        entry = by_key.get(key)
+        if entry is None or entry.highlight == RED:
+            continue  # already reported as missing above
+        if not satisfies_blocking(key, entry.value):
+            issues.append(
+                CompletenessIssue(
+                    key=key,
+                    label=display_label(key),
+                    severity="blocking",
+                    highlight=RED,
+                    message=(
+                        f"{display_label(key)} : la valeur enregistrée "
+                        f"(« {entry.value} ») ne constitue pas une donnée exploitable — "
+                        "analyse impossible sans cette donnée."
                     ),
                 )
             )

@@ -63,6 +63,7 @@ from rcpia.pps.schemas import (
     Treatments,
     TreatmentStep,
 )
+from rcpia.rules.approval import SUGGESTION_CAVEAT, Authority
 from rcpia.rules.referrals import (
     G8_THRESHOLD,
     fertility_referral,
@@ -324,22 +325,6 @@ def test_a_document_claiming_a_decision_is_refused() -> None:
     document.decision.taken = True
 
     with pytest.raises(DocumentAssertsADecision):
-        document.assert_provisional()
-
-
-def test_an_unapproved_rule_may_not_answer_a_referral() -> None:
-    """A ticked box means a rule started answering without being signed off."""
-    document = _minimal_document()
-    document.decision.referrals = [
-        Referral(
-            label="Préservation fertilité",
-            answer="non",
-            justification="…",
-            approved=False,
-        )
-    ]
-
-    with pytest.raises(DocumentAssertsADecision, match="unapproved"):
         document.assert_provisional()
 
 
@@ -846,59 +831,101 @@ async def test_section_six_does_not_claim_a_guideline_it_never_had(
         geriatric_referral(age="62 ans", g8="5"),
         geriatric_referral(age=None, g8=None),
         genetic_referral(family_history="RAS"),
-        genetic_referral(family_history="Mère : cancer du sein à 45 ans"),
+        genetic_referral(family_history="Mere : cancer du sein a 45 ans"),
         genetic_referral(family_history=None),
         fertility_referral(age="34 ans", sex="Homme"),
         fertility_referral(age="46 ans", sex="Femme"),
         fertility_referral(age="85 ans", sex="Femme"),
     ],
 )
-def test_no_rule_claims_a_clinician_approved_it(referral) -> None:
-    """The thresholds are project choices, not sign-off.
+def test_rcpia_never_ticks_a_decision_box(referral) -> None:
+    """No threshold has a clinician's name against it, so the checkbox stays undetermined.
 
-    A row may answer, because a proof of concept that answers nothing gives a reviewer
-    nothing to correct. What it may never do is read as clinically validated — so every
-    answer carries the caveat, and `approved` stays False until a clinician's name is
-    against it.
+    An earlier version let an unsigned threshold tick the box and printed a caveat beneath
+    it. The document then said RCPia was not deciding while showing the mark that means a
+    decision, and the mark is what a reader sees.
     """
-    assert referral.approved is False
-    assert referral.provisional is True
-    assert "non validé" in referral.justification
+    assert referral.answer == "a_determiner"
+    assert referral.authority is not Authority.clinician_approved
 
 
-def test_a_provisional_answer_must_carry_its_caveat() -> None:
-    """A ticked box with neither sign-off nor caveat is a decision nobody made."""
-    document = _minimal_document()
-    document.decision.referrals = [
+def test_the_checkbox_cannot_be_set_without_a_clinician() -> None:
+    """Enforced by the model, so no future rule can reintroduce it."""
+    with pytest.raises(ValidationError, match="only a clinician-approved rule"):
         Referral(
-            label="Avis oncogériatrique",
+            label="Avis oncogeriatrique",
             answer="oui",
-            justification="Score G8 à 5.",  # no caveat
-            provisional=True,
+            justification="Score G8 a 5.",
+            authority=Authority.project_suggestion,
         )
-    ]
 
-    with pytest.raises(DocumentAssertsADecision, match="without saying so"):
-        document.assert_provisional()
+
+def test_a_rule_with_no_authority_may_not_even_suggest() -> None:
+    with pytest.raises(ValidationError, match="may not suggest"):
+        Referral(
+            label="Avis oncogenetique",
+            answer="a_determiner",
+            justification="...",
+            suggestion="oui",
+            authority=Authority.none,
+        )
+
+
+def test_genetics_suggests_nothing_at_all() -> None:
+    """A correct rule needs the relationship, the tumour type, the age at diagnosis and the
+    family pattern. Keyword matching on free text returned Oui for a spinal column, a
+    benign breast tumour, and an isolated prostate cancer at 88 - word boundaries fix only
+    the first of those."""
+    for history in [
+        "Pere : HTA",
+        "Mere : cancer du sein a 45 ans",
+        "Antecedent de colonne vertebrale operee",
+        "frein lingual",
+        "Tumeur benigne du sein chez la tante",
+        "Pere : cancer de la prostate a 88 ans",
+        "RAS",
+        None,
+    ]:
+        referral = genetic_referral(family_history=history)
+        assert referral.answer == "a_determiner"
+        assert referral.suggestion is None
+        assert referral.authority is Authority.none
+
+    # The recorded text still reaches the RCP so a clinician can judge it.
+    assert "cancer du sein" in genetic_referral(
+        family_history="Mere : cancer du sein a 45 ans"
+    ).justification
+
+
+def test_a_missing_or_normal_g8_never_closes_the_question() -> None:
+    """Absence of screening is not a negative screening result. A 70-year-old with no G8
+    used to receive a ticked Non."""
+    for age, g8 in [("70 ans", None), ("62 ans", None), (None, None), ("62 ans", "16")]:
+        referral = geriatric_referral(age=age, g8=g8)
+        assert referral.suggestion != "non", f"{age} / G8 {g8} closed the question"
+        assert referral.answer == "a_determiner"
+
+
+def test_a_low_g8_raises_the_question_as_a_suggestion() -> None:
+    referral = geriatric_referral(age="62 ans", g8="5")
+
+    assert referral.suggestion == "oui"
+    assert referral.answer == "a_determiner", "a suggestion is not a decision"
+    assert referral.basis == "G8 : 5"
 
 
 def test_fertility_preservation_is_never_closed() -> None:
     """Wrongly declining to raise it is permanent; wrongly raising it costs a conversation.
-    So the rule opens the question or leaves it open — it never answers Non."""
-    for age, sex in [("34 ans", "Homme"), ("46 ans", "Femme"), ("85 ans", "Femme"),
-                     ("62 ans", "Homme"), (None, "Femme"), ("70 ans", None)]:
+    So the rule opens the question or leaves it open - it never suggests Non."""
+    for age, sex in [
+        ("34 ans", "Homme"), ("46 ans", "Femme"), ("85 ans", "Femme"),
+        ("62 ans", "Homme"), (None, "Femme"), ("70 ans", None),
+    ]:
         referral = fertility_referral(age=age, sex=sex)
-        assert referral.answer != "non", f"{age} {sex} closed the question"
+        assert referral.suggestion != "non", f"{age} {sex} closed the question"
 
-    assert fertility_referral(age="34 ans", sex="Homme").answer == "oui"
-    assert fertility_referral(age="85 ans", sex="Femme").answer == "a_determiner"
-
-
-def test_a_low_g8_now_proposes_the_assessment() -> None:
-    referral = geriatric_referral(age="62 ans", g8="5")
-
-    assert referral.answer == "oui"
-    assert referral.basis == "G8 : 5"
+    assert fertility_referral(age="34 ans", sex="Homme").suggestion == "oui"
+    assert fertility_referral(age="85 ans", sex="Femme").suggestion is None
 
 
 def test_an_observation_still_puts_the_evidence_in_front_of_the_rcp() -> None:
@@ -909,18 +936,6 @@ def test_an_observation_still_puts_the_evidence_in_front_of_the_rcp() -> None:
     assert "5" in geriatric.justification
     assert geriatric.basis == "G8 : 5"
     assert str(G8_THRESHOLD)[0] in geriatric.justification
-
-
-def test_a_family_history_of_hypertension_is_not_read_as_oncological() -> None:
-    """The rule used to propose a genetics referral for `Père : HTA` — a family history of
-    high blood pressure. It now looks for an oncological term, and still shows the recorded
-    text so the RCP can overrule it."""
-    hypertension = genetic_referral(family_history="Père : HTA")
-    cancer = genetic_referral(family_history="Mère : cancer du sein à 45 ans")
-
-    assert hypertension.answer == "non"
-    assert "Père : HTA" in hypertension.justification
-    assert cancer.answer == "oui"
 
 
 def test_ras_and_an_empty_field_remain_distinguishable() -> None:
@@ -1008,7 +1023,7 @@ def test_a_triggered_item_states_the_threshold_and_that_it_is_unvalidated() -> N
         item for item in support_items({"haemoglobin": "9.9"}) if item.trigger
     )
 
-    assert "Seuil indicatif non validé" in (item.caveat or "")
+    assert SUGGESTION_CAVEAT in (item.caveat or "")
     # In words, not "<": the renderer escapes angle brackets, and `Hb &lt; 10` is not
     # something to show a clinician.
     assert "Hb inférieure à 10 g/dL" in (item.caveat or "")

@@ -18,6 +18,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from rcpia.rules.approval import Authority
+
 # Section 2 records a decision the RCP has not yet taken, and section 6 records validation
 # that has not happened. These are the phrases the reference documents carry, and RCPia
 # must never *claim* either.
@@ -57,36 +59,43 @@ class Field2(Strict):
 
 
 class Referral(Strict):
-    """A referral question, what the dossier says that bears on it, and how far RCPia is
-    entitled to go in answering it.
+    """A referral question, what the dossier says about it, and who may answer.
 
-    Three states, and the difference between the last two is the point:
+    `answer` is **the checkbox** — the field a real fiche uses to record what the RCP
+    decided. Only a clinician-approved rule may set it to anything but `a_determiner`.
 
-    - **approved** — a clinician signed the threshold off. The answer stands on its own.
-    - **provisional** — the threshold is a project choice. The answer is shown *with* the
-      caveat that it is not clinically validated, because a proof of concept that answers
-      nothing gives a reviewer nothing to correct.
-    - **neither** — the rule may not answer at all, and `answer` is `a_determiner`.
+    `suggestion` is RCPia's own non-binding reading, rendered apart from the checkbox and
+    always labelled unvalidated. An earlier design let an unsigned threshold tick the box
+    and printed a caveat underneath; the document then said "RCPia ne se prononce pas" and
+    ticked Oui, and the tick was what a reader saw.
 
-    `PpsDocument.assert_provisional` enforces this, including that a provisional answer
-    carries its caveat. A ticked box with neither sign-off nor caveat is a decision nobody
-    made, in a form where a tick means a decision.
-
-    `basis` names the recorded value the observation came from. An observation whose basis
-    a reader cannot see is indistinguishable from an assertion, and this document must
-    never assert.
+    `basis` names the recorded value behind the observation. An observation whose basis a
+    reader cannot see is indistinguishable from an assertion.
     """
 
     label: str
     answer: Answer
     justification: str
     basis: str | None = None
-    # A clinician has signed this threshold off. Only then does the answer stand on its
-    # own authority.
-    approved: bool = False
-    # The threshold is a project choice: good enough to answer with, never good enough to
-    # present as validated. The justification carries the caveat, and the page shows it.
-    provisional: bool = False
+    # RCPia's unvalidated reading. Never rendered as the checkbox.
+    suggestion: Answer | None = None
+    authority: Authority = Authority.none
+
+    @model_validator(mode="after")
+    def only_a_clinician_may_tick_the_box(self) -> "Referral":
+        if (
+            self.answer != "a_determiner"
+            and self.authority is not Authority.clinician_approved
+        ):
+            raise ValueError(
+                f"{self.label}: only a clinician-approved rule may set the checkbox; "
+                f"authority is {self.authority}"
+            )
+        if self.suggestion is not None and self.authority is Authority.none:
+            raise ValueError(
+                f"{self.label}: a rule with no authority may not suggest either"
+            )
+        return self
 
 
 class TreatmentStep(Strict):
@@ -273,19 +282,17 @@ class PpsDocument(Strict):
                 "a withheld recommendation is carrying treatment content"
             )
 
-        # A referral may be answered by an approved rule, or by a provisional one that
-        # says so. What it may never do is answer while claiming an authority it lacks:
-        # a ticked box with neither sign-off nor caveat is a decision nobody made.
+        # Only a clinician's sign-off may tick a box. Checked on typed state, not by
+        # searching the justification for a caveat: a substring test passes on unrelated
+        # text that happens to contain the phrase, and the previous two attempts at this
+        # guard were both defeated that way.
         for referral in self.decision.referrals:
-            if referral.answer == "a_determiner":
-                continue
-            if not (referral.approved or referral.provisional):
+            if (
+                referral.answer != "a_determiner"
+                and referral.authority is not Authority.clinician_approved
+            ):
                 raise DocumentAssertsADecision(
-                    f"{referral.label}: an unapproved rule answered {referral.answer!r}"
-                )
-            if referral.provisional and "non validé" not in referral.justification:
-                raise DocumentAssertsADecision(
-                    f"{referral.label}: a provisional rule answered without saying so"
+                    f"{referral.label}: {referral.authority} ticked the decision box"
                 )
 
         # Prose RCPia authors must not carry the phrases that mean "decided" and

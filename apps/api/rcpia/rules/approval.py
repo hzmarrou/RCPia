@@ -1,66 +1,78 @@
-"""Clinical approval of the thresholds RCPia reasons with.
+"""Who is entitled to answer a clinical question, and how far.
 
 A threshold in this codebase is a clinical claim. `FERTILITY_AGE_FEMALE = 45` says a
-46-year-old woman need not be offered fertility preservation, and the PPS renders that as a
-ticked box in the same form, with the same weight, as a decision a room full of oncologists
-took. Nobody has approved these numbers.
+46-year-old woman need not be offered fertility preservation, and section 2 of a fiche
+renders that as a ticked box — the same mark, in the same form, that a room of oncologists
+uses to record a decision.
 
-So a rule states whether it has been approved, and an unapproved rule **may not answer**.
-It may only observe: it shows the recorded value and the criterion it would apply, marks
-the question `à déterminer`, and leaves the answer to the RCP. Adding a "seuil non validé"
-caption to a ticked box does not fix this — the box is still ticked, and a reader skimming
-the form sees the tick, not the caption.
+**Only a clinician's sign-off may tick a box.** An unsigned threshold may at most *suggest*,
+and a suggestion is rendered somewhere a reader cannot mistake for the decision field.
 
-To approve a rule, set `Approval(approved=True, ...)` naming the clinician and the source.
-That is a deliberate act with a name attached to it, which is the point.
+An earlier version of this module tried a middle state that ticked the box and printed a
+caveat beneath it. A reviewer rejected it in one line: the rendered document said
+*"RCPia ne se prononce pas"* and then ticked Oui. The caveat was true and the tick was what
+a reader saw. The lesson is encoded here as three levels rather than a boolean, so the
+difference is in the type system instead of in a comment.
 """
 
 from dataclasses import dataclass
 from datetime import date
+from enum import StrEnum
+
+
+class Authority(StrEnum):
+    """How far a rule may go in answering."""
+
+    # A clinician signed the threshold off. The rule may set the checkbox.
+    clinician_approved = "clinician_approved"
+    # A project choice. The rule may offer a suggestion, shown apart from the checkbox and
+    # labelled as unvalidated. It may never set the checkbox.
+    project_suggestion = "project_suggestion"
+    # No usable rule exists. The rule may not even suggest.
+    none = "none"
+
+
+# The one wording used wherever an unvalidated suggestion is shown. Canonical, so no code
+# path can weaken it and no string check has to look for it.
+SUGGESTION_CAVEAT = (
+    "Suggestion RCPia — non validée cliniquement, à confirmer ou infirmer en RCP."
+)
 
 
 @dataclass(frozen=True)
 class Approval:
-    """Whether a clinician has signed off a threshold, and on what basis."""
+    """The standing of one clinical threshold."""
 
-    approved: bool
+    authority: Authority
     source: str | None = None
     approved_by: str | None = None
     approved_on: date | None = None
 
-    # True when the threshold is a project decision rather than a clinician's. Such a
-    # rule may answer — otherwise the POC has nothing to show anyone — but the document
-    # must never let it read as clinically validated.
-    provisional: bool = False
+    @property
+    def may_answer(self) -> bool:
+        """Whether this rule may set the checkbox itself."""
+        return self.authority is Authority.clinician_approved
 
-    def caveat(self) -> str:
-        """What the document says about this rule's standing."""
-        if self.approved and self.provisional:
-            return (
-                "Seuil conventionnel retenu par l'équipe RCPia pour cette version "
-                "d'évaluation, **non validé cliniquement** : à confirmer ou corriger en RCP."
-                + (f" Référence : {self.source}." if self.source else "")
-            )
-        if self.approved:
-            return f"Critère validé — {self.source}" if self.source else "Critère validé"
-        return (
-            "Critère non validé cliniquement : RCPia ne se prononce pas, la question est "
-            "laissée à la RCP."
+    @property
+    def may_suggest(self) -> bool:
+        return self.authority in (
+            Authority.clinician_approved,
+            Authority.project_suggestion,
         )
 
 
-UNAPPROVED = Approval(approved=False)
+# No usable rule. Used where a correct rule needs structure RCPia does not have.
+NO_RULE = Approval(authority=Authority.none)
 
-# Thresholds chosen by the project so the proof of concept can answer at all. They are
-# conventional, and two of them are published; none has a clinician's name against it.
+# Conventional thresholds chosen by the project so RCPia can show its reasoning. They may
+# suggest and they may not decide.
 #
 # `approved_by` deliberately does not name a person. Writing one in would produce a record
-# indistinguishable from a real sign-off, and the whole purpose of this module is that a
+# indistinguishable from a real sign-off, and the purpose of this module is that a
 # threshold carries the name of whoever accepted responsibility for it. When a clinician
-# does, replace these with `provisional=False` and their name.
-POC_PROJECT_CHOICE = Approval(
-    approved=True,
-    provisional=True,
+# does, set `authority=Authority.clinician_approved` and record their name and the date.
+PROJECT_SUGGESTION = Approval(
+    authority=Authority.project_suggestion,
     source="seuils conventionnels de la littérature",
     approved_by="Équipe RCPia — décision projet, en attente de validation clinicienne",
     approved_on=date(2026, 8, 19),

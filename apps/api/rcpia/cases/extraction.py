@@ -39,6 +39,36 @@ BARE_SCORE_PATTERNS: dict[str, re.Pattern[str]] = {
     "who_status": re.compile(r"\bOMS\s+([0-4])\b", re.IGNORECASE),
 }
 
+# Words that name an imaging study. A label line naming one starts a *new* report and
+# therefore ends the previous one, whether or not the catalogue knows it.
+#
+# This is the counterpart to the fix that stopped reports ending at the first blank line.
+# That change was right — `Technique :` and `Résultat :` are sub-headings belonging to the
+# report above them — but it also ran straight through the next study: in dossier 6 the
+# prostate MRI absorbed a PET Choline, and in dossier 12 it absorbed a spinal MRI, a pelvic
+# MRI and a PET-PSMA before hitting the character cap mid-sentence.
+MODALITY_WORDS = (
+    "irm", "tdm", "scanner", "uroscanner", "pet", "tep", "scintigraphie",
+    "echographie", "radiographie", "tomodensitometrie", "petscan", "pet-scan",
+)
+
+# `IRM du bassin`, `PET Choline`, `Scintigraphie osseuse` — a modality word at the start
+# of a short label. Length-bounded so a sentence merely mentioning a scanner is not read
+# as a heading.
+MODALITY_LABEL = re.compile(
+    r"^(?:" + "|".join(MODALITY_WORDS) + r")\b[\w\s'’-]{0,40}$"
+)
+
+# Appended to a report cut short by the character cap, so a reader and an agent can both
+# see that what follows the cut was not considered.
+TRUNCATION_MARKER = " […rapport tronqué]"
+
+
+def starts_a_new_report(label: str) -> bool:
+    """Whether a label line begins a different imaging study."""
+    return MODALITY_LABEL.match(normalize_label(label)) is not None
+
+
 LABEL_INDEX: dict[str, FactField] = {}
 for field_spec in FIELDS:
     for label in field_spec.labels:
@@ -187,18 +217,27 @@ def _read_continuation(lines: list[str], start: int) -> tuple[str, list[str]]:
     over-capturing costs a longer quotation while under-capturing loses the diagnosis.
     """
     collected: list[str] = []
+    truncated = False
     for line in lines[start:]:
         stripped = line.strip()
         if not stripped:
             continue
         match = LABEL_LINE.match(line)
-        if match is not None and normalize_label(match.group("label")) in LABEL_INDEX:
-            break
+        if match is not None:
+            label = match.group("label")
+            # A label the catalogue knows, or any label naming another imaging study.
+            if normalize_label(label) in LABEL_INDEX or starts_a_new_report(label):
+                break
         collected.append(stripped)
         if sum(len(item) for item in collected) > MAX_VALUE_LENGTH:
+            truncated = True
             break
 
-    return " ".join(collected)[:MAX_VALUE_LENGTH], collected
+    text = " ".join(collected)[:MAX_VALUE_LENGTH]
+    if truncated:
+        # Silence here would present a partial report as a whole one.
+        text = text[: MAX_VALUE_LENGTH - len(TRUNCATION_MARKER)] + TRUNCATION_MARKER
+    return text, collected
 
 
 def normalize_value(value: str | None) -> str:

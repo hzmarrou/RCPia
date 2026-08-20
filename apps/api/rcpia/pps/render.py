@@ -18,8 +18,12 @@ from rcpia.pps.schemas import (
     SupportItem,
     TreatmentStep,
 )
+from rcpia.rules.approval import SUGGESTION_CAVEAT
 
 CHECKED, UNCHECKED = "[X]", "[ ]"
+
+# How RCPia's own non-binding reading is worded. Never rendered as a tick.
+SUGGESTION_LABELS = {"oui": "plutôt oui", "non": "plutôt non", "a_determiner": "sans avis"}
 
 # Line starts that carry structure in this document: headings, blockquotes, table rows,
 # horizontal rules, setext underlines — and the checkbox, which is how every decision in
@@ -111,11 +115,27 @@ def _yes_no(value: bool) -> str:
 
 
 def _referral(referral: Referral) -> list[str]:
-    lines = [f"**{referral.label}** — {_checkboxes(referral.answer)}", "", referral.justification]
+    """The checkbox, then the observation, then — separately — RCPia's own reading.
+
+    The suggestion is printed after the justification and under its own label, never as the
+    tick. A previous version set the box from an unvalidated threshold and printed the
+    caveat beneath it; the document then said RCPia was not deciding while showing the mark
+    that means a decision.
+    """
+    lines = [
+        f"**{referral.label}** — {_checkboxes(referral.answer)}",
+        "",
+        _inline(referral.justification),
+    ]
     if referral.basis:
-        # The recorded value the proposal came from. Without it a reader cannot tell a
+        # The recorded value behind the observation. Without it a reader cannot tell a
         # derivation from an assertion.
-        lines.append(f"*Fondé sur — {referral.basis}*")
+        lines.append(f"*Fondé sur — {_inline(referral.basis)}*")
+    if referral.suggestion is not None:
+        lines.append(
+            f"*{SUGGESTION_CAVEAT} Lecture RCPia : "
+            f"{SUGGESTION_LABELS[referral.suggestion]}.*"
+        )
     return [*lines, ""]
 
 

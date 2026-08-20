@@ -158,6 +158,14 @@ FIELDS: tuple[FactField, ...] = (
         "prostate_mri", ("irm prostatique multiparamétrique", "irm prostatique multiparametrique"),
         FactCategory.imaging, cancer_types=(PROSTATE,), required_for=(PROSTATE,),
     ),
+    # Further imaging real dossiers carry. Recognising them is what stops the prostate MRI
+    # report swallowing the study that follows it.
+    FactField(
+        "pet_ct", ("pet choline", "pet psma", "pet-psma", "pet scan", "tep tdm", "tep-tdm"),
+        FactCategory.imaging,
+    ),
+    FactField("spinal_mri", ("irm médullaire", "irm medullaire"), FactCategory.imaging),
+    FactField("pelvic_mri", ("irm du bassin", "irm pelvienne"), FactCategory.imaging),
     # ---------------------------------------------------------------- biology
     FactField(
         "psa_total", ("psa totale", "psa total"), FactCategory.biology, unit="ng/mL",

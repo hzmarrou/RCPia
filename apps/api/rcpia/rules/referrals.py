@@ -1,24 +1,27 @@
 """Which referrals to raise, and on what recorded basis.
 
 Section 2 of a real PPS records what the RCP decided about oncogeriatric assessment,
-genetic referral, and fertility preservation. RCPia has no decision to record, so it
-proposes — and states the recorded value each proposal came from.
+genetic referral, and fertility preservation. **RCPia never ticks those boxes.** No
+threshold here has a clinician's name against it, so every checkbox stays `à déterminer`
+and RCPia's own reading is carried separately as a labelled suggestion — see
+`approval.py` for why that separation is in the type system rather than in a caption.
 
-**The thresholds here are project choices, not clinician sign-off.** They are conventional
-and two are published, but nobody has put their name to them for this deployment. So every
-row carries `approved=False` and a caveat saying so, and the PPS renders the caveat next to
-the answer. When a clinician signs off, set `provisional=False` in `approval.py` and record
-their name; nothing else changes.
+Three asymmetries shape the rules, and each comes from what happens when they are wrong.
 
-Two asymmetries shape the rules, and both come from what happens when they are wrong:
-
-- **Fertility preservation never answers *Non*.** Wrongly declining to raise it is
-  irreversible, while wrongly raising it costs a conversation. So the rule answers *Oui*
-  below the age reference and *à déterminer* above it — never *Non*. The age limits are
-  the least defensible numbers in this file and they are used only to decide whether to
-  assert *Oui*, never to close the question.
+- **Absence never closes a question.** A missing G8 is not evidence that assessment is
+  unnecessary; a family history nobody recorded is not evidence there is none. Where the
+  input is missing, the rule declines to suggest rather than suggesting *non*.
+- **Fertility preservation is never closed.** Wrongly declining to raise it is permanent;
+  wrongly raising it costs a conversation. It suggests *oui* or nothing.
 - **A contested value is no basis for anything.** Where the dossier contradicts itself, the
-  rule says so and answers *à déterminer* rather than picking a reading.
+  rule says so and suggests nothing.
+
+The genetics rule has **no authority at all**. Deciding whether a family history warrants a
+referral needs the relationship, the tumour type, the age at diagnosis and the family
+pattern — none of which the ledger holds as structure. Keyword matching on free text
+produced referrals for *colonne vertébrale*, *dessein*, *frein lingual*, a benign breast
+tumour, and an isolated prostate cancer at 88. Word boundaries fix the first class only, so
+the rule reports what the dossier says and suggests nothing.
 """
 
 import re
@@ -26,31 +29,22 @@ from dataclasses import dataclass
 
 from rcpia.cases.fact_schema import REPORTED_ABSENT
 from rcpia.pps.schemas import Answer, Referral
-from rcpia.rules.approval import POC_PROJECT_CHOICE, Approval
+from rcpia.rules.approval import NO_RULE, PROJECT_SUGGESTION, Approval, Authority
 
 # G8 ≤ 14 is the published screening cutoff for oncogeriatric assessment; the age is the
-# usual convention for offering the screen at all.
+# usual convention for offering the screen at all. Both may suggest, never decide.
 GERIATRIC_AGE = 75
 G8_THRESHOLD = 14.0
 
-# Age references for raising fertility preservation. **Weakly grounded** — used only to
-# decide when to assert *Oui*. Above them the rule says *à déterminer*, never *Non*.
+# Age references for raising fertility preservation. Weakly grounded, and used only to
+# decide when to suggest *oui* — never to suggest *non*.
 FERTILITY_AGE_MALE = 60
 FERTILITY_AGE_FEMALE = 45
 
-# Project choices for the proof of concept, not clinician sign-off. See `approval.py`.
-GERIATRIC_APPROVAL: Approval = POC_PROJECT_CHOICE
-GENETIC_APPROVAL: Approval = POC_PROJECT_CHOICE
-FERTILITY_APPROVAL: Approval = POC_PROJECT_CHOICE
-
-# Family-history terms that bear on an oncogenetic referral. Without this the rule proposed
-# a genetics referral for `Père : HTA` — a family history of hypertension.
-CANCER_TERMS = (
-    "cancer", "carcinom", "adenocarcinom", "adénocarcinom", "neoplas", "néoplas",
-    "tumeur", "tumor", "sarcom", "lymphom", "leucem", "leucém", "melanom", "mélanom",
-    "brca", "lynch", "sein", "ovaire", "pancreas", "pancréas", "prostate", "colon",
-    "colorectal", "rein", "vessie", "uterus", "utérus", "metasta", "métasta",
-)
+GERIATRIC_APPROVAL: Approval = PROJECT_SUGGESTION
+FERTILITY_APPROVAL: Approval = PROJECT_SUGGESTION
+# No usable rule exists — see the module docstring.
+GENETIC_APPROVAL: Approval = NO_RULE
 
 # A number in its own right, not a digit inside an identifier. Without the lookbehind,
 # `G8 : 5/17` reads as 8 and `p T2` as 2 — a stage silently becoming a score.
@@ -59,10 +53,14 @@ NUMBER = re.compile(r"(?<![A-Za-z0-9])-?\d+(?:[.,]\d+)?")
 
 @dataclass(frozen=True)
 class Observation:
-    """What a rule saw, and what it concludes from it."""
+    """What a rule saw, and what it would suggest from it.
+
+    `suggestion` is deliberately `None` by default. A rule says nothing unless it has
+    something to say.
+    """
 
     text: str
-    answer: Answer = "a_determiner"
+    suggestion: Answer | None = None
     basis: str | None = None
 
 
@@ -97,36 +95,41 @@ def _reported_absent(value: str | None) -> bool:
     return (value or "").strip().upper() == REPORTED_ABSENT
 
 
-def mentions_cancer(history: str) -> bool:
-    """Whether a recorded family history names an oncological condition."""
-    lowered = history.lower()
-    return any(term in lowered for term in CANCER_TERMS)
-
-
 def _referral(label: str, approval: Approval, observation: Observation) -> Referral:
-    """Turn an observation into the row the document shows.
+    """Build the row the document shows.
 
-    An unapproved rule may not answer at all. A *provisionally* approved one may, because
-    otherwise the proof of concept has nothing to put in front of a clinician — but the
-    caveat travels with it and `approved` stays False, so `assert_provisional` still treats
-    the answer as unsigned.
+    The checkbox stays `a_determiner` unless a clinician approved the rule. Everything else
+    travels as a suggestion, which the renderer prints apart from the box and labels.
     """
-    answer = observation.answer if approval.approved else "a_determiner"
+    answer: Answer = (
+        observation.suggestion
+        if approval.may_answer and observation.suggestion is not None
+        else "a_determiner"
+    )
+    suggestion = (
+        observation.suggestion
+        if approval.may_suggest and not approval.may_answer
+        else None
+    )
     return Referral(
         label=label,
         answer=answer,
-        justification=f"{observation.text} {approval.caveat()}",
+        justification=observation.text,
         basis=observation.basis,
-        # Only a clinician's sign-off makes this true. A project choice does not.
-        approved=approval.approved and not approval.provisional,
-        provisional=approval.approved and approval.provisional,
+        suggestion=suggestion,
+        authority=approval.authority,
     )
 
 
 def geriatric_referral(
     *, age: str | None, g8: str | None, contested: frozenset[str] = frozenset()
 ) -> Referral:
-    """Propose an oncogeriatric assessment on a low G8, or on age when G8 is absent."""
+    """Raise an oncogeriatric assessment on a low G8, or on age when G8 is absent.
+
+    **Never suggests *non*.** A missing G8 says nothing about whether an assessment is
+    needed, and a G8 above the cutoff is a screening result rather than a decision — the
+    screen exists to raise the question, not to settle it.
+    """
     years = number_in(age)
     score = number_in(g8)
 
@@ -135,21 +138,32 @@ def geriatric_referral(
             "L'âge ou le score G8 est rapporté de façon contradictoire dans le dossier ; "
             "aucune conclusion fiable ne peut en être tirée."
         )
-    elif score is not None:
-        indicated = score <= G8_THRESHOLD
+    elif score is not None and score <= G8_THRESHOLD:
         observation = Observation(
-            f"Score G8 rapporté à {g8} "
-            f"({'≤' if indicated else '>'} {G8_THRESHOLD:g}) : évaluation oncogériatrique "
-            f"{'indiquée' if indicated else 'non requise sur ce seul critère'}.",
-            answer="oui" if indicated else "non",
+            f"Score G8 rapporté à {g8} (≤ {G8_THRESHOLD:g}) : une évaluation "
+            "oncogériatrique est habituellement indiquée.",
+            suggestion="oui",
             basis=f"G8 : {g8}",
         )
-    elif years is not None:
-        old_enough = years >= GERIATRIC_AGE
+    elif score is not None:
+        # Above the cutoff. A screening result does not close the question.
         observation = Observation(
-            f"Patient·e de {years:g} ans, score G8 non renseigné "
-            f"(critère habituel : évaluation à partir de {GERIATRIC_AGE} ans).",
-            answer="oui" if old_enough else "non",
+            f"Score G8 rapporté à {g8} (> {G8_THRESHOLD:g}). Le dépistage ne conclut pas "
+            "à lui seul à l'inutilité d'une évaluation.",
+            basis=f"G8 : {g8}",
+        )
+    elif years is not None and years >= GERIATRIC_AGE:
+        observation = Observation(
+            f"Patient·e de {years:g} ans, score G8 non renseigné (dépistage habituellement "
+            f"proposé à partir de {GERIATRIC_AGE} ans).",
+            suggestion="oui",
+            basis=f"Âge : {age}",
+        )
+    elif years is not None:
+        # Below the age reference and no G8. Absence of screening is not a negative result.
+        observation = Observation(
+            f"Patient·e de {years:g} ans, score G8 non renseigné. L'absence de dépistage "
+            "ne permet pas de conclure.",
             basis=f"Âge : {age}",
         )
     else:
@@ -161,41 +175,38 @@ def geriatric_referral(
 def genetic_referral(
     *, family_history: str | None, contested: frozenset[str] = frozenset()
 ) -> Referral:
-    """Propose an oncogenetic referral when the family history names a cancer.
+    """Report the recorded family history. Suggest nothing.
 
-    Any recorded history used to trigger this, which proposed genetics for `Père : HTA` —
-    a family history of hypertension. The rule now looks for an oncological term, and shows
-    the recorded text either way so the RCP can overrule it.
+    See the module docstring: a correct rule needs the relationship, the tumour type, the
+    age at diagnosis and the family pattern, and the ledger holds a free-text line. The
+    text is shown so the RCP can judge it.
     """
     if "family_history" in contested:
-        observation = Observation(
+        text = (
             "Les antécédents familiaux sont rapportés de façon contradictoire dans le "
             "dossier."
         )
+        basis = None
     elif family_history is None:
-        observation = Observation("Antécédents familiaux non renseignés dans le dossier.")
+        text = "Antécédents familiaux non renseignés dans le dossier."
+        basis = None
     elif _reported_absent(family_history):
-        observation = Observation(
-            "Antécédents familiaux rapportés sans particularité (RAS).",
-            answer="non",
-            basis="Antécédents familiaux : RAS",
-        )
-    elif mentions_cancer(family_history):
-        observation = Observation(
-            f"Antécédents familiaux évoquant une pathologie tumorale : "
-            f"« {family_history} ».",
-            answer="oui",
-            basis=f"Antécédents familiaux : {family_history}",
-        )
+        text = "Antécédents familiaux rapportés sans particularité (RAS)."
+        basis = "Antécédents familiaux : RAS"
     else:
-        observation = Observation(
-            f"Antécédents familiaux rapportés, sans pathologie tumorale identifiée : "
-            f"« {family_history} ». À réexaminer si un antécédent oncologique existe.",
-            answer="non",
-            basis=f"Antécédents familiaux : {family_history}",
-        )
+        text = f"Antécédents familiaux rapportés : « {family_history} »."
+        basis = f"Antécédents familiaux : {family_history}"
 
-    return _referral("Avis oncogénétique", GENETIC_APPROVAL, observation)
+    return _referral(
+        "Avis oncogénétique",
+        GENETIC_APPROVAL,
+        Observation(
+            f"{text} L'indication d'une consultation d'oncogénétique dépend du lien de "
+            "parenté, du type tumoral, de l'âge au diagnostic et du profil familial : "
+            "RCPia ne se prononce pas.",
+            basis=basis,
+        ),
+    )
 
 
 def fertility_referral(
@@ -203,10 +214,8 @@ def fertility_referral(
 ) -> Referral:
     """Raise fertility preservation where it may still apply — and never close it.
 
-    This rule answers *Oui* or *à déterminer*, never *Non*. Wrongly declining to raise
-    fertility preservation is permanent; wrongly raising it costs a conversation. The age
-    references behind it are the weakest numbers in this module, so they are allowed to
-    open the question and never to close it.
+    Suggests *oui* or nothing. Wrongly declining to raise fertility preservation is
+    permanent; wrongly raising it costs a conversation.
     """
     years = number_in(age)
     female = is_female(sex)
@@ -227,16 +236,28 @@ def fertility_referral(
             observation = Observation(
                 f"Patient·e de {years:g} ans : la préservation de la fertilité doit être "
                 "abordée avant tout traitement gonadotoxique.",
-                answer="oui",
+                suggestion="oui",
                 basis=f"Âge : {age}",
             )
         else:
-            # Deliberately not "non". See the docstring.
             observation = Observation(
                 f"Patient·e de {years:g} ans, au-delà du repère indicatif de {limit} ans. "
-                "RCPia ne conclut pas : la question reste à poser si un projet parental "
-                "existe.",
+                "La question reste à poser si un projet parental existe.",
                 basis=f"Âge : {age}",
             )
 
     return _referral("Préservation fertilité", FERTILITY_APPROVAL, observation)
+
+
+__all__ = [
+    "Authority",
+    "FERTILITY_AGE_FEMALE",
+    "FERTILITY_AGE_MALE",
+    "G8_THRESHOLD",
+    "GERIATRIC_AGE",
+    "fertility_referral",
+    "genetic_referral",
+    "geriatric_referral",
+    "is_female",
+    "number_in",
+]
