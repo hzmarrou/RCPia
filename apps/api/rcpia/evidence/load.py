@@ -59,8 +59,16 @@ async def run(directory: Path, *, dry_run: bool) -> int:
     print(f"passages seen    {report.chunks_seen}")
     print(f"  inserted       {report.chunks_inserted}")
     print(f"  updated        {report.chunks_updated}")
-    print(f"  unchanged      {report.chunks_unchanged}")
+    print(
+        f"  unchanged      {report.chunks_unchanged}  "
+        f"({report.metadata_updated} refreshed metadata only)"
+    )
     print(f"  embedded       {report.embedded}  ({embedder.model})")
+    # Removals are the consequence worth reading twice: a release replaces its documents,
+    # so anything the corpus agent withdrew disappears here rather than lingering, citable.
+    if report.chunks_removed or report.documents_removed:
+        print(f"  removed        {report.chunks_removed} passages"
+              + (f", {report.documents_removed} documents" if report.documents_removed else ""))
     if report.rejected:
         print(f"  rejected       {len(report.rejected)}")
         for line in report.rejected[:20]:

@@ -438,3 +438,93 @@ async def test_a_document_marked_excluded_is_removed_with_its_passages(
     assert report.documents_removed == 1
     assert await session.scalar(sa.select(sa.func.count()).select_from(EvidenceChunk)) == 0
     assert await session.get(EvidenceDocument, "afu.prostate.2024-2026") is None
+
+
+# --------------------------------------------------------------------------------------
+# Metadata corrections, which change no text at all
+# --------------------------------------------------------------------------------------
+
+
+async def test_a_relabelled_passage_is_updated_without_re_embedding(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """The failure that cost us corpus v3.
+
+    A release that corrects routing metadata changes no passage text, so `content_sha256`
+    stays the same. Keying the whole update on that hash discarded the corrections silently:
+    481 passages kept a `clinical_purpose` the release had removed and 164 kept the wrong
+    `disease_setting`, while the loader reported success.
+    """
+    await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk()]),
+        embedder=FakeEmbedder(),
+    )
+
+    # Same text, same hash, corrected routing -- exactly what a relabelling release looks like.
+    relabelled = chunk(
+        disease_setting="prostate_metastatic_hormone_sensitive",
+        clinical_purpose=["therapy_indication"],
+        not_specified_reason=None,
+    )
+    embedder = FakeEmbedder()
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [relabelled]),
+        embedder=embedder,
+    )
+
+    assert report.chunks_unchanged == 1
+    assert report.metadata_updated == 1
+    # The vector is untouched, because the embedded text is untouched.
+    assert embedder.embedded == []
+
+    stored = await session.scalar(sa.select(EvidenceChunk))
+    assert stored is not None
+    assert stored.disease_setting == "prostate_metastatic_hormone_sensitive"
+    assert stored.clinical_purpose == ["therapy_indication"]
+
+
+async def test_a_changed_context_re_embeds_even_when_the_text_is_identical(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """`contextual_text` carries the section path and is what gets embedded. Correcting a
+    wrong section heading changes the vector without changing a word of the passage."""
+    await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk(embedding_sha256="a" * 64)]),
+        embedder=FakeEmbedder(),
+    )
+
+    renested = chunk(
+        contextual_text="Source: AFU. Section: Cancer localise > Risque faible. La surveillance...",
+        embedding_sha256="e" * 64,
+    )
+    embedder = FakeEmbedder()
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [renested]),
+        embedder=embedder,
+    )
+
+    assert report.chunks_updated == 1
+    assert len(embedder.embedded) == 1
+
+
+async def test_the_reason_a_passage_carries_no_setting_is_stored(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """A general principle and an unlabelled treatment recommendation look identical through
+    a filter, and together they are 40% of the corpus."""
+    await ingest_release(
+        session,
+        directory=release(
+            tmp_path,
+            [document()],
+            [chunk(disease_setting="not_specified", not_specified_reason="general_principle")],
+        ),
+        embedder=FakeEmbedder(),
+    )
+
+    stored = await session.scalar(sa.select(EvidenceChunk))
+    assert stored is not None and stored.not_specified_reason == "general_principle"

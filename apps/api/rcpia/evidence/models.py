@@ -161,9 +161,22 @@ class EvidenceChunk(Base):
     # so a mixed table would rank nonsense; this is what lets a model change be detected.
     embedding_model: Mapped[str | None] = mapped_column(String(100))
 
-    # The corpus agent's hash of the passage. A reingest re-embeds only what changed, which
-    # matters because embedding the whole corpus costs money and minutes.
+    # The corpus agent's hash of the passage text.
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The hash of what was *embedded* — `contextual_text`, which carries the section path.
+    #
+    # **These answer different questions and must not be conflated.** A release that only
+    # corrects routing metadata leaves `content_sha256` untouched, because the passage text
+    # did not change; treating that as "nothing to do" silently discards the relabelling.
+    # Re-embedding keys on this column, and metadata is written unconditionally.
+    embedding_sha256: Mapped[str | None] = mapped_column(String(64))
+
+    # Why a passage carries no disease setting: `general_principle` and `spans_settings` are
+    # legitimate and apply to every patient; `not_determinable` means the source was not
+    # clear enough to say. Kept because the distinction is invisible otherwise — half a
+    # corpus of honest general principles and half of unlabelled treatment guidance look
+    # identical through a filter.
+    not_specified_reason: Mapped[str | None] = mapped_column(String(50))
 
     document: Mapped[EvidenceDocument] = relationship(back_populates="chunks")
 

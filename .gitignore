@@ -47,3 +47,6 @@ docker-compose.override.yml
 *.swp
 .DS_Store
 Thumbs.db
+
+# Database snapshots. Large, regenerable, and not source.
+backups/

@@ -12,10 +12,15 @@ Three properties matter more than speed.
 `disease_setting` would be invisible to every filter, which reads exactly like a corpus
 that does not cover the topic.
 
-**Re-running is cheap.** Every passage carries the corpus agent's hash of its own text, so
-a new release re-embeds only what changed. Embedding the whole slice costs money and
-minutes; embedding it again for four edited passages would be the reason nobody updates the
-corpus.
+**Re-running is cheap, but never lossy.** Metadata is written for every passage in the
+release, unconditionally. Only the *embedding* is skipped when nothing changed.
+
+Those are two different questions and conflating them cost us a release. Corpus v3 corrected
+routing metadata on 975 passages without altering a word of their text, so their
+`content_sha256` was unchanged. Keying the whole update on that hash meant the corrections
+were silently discarded: 481 passages kept a `clinical_purpose` value the release had
+removed, and 164 kept the wrong `disease_setting`. Nothing failed, and the loader reported
+success.
 
 **A passage is stored with the model that embedded it.** Vectors from different models are
 not comparable, so a table holding both would rank nonsense with nothing to show for it.
@@ -147,6 +152,7 @@ class IngestionReport:
     chunks_inserted: int = 0
     chunks_updated: int = 0
     chunks_unchanged: int = 0
+    metadata_updated: int = 0
     chunks_removed: int = 0
     documents_removed: int = 0
     embedded: int = 0
@@ -242,6 +248,10 @@ def _chunk_row(record: dict[str, Any]) -> dict[str, Any]:
         # still searchable, just less well.
         "keyword_text": retrieval.get("keyword_text") or record["text"],
         "content_sha256": record["content_sha256"],
+        # Falls back to the content hash for a release that predates the field: the
+        # worst case is re-embedding a passage that did not need it.
+        "embedding_sha256": record.get("embedding_sha256") or record["content_sha256"],
+        "not_specified_reason": record.get("not_specified_reason"),
     }
 
 
@@ -294,11 +304,17 @@ async def ingest_release(
     }
 
     # ------------------------------------------------------------------ passages
-    stored_hashes = {
-        chunk_id: sha
-        for chunk_id, sha in (
+    # What we already hold, and whether its vector is current. `embedding_sha256` is NULL
+    # for anything loaded before that column existed, which correctly forces a re-embed.
+    stored = {
+        chunk_id: (embedding_sha, embedding is not None)
+        for chunk_id, embedding_sha, embedding in (
             await session.execute(
-                sa.select(EvidenceChunk.chunk_id, EvidenceChunk.content_sha256)
+                sa.select(
+                    EvidenceChunk.chunk_id,
+                    EvidenceChunk.embedding_sha256,
+                    EvidenceChunk.embedding,
+                )
             )
         ).all()
     }
@@ -309,6 +325,7 @@ async def ingest_release(
     seen_chunks: set[str] = set()
 
     pending: list[tuple[dict[str, Any], bool]] = []
+    metadata_only: list[dict[str, Any]] = []
     for record in chunks:
         problem = validate_chunk(record)
         if problem is not None:
@@ -325,11 +342,27 @@ async def ingest_release(
         release_documents.add(row["document_id"])
         seen_chunks.add(row["chunk_id"])
 
-        previous = stored_hashes.get(row["chunk_id"])
-        if previous == row["content_sha256"]:
+        previous_hash, has_vector = stored.get(row["chunk_id"], (None, False))
+        exists = row["chunk_id"] in stored
+        # Re-embed when the embedded text changed, or when there is no vector to keep.
+        if exists and has_vector and previous_hash == row["embedding_sha256"]:
             report.chunks_unchanged += 1
+            # Metadata still goes in: a release that only corrects routing changes no text.
+            metadata_only.append(row)
             continue
-        pending.append((row, previous is not None))
+        pending.append((row, exists))
+
+    # Passages whose vector is current but whose routing may not be. This is the path that
+    # was missing, and its absence was invisible: the loader reported these as "unchanged".
+    for row in metadata_only:
+        await session.execute(
+            sa.update(EvidenceChunk)
+            .where(EvidenceChunk.chunk_id == row["chunk_id"])
+            .values(**row)
+        )
+        report.metadata_updated += 1
+    if metadata_only:
+        await session.flush()
 
     for start in range(0, len(pending), BATCH_SIZE):
         batch = pending[start : start + BATCH_SIZE]
