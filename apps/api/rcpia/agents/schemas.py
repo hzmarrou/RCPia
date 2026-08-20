@@ -57,14 +57,31 @@ class SourceSnippet(Strict):
 
 
 class GuidelinePassage(Strict):
-    """A passage of published guidance. Empty until evidence ingestion exists."""
+    """A passage of published guidance, with enough provenance to be checked and weighed.
+
+    **`clinical_status` has no default on purpose.** Every passage in the corpus is
+    `poc_unreviewed` — no clinician has read a word of it — and a passage nobody has reviewed
+    must not reach a page looking like one that has been. Requiring it means a caller cannot
+    construct a passage without stating where it stands, rather than being trusted to
+    remember.
+
+    `version` matters for the same reason `page` does: an opinion cited against AFU 2024-2026
+    has to stay checkable after the 2027 edition lands.
+    """
 
     id: str = Field(min_length=1, max_length=64)
     text: str = Field(min_length=1, max_length=MAX_TEXT)
     source: str
+    clinical_status: str = Field(min_length=1, max_length=50)
     section: str | None = None
     version: str | None = None
     published_at: str | None = None
+    # Where to look in the source. `recommendation_number` is what a clinician quotes to a
+    # colleague; a page alone is harder to argue with.
+    page: int | None = None
+    recommendation_number: int | None = None
+    # How the page was derived: `source_html_block` is exact, `pdf_text_alignment` inferred.
+    locator_method: str | None = None
 
 
 class ConflictingField(Strict):

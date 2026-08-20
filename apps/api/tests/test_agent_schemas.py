@@ -138,7 +138,13 @@ def test_a_bundle_serializes_to_the_file_pi_is_given() -> None:
 def test_citable_ids_cover_snippets_and_guidelines() -> None:
     task = bundle(
         guideline_passages=[
-            GuidelinePassage(id="ev-001", text="…", source="EAU 2026", section="6.3")
+            GuidelinePassage(
+                id="ev-001",
+                text="…",
+                source="EAU 2026",
+                section="6.3",
+                clinical_status="poc_unreviewed",
+            )
         ]
     )
 
@@ -255,7 +261,11 @@ def test_citations_inside_alternatives_are_checked_too() -> None:
 
 def test_valid_citations_pass() -> None:
     task = bundle(
-        guideline_passages=[GuidelinePassage(id="ev-001", text="…", source="EAU 2026")]
+        guideline_passages=[
+            GuidelinePassage(
+                id="ev-001", text="…", source="EAU 2026", clinical_status="poc_unreviewed"
+            )
+        ]
     )
     grounded = output(
         evidence_references=[
@@ -367,7 +377,11 @@ def test_an_id_cannot_belong_to_both_a_snippet_and_a_guideline() -> None:
             source_snippets=[
                 SourceSnippet(id="x-1", text="a", source_document_id="doc-1")
             ],
-            guideline_passages=[GuidelinePassage(id="x-1", text="b", source="EAU 2026")],
+            guideline_passages=[
+            GuidelinePassage(
+                id="x-1", text="b", source="EAU 2026", clinical_status="poc_unreviewed"
+            )
+        ],
         )
 
 
@@ -405,3 +419,32 @@ def test_the_schema_given_to_the_agent_describes_the_output_model() -> None:
     assert schema["title"] == "AgentOutput"
     assert "recommendation" in schema["properties"]
     assert "rationale" in schema["required"]
+
+
+def test_a_guideline_passage_must_state_whether_it_has_been_reviewed() -> None:
+    """Every passage in the corpus is `poc_unreviewed` -- no clinician has read a word of it.
+    A passage nobody has reviewed must not reach a page looking like one that has been, and
+    the way to guarantee that is to make the field impossible to omit rather than to trust
+    every caller to remember it."""
+    with pytest.raises(ValidationError):
+        GuidelinePassage(
+            id="afu.prostate.0001",
+            text="La surveillance active est une option.",
+            source="AFU Prostate 2024-2026",
+        )
+
+
+def test_a_guideline_passage_carries_what_a_clinician_needs_to_check_it() -> None:
+    passage = GuidelinePassage(
+        id="afu.prostate.0001",
+        text="La surveillance active est une option.",
+        source="AFU Prostate 2024-2026",
+        clinical_status="poc_unreviewed",
+        version="2024-2026",
+        page=42,
+        recommendation_number=12,
+        locator_method="pdf_text_alignment",
+    )
+
+    assert passage.clinical_status == "poc_unreviewed"
+    assert (passage.page, passage.recommendation_number) == (42, 12)

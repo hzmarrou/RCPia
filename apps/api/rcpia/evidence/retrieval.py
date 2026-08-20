@@ -32,11 +32,17 @@ this module uses.
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rcpia.evidence.models import ENGLISH_CONFIG, FRENCH_CONFIG, EvidenceChunk
+from rcpia.evidence.models import (
+    ENGLISH_CONFIG,
+    FRENCH_CONFIG,
+    EvidenceChunk,
+    EvidenceDocument,
+)
 from rcpia.evidence.rerank import Reranker
 
 # Both legs offer this many candidates to the fusion. Wide enough that a passage ranked
@@ -187,7 +193,19 @@ class RetrievedChunk:
     text: str
     citation_label: str | None
     page_start: int | None
+    page_end: int | None
+    recommendation_number: int | None
+    # How the page was derived and how far to trust it — `source_html_block` is exact,
+    # `pdf_text_alignment` is inferred.
+    locator_method: str | None
+    locator_confidence: float | None
+    # `poc_unreviewed` until a clinician has read the passage. Carried so the page can say so.
+    clinical_status: str
+    # The edition the passage was cited against.
+    version_label: str | None
+    publisher: str | None
     disease_setting: str
+    not_specified_reason: str | None
     language: str
     score: float
     keyword_rank: int | None = None
@@ -239,7 +257,15 @@ def _to_chunk(
         text=row.text,
         citation_label=row.citation_label,
         page_start=row.page_start,
+        page_end=row.page_end,
+        recommendation_number=row.recommendation_number,
+        locator_method=row.locator_method,
+        locator_confidence=row.locator_confidence,
+        clinical_status=row.clinical_status,
+        version_label=row.version_label,
+        publisher=row.publisher,
         disease_setting=row.disease_setting,
+        not_specified_reason=row.not_specified_reason,
         language=row.language,
         score=score,
         keyword_rank=keyword_rank,
@@ -248,15 +274,35 @@ def _to_chunk(
     )
 
 
+# Everything a clinician needs to check a citation, and everything a reader needs to judge
+# how much weight it carries. `clinical_status` is the one that must never be dropped: every
+# passage in the corpus is `poc_unreviewed`, and a passage nobody has reviewed must not reach
+# a page looking like one that has been.
 _COLUMNS = (
     EvidenceChunk.chunk_id,
     EvidenceChunk.document_id,
     EvidenceChunk.text,
     EvidenceChunk.citation_label,
     EvidenceChunk.page_start,
+    EvidenceChunk.page_end,
+    EvidenceChunk.recommendation_number,
+    EvidenceChunk.locator_method,
+    EvidenceChunk.locator_confidence,
+    EvidenceChunk.clinical_status,
     EvidenceChunk.disease_setting,
+    EvidenceChunk.not_specified_reason,
     EvidenceChunk.language,
+    # From the document, so an opinion stays checkable after the guideline is superseded.
+    EvidenceDocument.version_label,
+    EvidenceDocument.publisher,
 )
+
+
+def _base_select() -> sa.Select[Any]:
+    """The candidate query, joined to its document for the edition it was cited against."""
+    return sa.select(*_COLUMNS).join(
+        EvidenceDocument, EvidenceChunk.document_id == EvidenceDocument.document_id
+    )
 
 
 async def _keyword_leg(
@@ -282,7 +328,7 @@ async def _keyword_leg(
     )
 
     statement = (
-        sa.select(*_COLUMNS)
+        _base_select()
         .where(sa.and_(*clauses, matches))
         .order_by(rank.desc())
         .limit(CANDIDATE_LIMIT)
@@ -312,7 +358,7 @@ async def _dense_leg(
     """
     distance = EvidenceChunk.embedding.cosine_distance(embedding)
     statement = (
-        sa.select(*_COLUMNS)
+        _base_select()
         .where(
             sa.and_(
                 *clauses,
@@ -326,7 +372,7 @@ async def _dense_leg(
     return list((await session.execute(statement)).all())
 
 
-async def search(
+async def _search(
     session: AsyncSession,
     *,
     question: str,
@@ -334,9 +380,9 @@ async def search(
     embedding: list[float] | None,
     embedding_model: str,
     filter: Filter,
-    limit: int = 10,
-    reranker: Reranker | None = None,
-    floor: float = RELEVANCE_FLOOR,
+    limit: int,
+    reranker: Reranker | None,
+    floor: float,
 ) -> RetrievalReport:
     """Retrieve the passages an agent may see for one clinical question.
 
@@ -348,9 +394,6 @@ async def search(
     satisfied the full filter, and whoever reads the result is entitled to know which
     happened.
 
-    Without a `reranker` the floor cannot be applied and every fused candidate is returned.
-    That is the correct behaviour for a test or an offline experiment, and the wrong
-    behaviour for a clinician-facing answer — `report.reranked` distinguishes them.
     """
     report = RetrievalReport(keyword_skipped=not concepts)
     current: Filter | None = filter
@@ -441,3 +484,73 @@ async def search(
     # correct answer: the alternative is offering a passage the filter refused.
     report.filter_used = None
     return report
+
+
+async def search(
+    session: AsyncSession,
+    *,
+    question: str,
+    concepts: Concepts,
+    embedding: list[float] | None,
+    embedding_model: str,
+    filter: Filter,
+    reranker: Reranker,
+    limit: int = 10,
+    floor: float = RELEVANCE_FLOOR,
+) -> RetrievalReport:
+    """Retrieve the passages an agent may see for one clinical question.
+
+    **The reranker is required, and that is the point.** The relevance floor is the only
+    stage that can say the corpus does not answer the question, and it exists only where a
+    cross-encoder has scored the candidates. When the reranker was optional, a caller who
+    omitted it received the fused candidates unfiltered — ten passages with real citations
+    and real page numbers, and no signal that the safety stage had been skipped. Making it a
+    keyword argument without a default means that mistake cannot be made silently.
+
+    Retrieval without reranking is a legitimate thing to want, for an ablation or an offline
+    experiment. It has its own name: `search_without_reranking`.
+    """
+    return await _search(
+        session,
+        question=question,
+        concepts=concepts,
+        embedding=embedding,
+        embedding_model=embedding_model,
+        filter=filter,
+        limit=limit,
+        reranker=reranker,
+        floor=floor,
+    )
+
+
+async def search_without_reranking(
+    session: AsyncSession,
+    *,
+    question: str,
+    concepts: Concepts,
+    embedding: list[float] | None,
+    embedding_model: str,
+    filter: Filter,
+    limit: int = 10,
+) -> RetrievalReport:
+    """Filter, search and fuse, with no cross-encoder and no relevance floor.
+
+    **Not for clinician-facing use.** Every fused candidate is returned however weak, because
+    nothing has judged whether any of them answer the question. This exists so the retrieval
+    evaluation can measure what reranking actually contributes, and so an ablation does not
+    have to reach for a `None` that the production path deliberately forbids.
+
+    `report.reranked` is False on everything it returns, so a result from here can always be
+    told apart from a result that passed the floor.
+    """
+    return await _search(
+        session,
+        question=question,
+        concepts=concepts,
+        embedding=embedding,
+        embedding_model=embedding_model,
+        filter=filter,
+        limit=limit,
+        reranker=None,
+        floor=RELEVANCE_FLOOR,
+    )

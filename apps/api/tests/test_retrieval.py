@@ -30,6 +30,7 @@ from rcpia.evidence.retrieval import (
     Filter,
     reciprocal_rank_fusion,
     search,
+    search_without_reranking,
 )
 
 MODEL = "text-embedding-3-large"
@@ -86,6 +87,11 @@ async def add_chunk(
             language=language,
             clinical_status="poc_unreviewed",
             keyword_text=text,
+            recommendation_number=12,
+            page_start=42,
+            page_end=42,
+            locator_method="pdf_text_alignment",
+            locator_confidence=0.9,
             content_sha256=chunk_id.ljust(64, "0")[:64],
             embedding=None if embedding_index is None else vector(embedding_index),
             embedding_model=None if embedding_index is None else embedding_model,
@@ -208,7 +214,7 @@ async def test_a_prostate_question_returns_no_bladder_passage(session: AsyncSess
         disease_setting="bladder_nmibc_low_risk",
     )
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("surveillance active",)),
@@ -231,7 +237,7 @@ async def test_a_bladder_question_returns_no_prostate_passage(session: AsyncSess
         disease_setting="bladder_mibc_non_metastatic",
     )
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("chimiotherapie",)),
@@ -262,7 +268,7 @@ async def test_a_metastatic_question_returns_no_localized_protocol(
         disease_setting="prostate_metastatic_hormone_sensitive",
     )
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("traitement radical",)),
@@ -286,7 +292,7 @@ async def test_passages_marked_for_no_setting_are_admitted(session: AsyncSession
         not_specified_reason="general_principle",
     )
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("definition du cancer",)),
@@ -323,7 +329,7 @@ async def test_widening_finds_a_passage_the_strict_filter_refused(
     await add_document(session, "doc")
     await add_chunk(session, "primary-only", text="curage ganglionnaire", therapy_line="primary")
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("curage ganglionnaire",)),
@@ -351,7 +357,7 @@ async def test_widening_never_crosses_the_cancer_type(session: AsyncSession) -> 
         disease_setting="bladder_mibc_non_metastatic",
     )
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("cystectomie totale",)),
@@ -370,7 +376,7 @@ async def test_widening_never_drops_the_agent_role(session: AsyncSession) -> Non
     await add_document(session, "doc")
     await add_chunk(session, "urology-1", text="evaluation du patient")
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("evaluation du patient",)),
@@ -397,7 +403,7 @@ async def test_a_query_embedded_with_another_model_retrieves_nothing(
     await add_document(session, "doc")
     await add_chunk(session, "chunk-1", embedding_index=7, embedding_model=MODEL)
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(),
@@ -415,7 +421,7 @@ async def test_the_dense_leg_finds_a_passage_sharing_no_words(session: AsyncSess
     await add_document(session, "doc")
     await add_chunk(session, "paraphrase", text="aucun mot en commun", embedding_index=11)
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("cystectomie",)),
@@ -435,7 +441,7 @@ async def test_an_absent_concept_set_is_recorded_rather_than_reported_as_no_hits
     await add_document(session, "doc")
     await add_chunk(session, "chunk-1", embedding_index=3)
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(),
@@ -457,7 +463,7 @@ async def test_a_passage_without_an_embedding_is_excluded_not_sorted_last(
     await add_document(session, "doc")
     await add_chunk(session, "unembedded", embedding_index=None)
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(),
@@ -494,7 +500,7 @@ async def test_both_legs_are_reported_separately(session: AsyncSession) -> None:
     await add_document(session, "doc")
     await add_chunk(session, "chunk-1", text="cystectomie totale", embedding_index=2)
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("cystectomie totale",)),
@@ -666,7 +672,7 @@ async def test_without_a_reranker_nothing_is_refused_and_the_report_says_so(
     await add_document(session, "doc")
     await add_chunk(session, "chunk-1", text="alpha")
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("alpha",)),
@@ -723,7 +729,7 @@ async def test_a_passage_of_undeterminable_scope_is_not_treated_as_universal(
         not_specified_reason="not_determinable",
     )
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("orchidectomie bilaterale",)),
@@ -750,7 +756,7 @@ async def test_a_genuinely_universal_passage_is_still_admitted(
         not_specified_reason=reason,
     )
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("definition du cancer",)),
@@ -775,7 +781,7 @@ async def test_an_unspecified_passage_with_no_stated_reason_is_not_admitted(
         not_specified_reason=None,
     )
 
-    report = await search(
+    report = await search_without_reranking(
         session,
         question="question de test",
         concepts=Concepts(french=("texte sans raison",)),
@@ -785,3 +791,91 @@ async def test_an_unspecified_passage_with_no_stated_reason_is_not_admitted(
     )
 
     assert report.chunks == []
+
+
+# --------------------------------------------------------------------------------------
+# Provenance, and the safety stage that cannot be skipped by accident
+# --------------------------------------------------------------------------------------
+
+
+async def test_a_result_says_whether_a_clinician_has_reviewed_it(
+    session: AsyncSession,
+) -> None:
+    """Every passage in the corpus is `poc_unreviewed`. If retrieval drops that, nothing
+    downstream can say so, and an unreviewed passage reaches the page looking like one that
+    has been reviewed."""
+    await add_document(session, "doc")
+    await add_chunk(session, "chunk-1", text="alpha")
+
+    report = await search_without_reranking(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("alpha",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+    )
+
+    assert report.chunks[0].clinical_status == "poc_unreviewed"
+
+
+async def test_a_result_carries_the_edition_it_was_cited_against(
+    session: AsyncSession,
+) -> None:
+    """An opinion cited against AFU 2024-2026 has to stay checkable after 2027 lands, and the
+    edition lives on the document rather than the passage."""
+    session.add(
+        EvidenceDocument(
+            document_id="versioned",
+            title="AFU Prostate",
+            clinical_status="poc_unreviewed",
+            version_label="2024-2026",
+            publisher="AFU",
+        )
+    )
+    await session.flush()
+    await add_chunk(session, "chunk-1", document_id="versioned", text="alpha")
+
+    report = await search_without_reranking(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("alpha",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+    )
+
+    assert report.chunks[0].version_label == "2024-2026"
+    assert report.chunks[0].publisher == "AFU"
+
+
+async def test_the_locator_says_how_far_to_trust_the_page(session: AsyncSession) -> None:
+    """`source_html_block` is exact and `pdf_text_alignment` is inferred. A reader sent to the
+    wrong page loses confidence in every citation, not just that one."""
+    await add_document(session, "doc")
+    await add_chunk(session, "chunk-1", text="alpha")
+
+    report = await search_without_reranking(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("alpha",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+    )
+
+    found = report.chunks[0]
+    assert found.recommendation_number == 12
+    assert found.locator_method == "pdf_text_alignment"
+    assert found.page_start == 42
+
+
+def test_the_production_search_cannot_be_called_without_a_reranker() -> None:
+    """The floor is the only stage that can say the corpus does not answer the question. When
+    the reranker was optional, omitting it returned ten unfiltered passages with real
+    citations and no signal that the safety stage had been skipped."""
+    import inspect
+
+    parameter = inspect.signature(search).parameters["reranker"]
+
+    assert parameter.default is inspect.Parameter.empty

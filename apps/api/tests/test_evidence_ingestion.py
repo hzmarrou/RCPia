@@ -19,6 +19,7 @@ from rcpia.evidence.ingestion import (
     ingest_release,
     names_an_out_of_scope_disease,
     validate_chunk,
+    verify_search_configurations,
 )
 from rcpia.evidence.models import (
     EMBEDDING_DIMENSIONS,
@@ -760,3 +761,35 @@ async def test_a_release_without_its_schema_is_refused(
             directory=release(tmp_path, [document()], [chunk()], schema=None),
             embedder=FakeEmbedder(),
         )
+
+
+# --------------------------------------------------------------------------------------
+# The text search configurations the stored vectors were built with
+# --------------------------------------------------------------------------------------
+
+
+async def test_an_altered_search_configuration_stops_ingestion(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """PostgreSQL's dependency tracking prevents DROP, not ALTER. An altered configuration
+    leaves every stored vector built under the old rules -- terms that used to match stop
+    matching, and nothing raises. We cannot prevent it, so we refuse to add new vectors to
+    the mixture."""
+    await session.execute(
+        sa.text(
+            "ALTER TEXT SEARCH CONFIGURATION public.rcpia_fr "
+            "ALTER MAPPING FOR word WITH french_stem"
+        )
+    )
+
+    with pytest.raises(CorpusError, match="altered since the migration"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [document()], [chunk()]),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_the_expected_configuration_passes(session: AsyncSession) -> None:
+    """Both configurations fold accents before stemming, and the check knows it."""
+    await verify_search_configurations(session)

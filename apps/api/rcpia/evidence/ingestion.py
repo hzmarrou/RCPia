@@ -181,6 +181,65 @@ def claims_exclusive_settings(setting: str) -> bool:
     )
 
 
+# What each text search configuration must map word tokens through. PostgreSQL records a
+# dependency from the generated `search_vector` column to the configuration, so neither can
+# be dropped while passages exist — but that dependency does **not** cover `ALTER TEXT SEARCH
+# CONFIGURATION`. An altered configuration leaves every stored vector built by the old rules:
+# terms that used to match stop matching, and nothing raises.
+#
+# We cannot prevent an alteration, so we detect one. Rebuilding the vectors belongs in a
+# migration; refusing to ingest against a configuration we do not recognise at least stops us
+# writing new vectors under rules the old ones were not built with.
+EXPECTED_CONFIGURATIONS = {
+    "rcpia_fr": ("unaccent", "french_stem"),
+    "rcpia_en": ("unaccent", "english_stem"),
+}
+
+_CONFIGURATION_QUERY = sa.text("""
+    SELECT c.cfgname, t.alias, array_agg(d.dictname ORDER BY m.mapseqno) AS dictionaries
+    FROM pg_ts_config c
+    JOIN pg_ts_config_map m ON m.mapcfg = c.oid
+    JOIN pg_ts_dict d ON d.oid = m.mapdict
+    JOIN pg_catalog.ts_token_type(c.cfgparser) t ON t.tokid = m.maptokentype
+    WHERE c.cfgname = ANY(:names) AND t.alias IN ('word', 'hword', 'hword_part')
+    GROUP BY c.cfgname, t.alias
+""")
+
+
+async def verify_search_configurations(session: AsyncSession) -> None:
+    """Refuse to ingest against a text search configuration we do not recognise.
+
+    Detection, not prevention: a superuser can alter a configuration at any time, and the
+    stored vectors silently stop agreeing with it. This catches the case where that has
+    already happened before we add more vectors to the mixture.
+    """
+    rows = (
+        await session.execute(
+            _CONFIGURATION_QUERY, {"names": list(EXPECTED_CONFIGURATIONS)}
+        )
+    ).all()
+
+    seen: dict[str, set[tuple[str, ...]]] = {}
+    for name, _alias, dictionaries in rows:
+        seen.setdefault(name, set()).add(tuple(dictionaries))
+
+    for name, expected in EXPECTED_CONFIGURATIONS.items():
+        mappings = seen.get(name)
+        if not mappings:
+            raise CorpusError(
+                f"Text search configuration {name!r} is missing. Run the migrations before "
+                "loading a corpus."
+            )
+        if mappings != {expected}:
+            found = " / ".join(",".join(mapping) for mapping in sorted(mappings))
+            raise CorpusError(
+                f"Text search configuration {name!r} maps words through {found}, expected "
+                f"{','.join(expected)}. It has been altered since the migration that created "
+                "it, so every stored search vector was built under different rules. Rebuild "
+                "them in a migration rather than ingesting into the mixture."
+            )
+
+
 class CorpusError(Exception):
     """The release cannot be loaded."""
 
@@ -348,6 +407,10 @@ async def ingest_release(
     which passages are missing — and the loader previously reported success while doing
     exactly that. Any rejection now raises before anything is committed.
     """
+    # Before anything is written: the vectors we are about to add must have been built
+    # under the same rules as the ones already stored.
+    await verify_search_configurations(session)
+
     schema = ReleaseSchema.load(directory)
     documents = read_jsonl(directory / "documents.jsonl")
     chunks = read_jsonl(directory / "chunks.jsonl")
