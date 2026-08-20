@@ -13,6 +13,7 @@ rather than assumed, and each is pinned here so a configuration change cannot qu
 it.
 """
 
+import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,6 +66,7 @@ async def add_chunk(
     therapy_line: str = "primary",
     agent_roles: tuple[str, ...] = ("urology_oncology",),
     language: str = "fr",
+    not_specified_reason: str | None = None,
     embedding_index: int | None = None,
     embedding_model: str = MODEL,
 ) -> None:
@@ -77,6 +79,7 @@ async def add_chunk(
             section_path=["Section"],
             cancer_types=list(cancer_types),
             disease_setting=disease_setting,
+            not_specified_reason=not_specified_reason,
             therapy_line=therapy_line,
             clinical_purpose=["treatment_selection"],
             agent_roles=list(agent_roles),
@@ -276,7 +279,11 @@ async def test_passages_marked_for_no_setting_are_admitted(session: AsyncSession
     the general statement that frames the specific one."""
     await add_document(session, "doc")
     await add_chunk(
-        session, "general", text="definition du cancer", disease_setting="not_specified"
+        session,
+        "general",
+        text="definition du cancer",
+        disease_setting="not_specified",
+        not_specified_reason="general_principle",
     )
 
     report = await search(
@@ -296,9 +303,9 @@ async def test_passages_marked_for_no_setting_are_admitted(session: AsyncSession
 # --------------------------------------------------------------------------------------
 
 
-def test_widening_drops_therapy_line_before_disease_setting() -> None:
-    """Therapy line is the narrowest claim and the one a guideline is least likely to state.
-    Disease setting is the difference between localized and metastatic disease."""
+def test_widening_relaxes_the_therapy_line_and_nothing_else() -> None:
+    """Dropping the disease setting admits passages written for every other stage, and
+    re-admits every passage whose scope the corpus could not determine."""
     strict = Filter("prostate", "prostate_localized_low_risk", "salvage", "urology_oncology")
 
     once = strict.widen()
@@ -306,10 +313,8 @@ def test_widening_drops_therapy_line_before_disease_setting() -> None:
         "prostate", "prostate_localized_low_risk", None, "urology_oncology"
     )
 
-    twice = once.widen() if once else None
-    assert twice == Filter("prostate", None, None, "urology_oncology")
-
-    assert twice is not None and twice.widen() is None
+    # And there is nowhere further to go.
+    assert once is not None and once.widen() is None
 
 
 async def test_widening_finds_a_passage_the_strict_filter_refused(
@@ -375,7 +380,7 @@ async def test_widening_never_drops_the_agent_role(session: AsyncSession) -> Non
     )
 
     assert report.chunks == []
-    assert report.widened == 2
+    assert report.widened == 1
 
 
 # --------------------------------------------------------------------------------------
@@ -569,10 +574,34 @@ async def test_everything_below_the_floor_returns_nothing(session: AsyncSession)
     assert report.below_floor == 2
 
 
-async def test_a_weak_result_does_not_widen_the_filter(session: AsyncSession) -> None:
-    """Widening is the answer when the filter admitted nothing. It is the wrong answer when
-    the filter admitted passages and the reranker judged them all irrelevant -- the corpus
-    does not answer the question, and a looser filter offers worse passages, not better."""
+async def test_a_weak_strict_result_relaxes_the_therapy_line(session: AsyncSession) -> None:
+    """The review's scenario. A below-floor strict candidate alongside a relevant passage one
+    therapy-line relaxation away returned nothing and never widened -- the answer existed and
+    the filter was a shade too tight."""
+    await add_document(session, "doc")
+    await add_chunk(session, "weak-strict", text="passage de rattrapage", therapy_line="salvage")
+    await add_chunk(session, "relevant-relaxed", text="passage initial", therapy_line="primary")
+
+    report = await search(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("passage de rattrapage", "passage initial")),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate", "prostate_localized_low_risk", "salvage"),
+        reranker=FakeReranker(
+            {"passage de rattrapage": 0.1, "passage initial": 0.92}
+        ),
+    )
+
+    assert report.widened == 1
+    assert [chunk.chunk_id for chunk in report.chunks] == ["relevant-relaxed"]
+
+
+async def test_nothing_relevant_anywhere_still_returns_nothing(
+    session: AsyncSession,
+) -> None:
+    """Relaxing the therapy line is a second chance, not a lowering of the bar."""
     await add_document(session, "doc")
     await add_chunk(session, "weak", text="peu pertinent", therapy_line="primary")
 
@@ -582,12 +611,11 @@ async def test_a_weak_result_does_not_widen_the_filter(session: AsyncSession) ->
         concepts=Concepts(french=("peu pertinent",)),
         embedding=None,
         embedding_model=MODEL,
-        filter=Filter("prostate", "prostate_localized_low_risk", "primary"),
+        filter=Filter("prostate", "prostate_localized_low_risk", "salvage"),
         reranker=FakeReranker({}, default=0.1),
     )
 
     assert report.chunks == []
-    assert report.widened == 0
 
 
 async def test_the_reranker_reorders_what_fusion_ranked(session: AsyncSession) -> None:
@@ -672,3 +700,88 @@ async def test_the_reranker_sees_the_question_not_the_concepts(
     )
 
     assert reranker.calls == [("Quelle est la conduite a tenir ?", 1)]
+
+
+# --------------------------------------------------------------------------------------
+# `not_specified` is three different claims
+# --------------------------------------------------------------------------------------
+
+
+async def test_a_passage_of_undeterminable_scope_is_not_treated_as_universal(
+    session: AsyncSession,
+) -> None:
+    """"We could not tell what this applies to" and "this applies to everyone" are different
+    claims. Conflating them admitted 292 prostate passages of unknown scope to every patient,
+    74 of which name castration or metastatic therapy -- so a localized low-risk filter could
+    return bilateral orchiectomy."""
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "undeterminable",
+        text="orchidectomie bilaterale",
+        disease_setting="not_specified",
+        not_specified_reason="not_determinable",
+    )
+
+    report = await search(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("orchidectomie bilaterale",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate", "prostate_localized_low_risk"),
+    )
+
+    assert report.chunks == []
+
+
+@pytest.mark.parametrize("reason", ["general_principle", "spans_settings"])
+async def test_a_genuinely_universal_passage_is_still_admitted(
+    session: AsyncSession, reason: str
+) -> None:
+    """Excluding these would drop the general statement that frames the specific one, and
+    over-filtering is invisible."""
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "universal",
+        text="definition du cancer",
+        disease_setting="not_specified",
+        not_specified_reason=reason,
+    )
+
+    report = await search(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("definition du cancer",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate", "prostate_localized_low_risk"),
+    )
+
+    assert [chunk.chunk_id for chunk in report.chunks] == ["universal"]
+
+
+async def test_an_unspecified_passage_with_no_stated_reason_is_not_admitted(
+    session: AsyncSession,
+) -> None:
+    """A label carrying no justification is not evidence that the passage is universal."""
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "unexplained",
+        text="texte sans raison",
+        disease_setting="not_specified",
+        not_specified_reason=None,
+    )
+
+    report = await search(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("texte sans raison",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate", "prostate_localized_low_risk"),
+    )
+
+    assert report.chunks == []

@@ -47,14 +47,23 @@ CANDIDATE_LIMIT = 50
 # passage found by both legs beats one found brilliantly by a single leg.
 RRF_K = 60
 
-# Passages the corpus declares applicable to every setting: definitions, epidemiology,
-# general principles. They are admitted alongside the requested setting rather than filtered
-# out, because excluding them would drop the general statement that frames the specific one.
-#
-# This is currently 52% of the corpus, which is more than the label is meant to carry — see
-# `docs/reviews/corpus-v3-change-request.md`. Whether admitting them helps or hurts is a
-# question for the retrieval evaluation, not for an argument.
 UNSPECIFIED = "not_specified"
+
+# `not_specified` is not one claim but three, and only two of them mean "applies to every
+# patient". The third — `not_determinable` — means the corpus could not tell what the passage
+# applies to, which is a statement about our knowledge, not about the passage's scope.
+#
+# Treating them alike admitted 292 prostate passages of unknown applicability to every
+# patient, 74 of which name castration or metastatic therapy. A localized low-risk filter
+# could return bilateral orchiectomy.
+#
+# `ancestry_unreliable` is excluded for the same reason, and a NULL reason with it: a passage
+# whose label carries no stated justification is not evidence that it is universal.
+#
+# Leakage is reduced, not eliminated — `general_principle` has the highest rate of all three
+# (15 of 33). That residue is a corpus finding rather than a filter bug, and it is recorded
+# in `docs/reviews/corpus-v3-change-request.md`.
+ADMISSIBLE_UNSPECIFIED_REASONS = ("general_principle", "spans_settings")
 
 # Below this, a passage is discarded rather than returned. Measured against the loaded corpus
 # with three probe queries: the worst genuinely relevant candidate scored 0.579, and the best
@@ -123,23 +132,29 @@ class Filter:
     disease_setting: str | None = None
     therapy_line: str | None = None
     agent_role: str | None = None
+    # Which `not_specified` passages count as universally applicable. A parameter rather than
+    # a constant so the retrieval evaluation can measure the choice instead of inheriting it.
+    admit_unspecified: tuple[str, ...] = ADMISSIBLE_UNSPECIFIED_REASONS
 
     def widen(self) -> "Filter | None":
         """The next-looser filter, or None when nothing further may be dropped.
 
-        Therapy line goes first: it is the narrowest claim and the one a guideline is least
-        likely to state explicitly. Disease setting goes second, and reluctantly — it is the
-        difference between localized and metastatic disease.
+        **Only the therapy line is ever relaxed.** It is the narrowest claim and the one a
+        guideline is least likely to state explicitly, so a passage that omits it is usually
+        still applicable.
 
-        `cancer_type` and `agent_role` are never dropped. Widening past the cancer type would
-        offer bladder guidance for a prostate patient, which is the failure the filter exists
-        to prevent; a wider filter returning something is worse than a strict filter
-        returning nothing.
+        `disease_setting`, `cancer_type` and `agent_role` are never dropped. Dropping the
+        cancer type would offer bladder guidance to a prostate patient. Dropping the disease
+        setting is subtler and just as wrong: it admits passages written for *every other*
+        stage — localized protocols for metastatic disease — and it re-admits every passage
+        whose scope the corpus could not determine, undoing the admissibility rule above.
+
+        Nothing is lost by holding the setting: genuinely universal passages are already
+        admitted through `admit_unspecified`. A wider filter that returns something is worse
+        than a strict filter that returns nothing.
         """
         if self.therapy_line is not None:
             return replace(self, therapy_line=None)
-        if self.disease_setting is not None:
-            return replace(self, disease_setting=None)
         return None
 
     def as_clauses(self) -> list[sa.ColumnElement[bool]]:
@@ -147,8 +162,12 @@ class Filter:
             EvidenceChunk.cancer_types.contains([self.cancer_type])
         ]
         if self.disease_setting is not None:
+            universal = sa.and_(
+                EvidenceChunk.disease_setting == UNSPECIFIED,
+                EvidenceChunk.not_specified_reason.in_(self.admit_unspecified),
+            )
             clauses.append(
-                EvidenceChunk.disease_setting.in_((self.disease_setting, UNSPECIFIED))
+                sa.or_(EvidenceChunk.disease_setting == self.disease_setting, universal)
             )
         if self.therapy_line is not None:
             clauses.append(
@@ -321,16 +340,13 @@ async def search(
 ) -> RetrievalReport:
     """Retrieve the passages an agent may see for one clinical question.
 
-    Widens the filter only when the strict one returns nothing at all. A widened search is
-    recorded in the report rather than blended in silently: a passage admitted because the
-    therapy line was dropped is a weaker match than one that satisfied the full filter, and
-    whoever reads the result is entitled to know which happened.
+    Widens the filter when the strict one yields nothing usable — whether because it admitted
+    no passages, or because every passage it admitted fell below the relevance floor.
 
-    **A weak result does not widen.** Widening loosens the filter, which is the right answer
-    when the filter admitted nothing; it is the wrong answer when the filter admitted
-    passages and the reranker judged them all irrelevant. In that case the corpus does not
-    answer the question, and a looser filter would only offer worse passages with more
-    confidence. The report says so and returns nothing.
+    A widened search is recorded in the report rather than blended in silently: a passage
+    admitted only because the therapy line was relaxed is a weaker match than one that
+    satisfied the full filter, and whoever reads the result is entitled to know which
+    happened.
 
     Without a `reranker` the floor cannot be applied and every fused candidate is returned.
     That is the correct behaviour for a test or an offline experiment, and the wrong
@@ -360,9 +376,10 @@ async def search(
         )
 
         if keyword or dense:
-            report.filter_used = current
+            attempted = current
             report.keyword_hits = len(keyword)
             report.dense_hits = len(dense)
+            report.filter_used = attempted
 
             by_id = {row.chunk_id: row for row in (*dense, *keyword)}
             keyword_order = {row.chunk_id: i for i, row in enumerate(keyword, start=1)}
@@ -399,17 +416,22 @@ async def search(
             kept = sorted(
                 (item for item in scored if item[2] >= floor), key=lambda item: -item[2]
             )
-            report.chunks = [
-                _to_chunk(
-                    by_id[chunk_id],
-                    score=score,
-                    relevance=relevance,
-                    keyword_rank=keyword_order.get(chunk_id),
-                    dense_rank=dense_order.get(chunk_id),
-                )
-                for chunk_id, score, relevance in kept[:limit]
-            ]
-            return report
+            if kept:
+                report.chunks = [
+                    _to_chunk(
+                        by_id[chunk_id],
+                        score=score,
+                        relevance=relevance,
+                        keyword_rank=keyword_order.get(chunk_id),
+                        dense_rank=dense_order.get(chunk_id),
+                    )
+                    for chunk_id, score, relevance in kept[:limit]
+                ]
+                return report
+            # Everything the filter admitted was judged irrelevant. That can mean the corpus
+            # has nothing to say — or that the filter was a shade too tight, and the passage
+            # that answers the question sits one therapy-line relaxation away. Relaxing costs
+            # one more round trip; not relaxing returns nothing when an answer existed.
 
         current = current.widen()
         if current is not None:

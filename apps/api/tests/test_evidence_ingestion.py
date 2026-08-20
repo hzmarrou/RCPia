@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.ingestion import (
     CorpusError,
+    ReleaseSchema,
     ingest_release,
     names_an_out_of_scope_disease,
     validate_chunk,
@@ -87,21 +88,77 @@ def chunk(chunk_id: str = "afu.prostate.2024-2026.localise.01.0001", **overrides
         "cancer_types": ["prostate"],
         "disease_setting": "prostate_localized_low_risk",
         "therapy_line": "primary",
-        "clinical_purpose": ["treatment_selection"],
+        "clinical_purpose": ["therapy_indication"],
         "agent_roles": ["urology_oncology"],
         "unit_type": "recommendation",
         "recommendation_number": 12,
         "retrieval": {"keyword_text": "surveillance active risque faible"},
         "content_sha256": "a" * 64,
+        "embedding_sha256": "b" * 64,
+        "not_specified_reason": "not_applicable",
         "clinical_status": "poc_unreviewed",
     }
     record.update(overrides)
     return record
 
 
-def release(tmp_path: Path, documents: list[dict], chunks: list[dict]) -> Path:
+# The enums the real `chunk.schema.json` declares, trimmed to what the tests exercise. The
+# loader validates against the release's own schema, so a release without one is refused.
+SCHEMA = {
+    "required": ["chunk_id", "document_id", "text", "contextual_text", "content_sha256"],
+    "properties": {
+        "disease_setting": {
+            "type": "string",
+            "enum": [
+                "not_specified",
+                "prostate_localized_low_risk",
+                "prostate_metastatic_hormone_sensitive",
+                "bladder_mibc_non_metastatic",
+                "bladder_nmibc_low_risk",
+            ],
+        },
+        "therapy_line": {
+            "type": "string",
+            "enum": ["not_applicable", "primary", "neoadjuvant", "salvage"],
+        },
+        "language": {"type": "string", "enum": ["en", "fr"]},
+        "clinical_status": {"type": "string", "enum": ["poc_unreviewed", "poc_reviewed"]},
+        "not_specified_reason": {
+            "type": "string",
+            "enum": [
+                "not_applicable",
+                "spans_settings",
+                "general_principle",
+                "ancestry_unreliable",
+                "not_determinable",
+            ],
+        },
+        "cancer_types": {"type": "array", "items": {"enum": ["prostate", "bladder"]}},
+        "clinical_purpose": {
+            "type": "array",
+            "items": {"enum": ["general", "therapy_indication", "modality_selection"]},
+        },
+        "agent_roles": {
+            "type": "array",
+            "items": {"enum": ["urology_oncology", "medical_oncology"]},
+        },
+    },
+}
+
+
+def release(
+    tmp_path: Path,
+    documents: list[dict],
+    chunks: list[dict],
+    *,
+    schema: dict | None = SCHEMA,
+) -> Path:
     directory = tmp_path / "release"
     directory.mkdir(exist_ok=True)
+    if schema is not None:
+        (directory / "chunk.schema.json").write_text(
+            json.dumps(schema), encoding="utf-8"
+        )
     for name, records in (("documents", documents), ("chunks", chunks)):
         (directory / f"{name}.jsonl").write_text(
             "\n".join(json.dumps(record, ensure_ascii=False) for record in records),
@@ -154,10 +211,10 @@ async def test_a_passage_whose_document_is_absent_is_refused(
         tmp_path, [document()], [chunk(document_id="nccn.prostate.6.2026")]
     )
 
-    report = await ingest_release(session, directory=directory, embedder=FakeEmbedder())
+    with pytest.raises(CorpusError, match="not declared by this release"):
+        await ingest_release(session, directory=directory, embedder=FakeEmbedder())
 
-    assert report.chunks_inserted == 0
-    assert any("is not in this release" in line for line in report.rejected)
+    assert await session.scalar(sa.select(sa.func.count()).select_from(EvidenceChunk)) == 0
 
 
 async def test_an_excluded_document_is_not_loaded(
@@ -253,6 +310,7 @@ async def test_an_edited_passage_is_re_embedded_and_replaced(
 
     edited = chunk(
         text="La surveillance active est une option pour le risque tres faible.",
+        contextual_text="Source: AFU. Section: Risque faible. Risque tres faible.",
         content_sha256="b" * 64,
     )
     embedder = FakeEmbedder()
@@ -274,14 +332,22 @@ async def test_only_changed_passages_are_embedded_in_a_mixed_release(
     session: AsyncSession, tmp_path: Path
 ) -> None:
     unchanged = chunk("afu.prostate.2024-2026.localise.01.0001")
-    other = chunk("afu.prostate.2024-2026.localise.01.0002", content_sha256="c" * 64)
+    other = chunk(
+        "afu.prostate.2024-2026.localise.01.0002",
+        contextual_text="Source: AFU. Section: Risque faible. Autre passage.",
+        content_sha256="c" * 64,
+    )
     await ingest_release(
         session,
         directory=release(tmp_path, [document()], [unchanged, other]),
         embedder=FakeEmbedder(),
     )
 
-    edited = chunk("afu.prostate.2024-2026.localise.01.0002", content_sha256="d" * 64)
+    edited = chunk(
+        "afu.prostate.2024-2026.localise.01.0002",
+        contextual_text="Source: AFU. Section: Risque faible. Texte revise.",
+        content_sha256="d" * 64,
+    )
     embedder = FakeEmbedder()
     report = await ingest_release(
         session,
@@ -528,3 +594,169 @@ async def test_the_reason_a_passage_carries_no_setting_is_stored(
 
     stored = await session.scalar(sa.select(EvidenceChunk))
     assert stored is not None and stored.not_specified_reason == "general_principle"
+
+
+# --------------------------------------------------------------------------------------
+# Review findings, reproduced. Each of these passed silently before.
+# --------------------------------------------------------------------------------------
+
+
+async def test_a_release_cannot_touch_a_document_it_does_not_declare(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Scope came from every document already in PostgreSQL, so a release for document A
+    accepted a chunk belonging to B — and reconciled B's other chunks away."""
+    other = document("eau.prostate.2026")
+    await ingest_release(
+        session,
+        directory=release(
+            tmp_path,
+            [document(), other],
+            [chunk(), chunk("eau.0001", document_id="eau.prostate.2026",
+                            contextual_text="B one", content_sha256="c" * 64)],
+        ),
+        embedder=FakeEmbedder(),
+    )
+
+    # A release declaring only A, but smuggling a chunk for B.
+    with pytest.raises(CorpusError, match="not declared by this release"):
+        await ingest_release(
+            session,
+            directory=release(
+                tmp_path,
+                [document()],
+                [chunk(), chunk("eau.0002", document_id="eau.prostate.2026",
+                                contextual_text="B two", content_sha256="d" * 64)],
+            ),
+            embedder=FakeEmbedder(),
+        )
+
+    # B is untouched: both its state and A's survive the refused release.
+    remaining = set(
+        (await session.execute(sa.select(EvidenceChunk.chunk_id))).scalars().all()
+    )
+    assert "eau.0001" in remaining
+
+
+async def test_a_declared_document_with_no_valid_chunks_is_still_emptied(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Reconciliation was built from chunks that survived validation, so a document declared
+    with nothing valid was never reconciled and its old passages stayed citable."""
+    await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk()]),
+        embedder=FakeEmbedder(),
+    )
+
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], []),
+        embedder=FakeEmbedder(),
+    )
+
+    assert report.chunks_removed == 1
+    assert await session.scalar(sa.select(sa.func.count()).select_from(EvidenceChunk)) == 0
+
+
+async def test_changing_the_embedding_model_replaces_every_vector(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Freshness compared the hash and ignored the model, so reingesting under a new model
+    reported "unchanged" and kept the old model's vectors -- the exact failure the
+    `embedding_model` column exists to prevent."""
+    directory = release(tmp_path, [document()], [chunk()])
+    await ingest_release(session, directory=directory, embedder=FakeEmbedder("model-a"))
+
+    second = FakeEmbedder("model-b")
+    report = await ingest_release(session, directory=directory, embedder=second)
+
+    assert report.chunks_unchanged == 0
+    assert len(second.embedded) == 1
+    stored = await session.scalar(sa.select(EvidenceChunk))
+    assert stored is not None and stored.embedding_model == "model-b"
+
+
+async def test_a_stale_declared_hash_cannot_pin_a_stale_vector(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """The hash was taken from the release on trust. A release that edits `contextual_text`
+    while leaving its declared hash unchanged would pin the old vector to new text, silently
+    and permanently. We compute it from what we actually embed."""
+    await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk(embedding_sha256="f" * 64)]),
+        embedder=FakeEmbedder(),
+    )
+
+    lying = chunk(contextual_text="Un texte entierement different.", embedding_sha256="f" * 64)
+    embedder = FakeEmbedder()
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [lying]),
+        embedder=embedder,
+    )
+
+    assert report.chunks_updated == 1
+    assert len(embedder.embedded) == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("disease_setting", "prostate_localised_low_risk"),   # British spelling typo
+        ("therapy_line", "neo_adjuvant"),
+        ("language", "fr-FR"),
+        ("clinical_status", "unreviewed"),
+        ("not_specified_reason", "unknown"),
+        ("cancer_types", "prostate"),                          # scalar where an array belongs
+        ("agent_roles", ["urology_oncology", "geriatrics"]),   # undeclared member
+        ("content_sha256", "not-a-digest"),
+        ("embedding_sha256", "z" * 64),
+    ],
+)
+def test_a_value_the_release_does_not_declare_is_refused(field: str, value: object) -> None:
+    """A typo is stored intact and then matches no filter, which is indistinguishable from a
+    corpus that does not cover the topic."""
+    schema = ReleaseSchema(
+        enums={
+            name: frozenset(
+                (spec.get("enum") or (spec.get("items") or {}).get("enum")) or ()
+            )
+            for name, spec in SCHEMA["properties"].items()
+        },
+        required=frozenset(SCHEMA["required"]),
+    )
+
+    assert validate_chunk(chunk(**{field: value}), schema) is not None
+
+
+async def test_one_refused_passage_stores_none_of_the_release(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """A partially stored release is neither the old corpus nor the new one, and nothing
+    records which passages are missing. The loader used to report success."""
+    good = chunk("good.0001")
+    bad = chunk("bad.0001", disease_setting="prostate_localised_low_risk",
+                contextual_text="Autre", content_sha256="e" * 64)
+
+    with pytest.raises(CorpusError, match="nothing was stored"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [document()], [good, bad]),
+            embedder=FakeEmbedder(),
+        )
+
+    assert await session.scalar(sa.select(sa.func.count()).select_from(EvidenceChunk)) == 0
+
+
+async def test_a_release_without_its_schema_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """An unvalidated release is how a typo becomes an unreachable passage."""
+    with pytest.raises(CorpusError, match="chunk.schema.json"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [document()], [chunk()], schema=None),
+            embedder=FakeEmbedder(),
+        )

@@ -31,6 +31,7 @@ row rather than sit beside it. Only documents named in the release are touched, 
 six-document slice does not delete the rest of the corpus.
 """
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -101,6 +102,48 @@ def names_an_out_of_scope_disease(section_path: list[str]) -> str | None:
         if any(pattern.search(text) for pattern in OUT_OF_SCOPE_SECTIONS):
             return text
     return None
+
+
+# Fields the release's own `chunk.schema.json` constrains to an enum. Validating against
+# the delivered schema rather than a list held here means a corpus that adds a disease
+# setting cannot be silently rejected, and a typo in one cannot be silently accepted.
+_ENUM_FIELDS = (
+    "disease_setting",
+    "therapy_line",
+    "language",
+    "clinical_status",
+    "not_specified_reason",
+    "unit_type",
+)
+_ENUM_ARRAY_FIELDS = ("cancer_types", "clinical_purpose", "agent_roles")
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+@dataclass(frozen=True)
+class ReleaseSchema:
+    """The enums and required fields the release declares for its own chunks."""
+
+    enums: dict[str, frozenset[str]]
+    required: frozenset[str]
+
+    @classmethod
+    def load(cls, directory: Path) -> "ReleaseSchema":
+        path = directory / "chunk.schema.json"
+        if not path.exists():
+            raise CorpusError(
+                f"{path.name} is missing. A release without its schema cannot be validated, "
+                "and an unvalidated release is how a typo becomes an unreachable passage."
+            )
+        document = json.loads(path.read_text(encoding="utf-8"))
+        properties = document.get("properties") or {}
+        enums: dict[str, frozenset[str]] = {}
+        for name in (*_ENUM_FIELDS, *_ENUM_ARRAY_FIELDS):
+            spec = properties.get(name) or {}
+            values = spec.get("enum") or (spec.get("items") or {}).get("enum")
+            if values:
+                enums[name] = frozenset(values)
+        return cls(enums=enums, required=frozenset(document.get("required") or ()))
 
 
 def claims_exclusive_settings(setting: str) -> bool:
@@ -178,11 +221,45 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def validate_chunk(record: dict[str, Any]) -> str | None:
-    """Why this record cannot be stored, or None if it can."""
+def validate_chunk(
+    record: dict[str, Any], schema: ReleaseSchema | None = None
+) -> str | None:
+    """Why this record cannot be stored, or None if it can.
+
+    Checks the release's own declared enums where a schema is given. Without that, a typo in
+    `disease_setting` or a scalar where an array belongs is stored intact and then matches no
+    filter — indistinguishable from a corpus that does not cover the topic.
+    """
     missing = [name for name in REQUIRED_CHUNK_FIELDS if not record.get(name)]
     if missing:
         return f"missing {', '.join(missing)}"
+
+    if record.get("clinical_status") == "excluded":
+        return "chunk is marked excluded"
+
+    for field_name in ("content_sha256", "embedding_sha256"):
+        value = record.get(field_name)
+        if value is not None and not _SHA256.match(str(value)):
+            return f"{field_name} {value!r} is not a sha256 digest"
+
+    if schema is not None:
+        for name in _ENUM_FIELDS:
+            allowed = schema.enums.get(name)
+            value = record.get(name)
+            if allowed and value is not None and value not in allowed:
+                return f"{name} {value!r} is not one of the values the release declares"
+        for name in _ENUM_ARRAY_FIELDS:
+            value = record.get(name)
+            if value is not None and not isinstance(value, list):
+                return f"{name} must be a list, got {type(value).__name__}"
+            allowed = schema.enums.get(name)
+            if allowed and isinstance(value, list):
+                unknown = [item for item in value if item not in allowed]
+                if unknown:
+                    return f"{name} holds undeclared values: {', '.join(map(str, unknown))}"
+        absent = [name for name in schema.required if name not in record]
+        if absent:
+            return f"schema requires {', '.join(sorted(absent))}"
 
     setting = str(record["disease_setting"])
     if claims_exclusive_settings(setting):
@@ -248,9 +325,11 @@ def _chunk_row(record: dict[str, Any]) -> dict[str, Any]:
         # still searchable, just less well.
         "keyword_text": retrieval.get("keyword_text") or record["text"],
         "content_sha256": record["content_sha256"],
-        # Falls back to the content hash for a release that predates the field: the
-        # worst case is re-embedding a passage that did not need it.
-        "embedding_sha256": record.get("embedding_sha256") or record["content_sha256"],
+        # Computed from what we actually embed, rather than taken from the release. A
+        # declared hash that does not match its own text would pin a stale vector forever.
+        "embedding_sha256": hashlib.sha256(
+            record["contextual_text"].encode("utf-8")
+        ).hexdigest(),
         "not_specified_reason": record.get("not_specified_reason"),
     }
 
@@ -262,7 +341,14 @@ async def ingest_release(
     embedder: Embedder,
     release_id: str | None = None,
 ) -> IngestionReport:
-    """Load `documents.jsonl` and `chunks.jsonl` from a corpus release directory."""
+    """Load `documents.jsonl` and `chunks.jsonl` from a corpus release directory.
+
+    **A release loads completely or not at all.** Storing the valid part of a rejected
+    release produces a corpus that is neither the old one nor the new one, with no record of
+    which passages are missing — and the loader previously reported success while doing
+    exactly that. Any rejection now raises before anything is committed.
+    """
+    schema = ReleaseSchema.load(directory)
     documents = read_jsonl(directory / "documents.jsonl")
     chunks = read_jsonl(directory / "chunks.jsonl")
     report = IngestionReport(release_id=release_id, chunks_seen=len(chunks))
@@ -271,6 +357,12 @@ async def ingest_release(
         raise CorpusError(f"{directory} holds no documents")
 
     # ------------------------------------------------------------------ documents
+    # Scope comes from what the release *declares*, never from what PostgreSQL happens to
+    # hold. Two failures follow from getting this wrong: a release for document A would
+    # accept a chunk belonging to document B simply because B was loaded earlier, and a
+    # declared document whose chunks were all rejected would never be reconciled at all —
+    # its stale passages would survive a release that replaced them.
+    declared: set[str] = set()
     excluded: list[str] = []
     for record in documents:
         # A document the release itself excluded should not be loaded, however tidy the
@@ -279,6 +371,7 @@ async def ingest_release(
         if record.get("clinical_status") == "excluded":
             excluded.append(record["document_id"])
             continue
+        declared.add(record["document_id"])
         row = _document_row(record, release_id)
         existing = await session.get(EvidenceDocument, row["document_id"])
         if existing is None:
@@ -296,61 +389,78 @@ async def ingest_release(
             report.documents_removed += 1
 
     await session.flush()
-    known = {
-        document_id
-        for (document_id,) in (
-            await session.execute(sa.select(EvidenceDocument.document_id))
-        ).all()
-    }
 
     # ------------------------------------------------------------------ passages
     # What we already hold, and whether its vector is current. `embedding_sha256` is NULL
     # for anything loaded before that column existed, which correctly forces a re-embed.
     stored = {
-        chunk_id: (embedding_sha, embedding is not None)
-        for chunk_id, embedding_sha, embedding in (
+        chunk_id: (embedding_sha, model, embedding is not None)
+        for chunk_id, embedding_sha, model, embedding in (
             await session.execute(
                 sa.select(
                     EvidenceChunk.chunk_id,
                     EvidenceChunk.embedding_sha256,
+                    EvidenceChunk.embedding_model,
                     EvidenceChunk.embedding,
                 )
             )
         ).all()
     }
 
-    # Every chunk this release declares for a document it also declares. Anything else
-    # belonging to those documents is stale and removed at the end.
-    release_documents: set[str] = set()
+    # Every chunk this release declares. Anything else belonging to a declared document is
+    # stale and removed at the end.
     seen_chunks: set[str] = set()
 
     pending: list[tuple[dict[str, Any], bool]] = []
     metadata_only: list[dict[str, Any]] = []
     for record in chunks:
-        problem = validate_chunk(record)
+        problem = validate_chunk(record, schema)
         if problem is not None:
             report.rejected.append(f"{record.get('chunk_id', '?')}: {problem}")
             continue
-        if record["document_id"] not in known:
+        if record["document_id"] not in declared:
             report.rejected.append(
-                f"{record['chunk_id']}: document {record['document_id']} is not in this "
-                "release"
+                f"{record['chunk_id']}: document {record['document_id']} is not declared by "
+                "this release"
             )
             continue
 
         row = _chunk_row(record)
-        release_documents.add(row["document_id"])
         seen_chunks.add(row["chunk_id"])
 
-        previous_hash, has_vector = stored.get(row["chunk_id"], (None, False))
+        previous_hash, previous_model, has_vector = stored.get(
+            row["chunk_id"], (None, None, False)
+        )
         exists = row["chunk_id"] in stored
-        # Re-embed when the embedded text changed, or when there is no vector to keep.
-        if exists and has_vector and previous_hash == row["embedding_sha256"]:
+        # Re-embed when the embedded text changed, when the model changed, or when there is
+        # no vector to keep.
+        #
+        # **The model is half the question.** Vectors from different models are not
+        # comparable, so reingesting under a new model must replace every vector; comparing
+        # only the hash reported "unchanged" and preserved the old model's vectors, which is
+        # exactly the failure `embedding_model` exists to prevent.
+        #
+        # **And the hash is computed here, not taken on trust.** A release that edits
+        # `contextual_text` while leaving its declared hash unchanged would otherwise pin a
+        # stale vector to changed text, silently and permanently.
+        fresh = (
+            exists
+            and has_vector
+            and previous_hash == row["embedding_sha256"]
+            and previous_model == embedder.model
+        )
+        if fresh:
             report.chunks_unchanged += 1
             # Metadata still goes in: a release that only corrects routing changes no text.
             metadata_only.append(row)
             continue
         pending.append((row, exists))
+
+    if report.rejected:
+        raise CorpusError(
+            f"{len(report.rejected)} of {len(chunks)} passages were refused; "
+            "nothing was stored. First few: " + "; ".join(report.rejected[:10])
+        )
 
     # Passages whose vector is current but whose routing may not be. This is the path that
     # was missing, and its absence was invisible: the loader reported these as "unchanged".
@@ -383,13 +493,14 @@ async def ingest_release(
                 report.chunks_inserted += 1
         await session.flush()
 
-    # A rejected chunk is deliberately absent from `seen_chunks`: if it was stored by an
-    # earlier release and has since become invalid, it should go rather than linger.
-    if release_documents:
+    # Reconcile every declared document, including one whose chunks were all rejected: a
+    # release that declares a document and supplies nothing valid for it has emptied it, and
+    # leaving the previous passages in place would leave withdrawn guidance citable.
+    if declared:
         removal = (
             sa.delete(EvidenceChunk)
             .where(
-                EvidenceChunk.document_id.in_(release_documents),
+                EvidenceChunk.document_id.in_(declared),
                 sa.not_(EvidenceChunk.chunk_id.in_(seen_chunks)),
             )
             .returning(EvidenceChunk.chunk_id)

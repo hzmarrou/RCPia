@@ -69,12 +69,6 @@ async def run(directory: Path, *, dry_run: bool) -> int:
     if report.chunks_removed or report.documents_removed:
         print(f"  removed        {report.chunks_removed} passages"
               + (f", {report.documents_removed} documents" if report.documents_removed else ""))
-    if report.rejected:
-        print(f"  rejected       {len(report.rejected)}")
-        for line in report.rejected[:20]:
-            print(f"      {line}")
-        if len(report.rejected) > 20:
-            print(f"      … and {len(report.rejected) - 20} more")
     if dry_run:
         print("\ndry run — rolled back, nothing stored")
     return 0

@@ -14,6 +14,7 @@ identical, and half the corpus carries the label.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "c9d2e71f4a08"
