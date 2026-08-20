@@ -37,6 +37,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rcpia.evidence.ingestion import verify_search_configurations
 from rcpia.evidence.models import (
     ENGLISH_CONFIG,
     FRENCH_CONFIG,
@@ -83,6 +84,25 @@ RELEVANCE_FLOOR = 0.5
 # `websearch_to_tsquery` reads a double quote as a phrase delimiter, so a concept containing
 # one would split into two. Concepts are clinical phrases and never need internal quotes.
 _QUOTES = re.compile(r'["“”]')
+
+# Verified once per process, before the first search.
+#
+# Checking only at ingestion left a gap: an alteration made after the last import leaves live
+# retrieval querying with rules the stored vectors were never built under, and nothing raises.
+# Checking on every query would cost a catalogue round trip per search for a condition that
+# changes at most once in a process's life, so it is checked once and remembered.
+#
+# It fails closed. A search against a configuration we do not recognise returns nothing
+# useful, and returning nothing is the correct answer when we cannot trust the index.
+_configuration_verified = False
+
+
+async def _ensure_configuration(session: AsyncSession) -> None:
+    global _configuration_verified
+    if not _configuration_verified:
+        await verify_search_configurations(session)
+        _configuration_verified = True
+
 
 _FRENCH: sa.ColumnClause[str] = sa.literal_column(f"'{FRENCH_CONFIG}'::regconfig")
 _ENGLISH: sa.ColumnClause[str] = sa.literal_column(f"'{ENGLISH_CONFIG}'::regconfig")
@@ -399,6 +419,8 @@ async def _search(
     happened.
 
     """
+    await _ensure_configuration(session)
+
     report = RetrievalReport(keyword_skipped=not concepts)
     current: Filter | None = filter
 

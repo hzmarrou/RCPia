@@ -117,6 +117,19 @@ _ENUM_FIELDS = (
 )
 _ENUM_ARRAY_FIELDS = ("cancer_types", "clinical_purpose", "agent_roles")
 
+# The fields the filter routes on. A release must declare what each may contain; the rest may
+# go unconstrained without a passage becoming unreachable.
+_MUST_BE_CONSTRAINED = frozenset(
+    {
+        "disease_setting",
+        "therapy_line",
+        "language",
+        "cancer_types",
+        "clinical_purpose",
+        "agent_roles",
+    }
+)
+
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 # Every field a release may carry. Anything else stops the load.
@@ -178,11 +191,26 @@ class ReleaseSchema:
         document = json.loads(path.read_text(encoding="utf-8"))
         properties = document.get("properties") or {}
         enums: dict[str, frozenset[str]] = {}
+        unconstrained: list[str] = []
         for name in (*_ENUM_FIELDS, *_ENUM_ARRAY_FIELDS):
             spec = properties.get(name) or {}
             values = spec.get("enum") or (spec.get("items") or {}).get("enum")
             if values:
                 enums[name] = frozenset(values)
+            elif name in _MUST_BE_CONSTRAINED:
+                unconstrained.append(name)
+
+        # A schema that constrains nothing is worse than no schema, because it looks like
+        # validation. Without an enum on these fields, `TYPO_SETTING`, `fr-FR` and an invented
+        # agent role all load intact and then match no filter — indistinguishable from a
+        # corpus that does not cover the topic.
+        if unconstrained:
+            raise CorpusError(
+                f"{path.name} declares no permitted values for "
+                f"{', '.join(sorted(unconstrained))}. Routing metadata that nothing "
+                "constrains cannot be validated, and an unvalidated typo becomes a passage "
+                "no filter can reach."
+            )
         return cls(enums=enums, required=frozenset(document.get("required") or ()))
 
 
@@ -230,53 +258,79 @@ def claims_exclusive_settings(setting: str) -> bool:
 # We cannot prevent an alteration, so we detect one. Rebuilding the vectors belongs in a
 # migration; refusing to ingest against a configuration we do not recognise at least stops us
 # writing new vectors under rules the old ones were not built with.
-EXPECTED_CONFIGURATIONS = {
-    "rcpia_fr": ("unaccent", "french_stem"),
-    "rcpia_en": ("unaccent", "english_stem"),
+# The complete token mapping each configuration must have, as a fingerprint.
+#
+# **Every token type, not the obvious three.** An earlier version checked `word`, `hword` and
+# `hword_part` — and ordinary English words are none of those. PostgreSQL classifies
+# `cystectomy` as `asciiword`, so altering `asciiword` to `simple` would break English
+# stemming across 81% of the corpus while the check passed.
+#
+# Fingerprinting the whole mapping avoids having to know which token types matter, which is
+# the mistake that produced the gap in the first place.
+_CONFIGURATION_FINGERPRINTS = {
+    "rcpia_fr": (
+        "asciihword:french_stem|asciiword:french_stem|email:simple|file:simple|"
+        "float:simple|host:simple|hword:unaccent,french_stem|hword_asciipart:french_stem|"
+        "hword_numpart:simple|hword_part:unaccent,french_stem|int:simple|numhword:simple|"
+        "numword:simple|sfloat:simple|uint:simple|url:simple|url_path:simple|"
+        "version:simple|word:unaccent,french_stem"
+    ),
+    "rcpia_en": (
+        "asciihword:english_stem|asciiword:english_stem|email:simple|file:simple|"
+        "float:simple|host:simple|hword:unaccent,english_stem|hword_asciipart:english_stem|"
+        "hword_numpart:simple|hword_part:unaccent,english_stem|int:simple|numhword:simple|"
+        "numword:simple|sfloat:simple|uint:simple|url:simple|url_path:simple|"
+        "version:simple|word:unaccent,english_stem"
+    ),
 }
 
 _CONFIGURATION_QUERY = sa.text("""
-    SELECT c.cfgname, t.alias, array_agg(d.dictname ORDER BY m.mapseqno) AS dictionaries
+    SELECT c.cfgname,
+           string_agg(t.alias || ':' || d.dictnames, '|' ORDER BY t.alias) AS fingerprint
     FROM pg_ts_config c
-    JOIN pg_ts_config_map m ON m.mapcfg = c.oid
-    JOIN pg_ts_dict d ON d.oid = m.mapdict
-    JOIN pg_catalog.ts_token_type(c.cfgparser) t ON t.tokid = m.maptokentype
-    WHERE c.cfgname = ANY(:names) AND t.alias IN ('word', 'hword', 'hword_part')
-    GROUP BY c.cfgname, t.alias
+    JOIN (
+        SELECT m.mapcfg, m.maptokentype,
+               string_agg(dd.dictname, ',' ORDER BY m.mapseqno) AS dictnames
+        FROM pg_ts_config_map m
+        JOIN pg_ts_dict dd ON dd.oid = m.mapdict
+        GROUP BY m.mapcfg, m.maptokentype
+    ) d ON d.mapcfg = c.oid
+    JOIN pg_catalog.ts_token_type(c.cfgparser) t ON t.tokid = d.maptokentype
+    WHERE c.cfgname = ANY(:names)
+    GROUP BY c.cfgname
 """)
 
 
 async def verify_search_configurations(session: AsyncSession) -> None:
-    """Refuse to ingest against a text search configuration we do not recognise.
+    """Refuse to proceed against a text search configuration we do not recognise.
 
-    Detection, not prevention: a superuser can alter a configuration at any time, and the
-    stored vectors silently stop agreeing with it. This catches the case where that has
-    already happened before we add more vectors to the mixture.
+    Detection, not prevention: a role that owns the configuration can alter it at any time,
+    and every stored vector silently stops agreeing with it — terms that used to match stop
+    matching, and nothing raises. PostgreSQL's dependency tracking covers `DROP`, not `ALTER`.
+
+    Checked before ingestion *and* before the first search of a process, because an
+    alteration made after the last import would otherwise leave live retrieval querying with
+    rules the stored vectors were never built under.
     """
     rows = (
         await session.execute(
-            _CONFIGURATION_QUERY, {"names": list(EXPECTED_CONFIGURATIONS)}
+            _CONFIGURATION_QUERY, {"names": list(_CONFIGURATION_FINGERPRINTS)}
         )
     ).all()
+    seen = {name: fingerprint for name, fingerprint in rows}
 
-    seen: dict[str, set[tuple[str, ...]]] = {}
-    for name, _alias, dictionaries in rows:
-        seen.setdefault(name, set()).add(tuple(dictionaries))
-
-    for name, expected in EXPECTED_CONFIGURATIONS.items():
-        mappings = seen.get(name)
-        if not mappings:
+    for name, expected in _CONFIGURATION_FINGERPRINTS.items():
+        actual = seen.get(name)
+        if actual is None:
             raise CorpusError(
-                f"Text search configuration {name!r} is missing. Run the migrations before "
-                "loading a corpus."
+                f"Text search configuration {name!r} is missing. Run the migrations first."
             )
-        if mappings != {expected}:
-            found = " / ".join(",".join(mapping) for mapping in sorted(mappings))
+        if actual != expected:
             raise CorpusError(
-                f"Text search configuration {name!r} maps words through {found}, expected "
-                f"{','.join(expected)}. It has been altered since the migration that created "
-                "it, so every stored search vector was built under different rules. Rebuild "
-                "them in a migration rather than ingesting into the mixture."
+                f"Text search configuration {name!r} has been altered since the migration "
+                "that created it, so every stored search vector was built under different "
+                f"rules. expected {expected} but found {actual}. "
+                "Rebuild the vectors in a migration rather than querying across the mixture."
             )
 
 

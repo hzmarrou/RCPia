@@ -846,3 +846,58 @@ async def test_a_release_that_says_nothing_leaves_every_passage_retrievable(
 
     stored = await session.scalar(sa.select(EvidenceChunk))
     assert stored is not None and stored.retrieval_eligible is True
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["disease_setting", "therapy_line", "language", "cancer_types",
+     "clinical_purpose", "agent_roles"],
+)
+async def test_a_schema_that_constrains_nothing_is_refused(
+    session: AsyncSession, tmp_path: Path, field: str
+) -> None:
+    """A schema that constrains nothing is worse than no schema, because it looks like
+    validation. Without an enum on a routing field, `TYPO_SETTING` and `fr-FR` load intact
+    and then match no filter -- indistinguishable from a corpus that does not cover the
+    topic."""
+    weakened = {
+        "required": SCHEMA["required"],
+        "properties": {k: v for k, v in SCHEMA["properties"].items() if k != field},
+    }
+
+    with pytest.raises(CorpusError, match="no permitted values"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [document()], [chunk()], schema=weakened),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_an_empty_schema_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    with pytest.raises(CorpusError, match="no permitted values"):
+        await ingest_release(
+            session,
+            directory=release(
+                tmp_path, [document()], [chunk()], schema={"required": [], "properties": {}}
+            ),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_the_configuration_check_covers_ascii_tokens(
+    session: AsyncSession,
+) -> None:
+    """Ordinary English words are `asciiword`, not `word`. Checking only `word`, `hword` and
+    `hword_part` meant altering `asciiword` to `simple` broke English stemming across 81% of
+    the corpus while the check passed."""
+    await session.execute(
+        sa.text(
+            "ALTER TEXT SEARCH CONFIGURATION public.rcpia_en "
+            "ALTER MAPPING FOR asciiword WITH simple"
+        )
+    )
+
+    with pytest.raises(CorpusError, match="has been altered"):
+        await verify_search_configurations(session)
