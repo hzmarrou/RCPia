@@ -23,6 +23,7 @@ from rcpia.evidence.models import (
     EvidenceChunk,
     EvidenceDocument,
 )
+from rcpia.evidence.rerank import Reranker
 from rcpia.evidence.retrieval import (
     Concepts,
     Filter,
@@ -206,6 +207,7 @@ async def test_a_prostate_question_returns_no_bladder_passage(session: AsyncSess
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(french=("surveillance active",)),
         embedding=None,
         embedding_model=MODEL,
@@ -228,6 +230,7 @@ async def test_a_bladder_question_returns_no_prostate_passage(session: AsyncSess
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(french=("chimiotherapie",)),
         embedding=None,
         embedding_model=MODEL,
@@ -258,6 +261,7 @@ async def test_a_metastatic_question_returns_no_localized_protocol(
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(french=("traitement radical",)),
         embedding=None,
         embedding_model=MODEL,
@@ -277,6 +281,7 @@ async def test_passages_marked_for_no_setting_are_admitted(session: AsyncSession
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(french=("definition du cancer",)),
         embedding=None,
         embedding_model=MODEL,
@@ -315,6 +320,7 @@ async def test_widening_finds_a_passage_the_strict_filter_refused(
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(french=("curage ganglionnaire",)),
         embedding=None,
         embedding_model=MODEL,
@@ -342,6 +348,7 @@ async def test_widening_never_crosses_the_cancer_type(session: AsyncSession) -> 
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(french=("cystectomie totale",)),
         embedding=None,
         embedding_model=MODEL,
@@ -360,6 +367,7 @@ async def test_widening_never_drops_the_agent_role(session: AsyncSession) -> Non
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(french=("evaluation du patient",)),
         embedding=None,
         embedding_model=MODEL,
@@ -386,6 +394,7 @@ async def test_a_query_embedded_with_another_model_retrieves_nothing(
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(),
         embedding=vector(7),
         embedding_model="text-embedding-ada-002",
@@ -403,6 +412,7 @@ async def test_the_dense_leg_finds_a_passage_sharing_no_words(session: AsyncSess
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(french=("cystectomie",)),
         embedding=vector(11),
         embedding_model=MODEL,
@@ -422,6 +432,7 @@ async def test_an_absent_concept_set_is_recorded_rather_than_reported_as_no_hits
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(),
         embedding=vector(3),
         embedding_model=MODEL,
@@ -443,6 +454,7 @@ async def test_a_passage_without_an_embedding_is_excluded_not_sorted_last(
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(),
         embedding=vector(5),
         embedding_model=MODEL,
@@ -479,6 +491,7 @@ async def test_both_legs_are_reported_separately(session: AsyncSession) -> None:
 
     report = await search(
         session,
+        question="question de test",
         concepts=Concepts(french=("cystectomie totale",)),
         embedding=vector(2),
         embedding_model=MODEL,
@@ -487,3 +500,175 @@ async def test_both_legs_are_reported_separately(session: AsyncSession) -> None:
 
     assert (report.keyword_hits, report.dense_hits) == (1, 1)
     assert report.chunks[0].found_by_both is True
+
+
+# --------------------------------------------------------------------------------------
+# Reranking, and the floor
+# --------------------------------------------------------------------------------------
+
+
+class FakeReranker(Reranker):
+    """Scores passages from a lookup, so the floor can be tested without a network call."""
+
+    def __init__(self, scores: dict[str, float], default: float = 0.9) -> None:
+        self._scores = scores
+        self._default = default
+        self.calls: list[tuple[str, int]] = []
+
+    @property
+    def model(self) -> str:
+        return "fake-rerank"
+
+    async def score(self, query: str, documents: list[str]) -> list[float]:
+        self.calls.append((query, len(documents)))
+        return [self._scores.get(document, self._default) for document in documents]
+
+
+async def test_a_passage_below_the_floor_is_discarded(session: AsyncSession) -> None:
+    """The reason this stage exists, more than the reordering. Without a floor the retriever
+    has no way to say the corpus does not answer the question -- it returns its top ten
+    regardless, each with a real citation and a real page number."""
+    await add_document(session, "doc")
+    await add_chunk(session, "relevant", text="pertinent")
+    await add_chunk(session, "irrelevant", text="hors sujet")
+
+    report = await search(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("pertinent", "hors sujet")),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+        reranker=FakeReranker({"pertinent": 0.82, "hors sujet": 0.11}),
+    )
+
+    assert [chunk.chunk_id for chunk in report.chunks] == ["relevant"]
+    assert report.below_floor == 1
+    assert report.reranked is True
+
+
+async def test_everything_below_the_floor_returns_nothing(session: AsyncSession) -> None:
+    """Measured behaviour: a deliberately irrelevant question still passed the filter and
+    returned 25 prostate candidates, every one of which the cross-encoder scored under 0.45.
+    The filter cannot tell; the floor can."""
+    await add_document(session, "doc")
+    await add_chunk(session, "weak-1", text="premier")
+    await add_chunk(session, "weak-2", text="second")
+
+    report = await search(
+        session,
+        question="question sans rapport",
+        concepts=Concepts(french=("premier", "second")),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+        reranker=FakeReranker({}, default=0.2),
+    )
+
+    assert report.chunks == []
+    assert report.below_floor == 2
+
+
+async def test_a_weak_result_does_not_widen_the_filter(session: AsyncSession) -> None:
+    """Widening is the answer when the filter admitted nothing. It is the wrong answer when
+    the filter admitted passages and the reranker judged them all irrelevant -- the corpus
+    does not answer the question, and a looser filter offers worse passages, not better."""
+    await add_document(session, "doc")
+    await add_chunk(session, "weak", text="peu pertinent", therapy_line="primary")
+
+    report = await search(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("peu pertinent",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate", "prostate_localized_low_risk", "primary"),
+        reranker=FakeReranker({}, default=0.1),
+    )
+
+    assert report.chunks == []
+    assert report.widened == 0
+
+
+async def test_the_reranker_reorders_what_fusion_ranked(session: AsyncSession) -> None:
+    """Otherwise the cross-encoder is an expensive filter and nothing more."""
+    await add_document(session, "doc")
+    await add_chunk(session, "fused-first", text="alpha", embedding_index=1)
+    await add_chunk(session, "fused-second", text="beta")
+
+    report = await search(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("alpha", "beta")),
+        embedding=vector(1),
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+        reranker=FakeReranker({"alpha": 0.6, "beta": 0.95}),
+    )
+
+    assert [chunk.chunk_id for chunk in report.chunks] == ["fused-second", "fused-first"]
+    assert report.chunks[0].relevance == 0.95
+
+
+async def test_the_fusion_score_survives_reranking(session: AsyncSession) -> None:
+    """Two different judgements, kept apart. The reader should be able to see which one
+    ordered the list, and they are not on comparable scales."""
+    await add_document(session, "doc")
+    await add_chunk(session, "chunk-1", text="alpha")
+
+    report = await search(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("alpha",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+        reranker=FakeReranker({"alpha": 0.77}),
+    )
+
+    chunk = report.chunks[0]
+    assert chunk.relevance == 0.77
+    assert 0 < chunk.score < 0.1  # the RRF score, on its own scale
+
+
+async def test_without_a_reranker_nothing_is_refused_and_the_report_says_so(
+    session: AsyncSession,
+) -> None:
+    """Correct for a test or an offline experiment, wrong for a clinician-facing answer."""
+    await add_document(session, "doc")
+    await add_chunk(session, "chunk-1", text="alpha")
+
+    report = await search(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("alpha",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+    )
+
+    assert report.reranked is False
+    assert report.below_floor == 0
+    assert len(report.chunks) == 1
+
+
+async def test_the_reranker_sees_the_question_not_the_concepts(
+    session: AsyncSession,
+) -> None:
+    """A cross-encoder reads the question and the passage together. Handing it a bag of
+    quoted keywords would throw away the sentence it is meant to reason about."""
+    await add_document(session, "doc")
+    await add_chunk(session, "chunk-1", text="alpha")
+    reranker = FakeReranker({"alpha": 0.9})
+
+    await search(
+        session,
+        question="Quelle est la conduite a tenir ?",
+        concepts=Concepts(french=("alpha",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate"),
+        reranker=reranker,
+    )
+
+    assert reranker.calls == [("Quelle est la conduite a tenir ?", 1)]

@@ -10,6 +10,10 @@ The pipeline is filter, then search, then fuse:
    blur, pgvector for the paraphrase full-text cannot reach.
 3. **Fuse by rank, not by score.** `ts_rank_cd` is unbounded and cosine similarity is not,
    so averaging them is meaningless. Reciprocal Rank Fusion sidesteps it.
+4. **Rerank, and refuse what is too weak.** A cross-encoder reads the question and the
+   passage together, which neither leg does. The floor matters more than the reordering: a
+   retriever that always returns its top ten cannot say the corpus does not answer the
+   question, and every one of those ten arrives with a real citation and a real page.
 
 **Two keyword queries, not one.** The corpus is 81% English and every question is French, and
 no stemmer bridges that: `métastatique` and `metastatic` both reduce to `metastat`, but
@@ -33,6 +37,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.evidence.models import ENGLISH_CONFIG, FRENCH_CONFIG, EvidenceChunk
+from rcpia.evidence.rerank import Reranker
 
 # Both legs offer this many candidates to the fusion. Wide enough that a passage ranked
 # poorly by one leg can still be rescued by the other, narrow enough to stay one query.
@@ -50,6 +55,15 @@ RRF_K = 60
 # `docs/reviews/corpus-v3-change-request.md`. Whether admitting them helps or hurts is a
 # question for the retrieval evaluation, not for an argument.
 UNSPECIFIED = "not_specified"
+
+# Below this, a passage is discarded rather than returned. Measured against the loaded corpus
+# with three probe queries: the worst genuinely relevant candidate scored 0.579, and the best
+# candidate for a deliberately irrelevant question scored 0.447. This sits in that gap.
+#
+# Three queries on one corpus is a starting point, not an authority. The retrieval evaluation
+# should revise it, which is why it is a parameter of `search` rather than a constant buried
+# in the call.
+RELEVANCE_FLOOR = 0.5
 
 # `websearch_to_tsquery` reads a double quote as a phrase delimiter, so a concept containing
 # one would split into two. Concepts are clinical phrases and never need internal quotes.
@@ -159,6 +173,10 @@ class RetrievedChunk:
     score: float
     keyword_rank: int | None = None
     dense_rank: int | None = None
+    # The cross-encoder's judgement, or None when no reranker ran. Kept apart from `score`,
+    # which is the fusion's, because the two are not comparable and the reader should be able
+    # to see which one ordered the list.
+    relevance: float | None = None
 
     @property
     def found_by_both(self) -> bool:
@@ -173,6 +191,8 @@ class RetrievalReport:
     keyword_hits: int = 0
     dense_hits: int = 0
     keyword_skipped: bool = False
+    reranked: bool = False
+    below_floor: int = 0
     filter_used: Filter | None = None
     chunks: list[RetrievedChunk] = field(default_factory=list)
 
@@ -184,6 +204,29 @@ def reciprocal_rank_fusion(rankings: list[list[str]], k: int = RRF_K) -> list[tu
         for rank, chunk_id in enumerate(ranking, start=1):
             scores[chunk_id] += 1.0 / (k + rank)
     return sorted(scores.items(), key=lambda pair: -pair[1])
+
+
+def _to_chunk(
+    row: sa.Row,
+    *,
+    score: float,
+    relevance: float | None,
+    keyword_rank: int | None,
+    dense_rank: int | None,
+) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=row.chunk_id,
+        document_id=row.document_id,
+        text=row.text,
+        citation_label=row.citation_label,
+        page_start=row.page_start,
+        disease_setting=row.disease_setting,
+        language=row.language,
+        score=score,
+        keyword_rank=keyword_rank,
+        dense_rank=dense_rank,
+        relevance=relevance,
+    )
 
 
 _COLUMNS = (
@@ -267,18 +310,31 @@ async def _dense_leg(
 async def search(
     session: AsyncSession,
     *,
+    question: str,
     concepts: Concepts,
     embedding: list[float] | None,
     embedding_model: str,
     filter: Filter,
     limit: int = 10,
+    reranker: Reranker | None = None,
+    floor: float = RELEVANCE_FLOOR,
 ) -> RetrievalReport:
-    """Retrieve candidates for one clinical question.
+    """Retrieve the passages an agent may see for one clinical question.
 
     Widens the filter only when the strict one returns nothing at all. A widened search is
     recorded in the report rather than blended in silently: a passage admitted because the
     therapy line was dropped is a weaker match than one that satisfied the full filter, and
     whoever reads the result is entitled to know which happened.
+
+    **A weak result does not widen.** Widening loosens the filter, which is the right answer
+    when the filter admitted nothing; it is the wrong answer when the filter admitted
+    passages and the reranker judged them all irrelevant. In that case the corpus does not
+    answer the question, and a looser filter would only offer worse passages with more
+    confidence. The report says so and returns nothing.
+
+    Without a `reranker` the floor cannot be applied and every fused candidate is returned.
+    That is the correct behaviour for a test or an offline experiment, and the wrong
+    behaviour for a clinician-facing answer — `report.reranked` distinguishes them.
     """
     report = RetrievalReport(keyword_skipped=not concepts)
     current: Filter | None = filter
@@ -312,24 +368,47 @@ async def search(
             keyword_order = {row.chunk_id: i for i, row in enumerate(keyword, start=1)}
             dense_order = {row.chunk_id: i for i, row in enumerate(dense, start=1)}
 
-            for chunk_id, score in reciprocal_rank_fusion(
-                [list(keyword_order), list(dense_order)]
-            )[:limit]:
-                row = by_id[chunk_id]
-                report.chunks.append(
-                    RetrievedChunk(
-                        chunk_id=row.chunk_id,
-                        document_id=row.document_id,
-                        text=row.text,
-                        citation_label=row.citation_label,
-                        page_start=row.page_start,
-                        disease_setting=row.disease_setting,
-                        language=row.language,
+            fused = reciprocal_rank_fusion([list(keyword_order), list(dense_order)])
+
+            if reranker is None:
+                report.chunks = [
+                    _to_chunk(
+                        by_id[chunk_id],
                         score=score,
+                        relevance=None,
                         keyword_rank=keyword_order.get(chunk_id),
                         dense_rank=dense_order.get(chunk_id),
                     )
+                    for chunk_id, score in fused[:limit]
+                ]
+                return report
+
+            # The whole fused set goes to the cross-encoder, not just the head of it: the
+            # point of reranking is that fusion's order is not the final word.
+            candidates = fused[:CANDIDATE_LIMIT]
+            relevances = await reranker.score(
+                question, [by_id[chunk_id].text for chunk_id, _ in candidates]
+            )
+            report.reranked = True
+
+            scored = [
+                (chunk_id, score, relevance)
+                for (chunk_id, score), relevance in zip(candidates, relevances, strict=True)
+            ]
+            report.below_floor = sum(1 for _, _, relevance in scored if relevance < floor)
+            kept = sorted(
+                (item for item in scored if item[2] >= floor), key=lambda item: -item[2]
+            )
+            report.chunks = [
+                _to_chunk(
+                    by_id[chunk_id],
+                    score=score,
+                    relevance=relevance,
+                    keyword_rank=keyword_order.get(chunk_id),
+                    dense_rank=dense_order.get(chunk_id),
                 )
+                for chunk_id, score, relevance in kept[:limit]
+            ]
             return report
 
         current = current.widen()
