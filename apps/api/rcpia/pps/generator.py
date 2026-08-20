@@ -245,7 +245,9 @@ def build_support(
     contested: frozenset[str] = frozenset(),
 ) -> SupportCare:
     return SupportCare(
-        items=support_rules.support_items(values, contested=contested),
+        items=list(support_rules.STANDING),
+        # RCPia's own readings, kept apart from care that applies to everyone.
+        suggested=support_rules.suggested_items(values, contested=contested),
         carers=(
             "À constituer en RCP. Avis automatisés sollicités : "
             + ", ".join(agent_label(role) for role in agent_roles)

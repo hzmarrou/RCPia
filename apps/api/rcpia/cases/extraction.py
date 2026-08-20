@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from rcpia.cases.fact_schema import (
     FIELDS,
+    FIELDS_BY_KEY,
     REPORTED_ABSENT,
     FactField,
     is_reported_absent,
@@ -69,6 +70,33 @@ def starts_a_new_report(label: str) -> bool:
     return MODALITY_LABEL.match(normalize_label(label)) is not None
 
 
+# Where an unrecognised modality heading belongs. Ordered: the first match wins, so the
+# more specific sites come before the generic ones.
+#
+# Without this, a heading that ends the previous report but matches no field discards its
+# own content — worse than the truncation it replaced. Real dossiers carry
+# `IRM lombaire`, `IRM pelvienne multiparamétrique` and `PET-TDM 18-FDG`, none of which an
+# exact-label list happened to contain.
+MODALITY_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("pet_ct", ("pet", "tep")),
+    ("spinal_mri", ("lombaire", "medullaire", "rachis", "dorsal")),
+    ("pelvic_mri", ("bassin", "pelvi")),
+    ("prostate_mri", ("prostat",)),
+    ("bone_scan", ("scintigraphie",)),
+    ("uro_ct", ("uroscanner",)),
+    ("ct_tap", ("tdm", "scanner", "tomodensitometrie")),
+)
+
+
+def modality_field(label: str) -> str | None:
+    """The field an unrecognised imaging heading belongs to, if any."""
+    normalized = normalize_label(label)
+    for key, words in MODALITY_FAMILIES:
+        if any(word in normalized for word in words):
+            return key
+    return None
+
+
 LABEL_INDEX: dict[str, FactField] = {}
 for field_spec in FIELDS:
     for label in field_spec.labels:
@@ -113,8 +141,16 @@ def extract_from_text(
             candidates.extend(_bare_scores(line, chunk_id, document_id))
             continue
 
-        field_spec = LABEL_INDEX.get(normalize_label(match.group("label")))
+        label_text = match.group("label")
+        field_spec = LABEL_INDEX.get(normalize_label(label_text))
         value = match.group("value").strip().strip("*").strip()
+
+        if field_spec is None and starts_a_new_report(label_text):
+            # A heading that ends the previous report must land somewhere, or its own
+            # content is lost silently.
+            family = modality_field(label_text)
+            if family is not None:
+                field_spec = FIELDS_BY_KEY.get(family)
 
         if field_spec is None:
             # An unrecognised label may still carry a recognised one: `Autres : ALAT : 5`.

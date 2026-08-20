@@ -80,6 +80,7 @@ class Trigger:
             # as an assessment rather than an instruction, and the canonical caveat says
             # where it stands.
             caveat=f"{SUGGESTION_CAVEAT} Critère appliqué : {self.criterion}.",
+            authority=SUPPORT_APPROVAL.authority,
         )
 
 
@@ -164,10 +165,10 @@ COMPLETED_BY_RCP = (
 )
 
 
-def support_items(
+def suggested_items(
     values: dict[str, str | None], *, contested: frozenset[str] = frozenset()
 ) -> list[SupportItem]:
-    """Support items the recorded values call for, then the standing ones.
+    """Only the items a recorded value triggered — RCPia's own reading.
 
     Two triggers can name the same item — a low albumin and a low MNA both call for
     nutritional support — so the first to fire keeps the title and the second is dropped
@@ -185,4 +186,16 @@ def support_items(
         seen.add(item.title)
         items.append(item)
 
-    return [*items, *STANDING]
+    return items
+
+
+def support_items(
+    values: dict[str, str | None], *, contested: frozenset[str] = frozenset()
+) -> list[SupportItem]:
+    """Every item, standing first.
+
+    Kept for callers that want one list. The generator uses `suggested_items` and
+    `STANDING` separately, because the PPS must not interleave a project threshold's
+    output with care that applies to everyone.
+    """
+    return [*STANDING, *suggested_items(values, contested=contested)]

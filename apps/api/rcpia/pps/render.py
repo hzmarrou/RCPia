@@ -263,6 +263,17 @@ def render_markdown(document: PpsDocument) -> str:
     out += [f"# 4 — {SECTION_TITLES[3]}", ""]
     for item in document.support.items:
         out += _support(item)
+
+    if document.support.suggested:
+        # Under its own heading, never mixed into the plan above: every item here rests on
+        # a threshold nobody has approved, and Hb 9.9 producing an item while Hb 10.0
+        # produces none is a line the project drew, not a clinical distinction.
+        out += [
+            "**Points signalés par RCPia — lectures non validées**",
+            "",
+        ]
+        for item in document.support.suggested:
+            out += _support(item)
     rows = [("Soignants", document.support.carers or "À constituer en RCP")]
     if document.support.location:
         rows.append(("Lieu", document.support.location))

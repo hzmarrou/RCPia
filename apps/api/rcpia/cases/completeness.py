@@ -12,6 +12,7 @@ impossible without the field, which is a much smaller list.
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from rcpia.cases.fact_schema import FIELDS_BY_KEY, is_reported_absent, required_fields_for
@@ -31,13 +32,57 @@ BLOCKING_FIELDS: dict[CancerType, tuple[str, ...]] = {
 }
 
 
+# Words that may legitimately surround a grade without changing it.
+SCORE_NOISE = re.compile(r"\b(?:gleason|isup|score|grade|groupe|de|du)\b|[:=]")
+
+# What remains after the noise must *be* the score, not merely contain one. Matching a
+# digit anywhere accepted `2024` as a Gleason and `score inconnu 7` as a grade of 7.
+GLEASON_SHAPE = re.compile(
+    r"^(?:(?P<total>\d{1,2})\s*)?(?:\(?\s*(?P<a>\d)\s*\+\s*(?P<b>\d)\s*\)?)?"
+    r"(?:\s*(?P<total2>\d{1,2}))?$"
+)
+ISUP_SHAPE = re.compile(r"^(?P<grade>\d{1,2})$")
+
+
+def _clean(text: str) -> str:
+    """Strip the words a clinician writes around a grade, leaving the grade."""
+    return " ".join(SCORE_NOISE.sub(" ", text.lower()).split())
+
+
+def _valid_gleason(text: str) -> bool:
+    """A total in 6-10, and if the two grades are given they must sum to it."""
+    match = GLEASON_SHAPE.match(_clean(text))
+    if match is None:
+        return False
+
+    pair = (match.group("a"), match.group("b"))
+    totals = [value for value in (match.group("total"), match.group("total2")) if value]
+
+    if pair[0] and pair[1]:
+        primary, secondary = int(pair[0]), int(pair[1])
+        if not (1 <= primary <= 5 and 1 <= secondary <= 5):
+            return False
+        summed = primary + secondary
+        if not 6 <= summed <= 10:
+            return False
+        # `7 (5+5)` is internally inconsistent: 5+5 is 10, not 7.
+        return all(int(total) == summed for total in totals)
+
+    # A bare total, and nothing else left over.
+    return len(totals) == 1 and 6 <= int(totals[0]) <= 10
+
+
+def _valid_isup(text: str) -> bool:
+    """A single grade group, 1 to 5. `12` is not grade 1."""
+    match = ISUP_SHAPE.match(_clean(text))
+    return match is not None and 1 <= int(match.group("grade")) <= 5
+
+
 # What a blocking field must look like to count as answered. A field absent from this map
 # only has to be non-empty and not `RAS`.
-BLOCKING_VALUE_PATTERNS: dict[str, re.Pattern[str]] = {
-    # Gleason is written `7 (3+4)`, `9 (5+4)`, sometimes `7(4+3)`. Two grades summing to a
-    # total; anything without digits is not a Gleason score.
-    "gleason": re.compile(r"\d"),
-    "isup": re.compile(r"[1-5]"),
+BLOCKING_VALUE_CHECKS: dict[str, "Callable[[str], bool]"] = {
+    "gleason": _valid_gleason,
+    "isup": _valid_isup,
 }
 
 
@@ -47,12 +92,15 @@ def satisfies_blocking(key: str, value: str | None) -> bool:
     `RAS` never does. It means the clinician looked and found nothing to report, which is
     meaningful for a symptom and meaningless for a histology or a grade — there is no such
     thing as a tumour with no histological type.
+
+    A grade must also *be* a grade. Testing only for a digit accepted `2024` as a Gleason
+    score, `score inconnu 7` as a grade of 7, and `12` as an ISUP group.
     """
     text = (value or "").strip()
     if not text or is_reported_absent(text):
         return False
-    pattern = BLOCKING_VALUE_PATTERNS.get(key)
-    return pattern.search(text) is not None if pattern else True
+    check = BLOCKING_VALUE_CHECKS.get(key)
+    return check(text) if check else True
 
 
 @dataclass(frozen=True)

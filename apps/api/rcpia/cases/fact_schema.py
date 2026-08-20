@@ -161,7 +161,12 @@ FIELDS: tuple[FactField, ...] = (
     # Further imaging real dossiers carry. Recognising them is what stops the prostate MRI
     # report swallowing the study that follows it.
     FactField(
-        "pet_ct", ("pet choline", "pet psma", "pet-psma", "pet scan", "tep tdm", "tep-tdm"),
+        "pet_ct",
+        (
+            "pet choline", "pet psma", "pet-psma", "pet scan", "pet-scan",
+            "tep choline", "tep psma", "tep-psma", "tep scan",
+            "tep tdm", "tep-tdm", "tep fdg", "pet fdg",
+        ),
         FactCategory.imaging,
     ),
     FactField("spinal_mri", ("irm médullaire", "irm medullaire"), FactCategory.imaging),

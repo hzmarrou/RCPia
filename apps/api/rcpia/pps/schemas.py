@@ -18,7 +18,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from rcpia.rules.approval import Authority
+from rcpia.rules.approval import SUGGESTION_CAVEAT, Authority
 
 # Section 2 records a decision the RCP has not yet taken, and section 6 records validation
 # that has not happened. These are the phrases the reference documents carry, and RCPia
@@ -105,14 +105,44 @@ class TreatmentStep(Strict):
 
 
 class SupportItem(Strict):
-    """A support-care item, and the recorded value that called for it."""
+    """A support-care item.
+
+    Two kinds, and the difference is who is entitled to say it:
+
+    - **standing** (`authority=none`, no trigger) — applies to any patient entering an
+      oncology pathway, and the reference documents carry it unconditionally.
+    - **triggered** (`authority=project_suggestion`) — RCPia's own reading of a recorded
+      value against a threshold nobody has approved. Hb 9.9 produces an item and Hb 10.0
+      does not, which is not a clinical distinction; it is a line the project drew.
+
+    A triggered item must carry the canonical caveat, and the renderer prints the two kinds
+    apart. An earlier version placed both in one list with an optional caveat, so an
+    unapproved threshold silently became a block in the care plan — the same laundering the
+    referral checkbox was fixed for, one section over.
+    """
 
     title: str
     detail: str
     trigger: str | None = None
-    # The threshold behind a triggered item, and its standing. Absent on standing items,
-    # which rest on no threshold at all.
+    # The threshold behind a triggered item and its standing. Required when the item is a
+    # project suggestion; absent on standing items, which rest on no threshold.
     caveat: str | None = None
+    authority: Authority = Authority.none
+
+    @model_validator(mode="after")
+    def a_suggestion_carries_its_caveat(self) -> "SupportItem":
+        if self.authority is Authority.project_suggestion:
+            if self.caveat is None or SUGGESTION_CAVEAT not in self.caveat:
+                raise ValueError(
+                    f"{self.title}: a project-threshold item must carry the canonical "
+                    "caveat from approval.py"
+                )
+        elif self.trigger is not None:
+            raise ValueError(
+                f"{self.title}: an item triggered by a recorded value is a project "
+                "reading and must say so"
+            )
+        return self
 
 
 class MissingItem(Strict):
@@ -197,10 +227,29 @@ class Treatments(Strict):
 
 
 class SupportCare(Strict):
+    """Section 4, in two parts.
+
+    `items` is care that applies to any patient entering an oncology pathway. `suggested`
+    is RCPia's own reading of recorded values against thresholds nobody approved, and the
+    renderer prints it under its own heading — interleaving the two would let an unapproved
+    threshold read as part of the care plan.
+    """
+
     items: list[SupportItem] = Field(default_factory=list)
+    suggested: list[SupportItem] = Field(default_factory=list)
     carers: str | None = None
     location: str | None = None
     status: str
+
+    @model_validator(mode="after")
+    def standing_care_carries_no_project_threshold(self) -> "SupportCare":
+        for item in self.items:
+            if item.authority is not Authority.none:
+                raise ValueError(
+                    f"{item.title}: a project reading belongs in `suggested`, not in the "
+                    "standing care plan"
+                )
+        return self
 
 
 class SocialAssessment(Strict):
