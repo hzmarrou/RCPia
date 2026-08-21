@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     azure_rerank_base_url: str = ""
     azure_rerank_deployment: str = "Cohere-rerank-v4.0-pro"
+    # Empty means "use the embedding key", which is what the live workspace issues today.
+    # It exists so that a workspace with per-endpoint keys is a configuration change rather
+    # than a code change — and so that rotating the embedding key cannot silently break
+    # reranking with nothing in the configuration to point at.
+    azure_rerank_api_key: str = ""
 
     auth_secret: str = DEFAULT_AUTH_SECRET
 

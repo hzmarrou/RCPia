@@ -46,11 +46,72 @@ class RerankError(Exception):
     """The reranker could not be reached, or refused the request."""
 
 
+def _parse_scores(rows: object, *, expected: int) -> list[float]:
+    """Turn the service's rows into one score per passage, or refuse the response.
+
+    **Counting the rows is not validating them**, and this function exists because that is
+    what the first version did. Every failure below passes a length check, and every one of
+    them corrupts the ranking silently rather than raising:
+
+    - **A duplicated index** writes one slot repeatedly and leaves the rest at their initial
+      value. With a `0.0` default, forty-nine passages then fall below the relevance floor
+      and are counted as "below floor" — so the search reports that the corpus has nothing
+      to say about the question. A false refusal is the one failure mode a clinician cannot
+      see: it reads as a gap in the guideline rather than a fault in us.
+    - **A negative index** writes to the wrong end of the list, attaching a score to a
+      passage that did not earn it.
+    - **An index past the end** raises `IndexError`, which is not a `RerankError`, so a
+      caller catching the documented exception does not catch it.
+    - **A non-finite score** is worse than either. `inf` clears the relevance floor and
+      sorts to the top of the results. `NaN` compares false against everything, so it is
+      dropped by the floor *and* missed by the `below_floor` count — it vanishes from both
+      tallies and the arithmetic silently stops adding up.
+
+    Refusing the whole response is the right response to any of them. A rerank call is
+    retryable and its failure is loud; a corrupted ranking is neither.
+    """
+    if not isinstance(rows, list):
+        raise RerankError(f"Rerank response held no results list, got {type(rows).__name__}")
+    if len(rows) != expected:
+        raise RerankError(f"Rerank response held {len(rows)} scores for {expected} passages")
+
+    scores: list[float | None] = [None] * expected
+    for position, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise RerankError(f"Rerank result {position} was {type(row).__name__}, not an object")
+        try:
+            index = int(row["index"])
+            score = float(row["relevance_score"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RerankError(f"Rerank result {position} was unreadable: {exc}") from exc
+
+        if not 0 <= index < expected:
+            raise RerankError(
+                f"Rerank result {position} indexed passage {index}, outside 0..{expected - 1}"
+            )
+        if scores[index] is not None:
+            raise RerankError(f"Rerank response scored passage {index} more than once")
+        # `x != x` is true only for NaN; the comparisons catch both infinities. Written this
+        # way rather than with `math.isfinite` so the NaN case is visible to a reader.
+        if score != score or score in (float("inf"), float("-inf")):
+            raise RerankError(f"Rerank result {position} scored passage {index} as {score}")
+        scores[index] = score
+
+    # Unreachable: `expected` distinct indexes in `0..expected-1` fill every slot. Asserted
+    # rather than assumed, because the alternative is a `None` reaching the relevance floor.
+    if any(score is None for score in scores):
+        raise RerankError("Rerank response left passages unscored")
+    return [score for score in scores if score is not None]
+
+
 class Reranker(Protocol):
     """What retrieval needs. Implemented by Azure, and by a fake in the tests."""
 
     @property
     def model(self) -> str: ...
+
+    @property
+    def fingerprint(self) -> str: ...
 
     async def score(self, query: str, documents: list[str]) -> list[float]: ...
 
@@ -80,6 +141,22 @@ class AzureReranker:
     def model(self) -> str:
         return self._deployment
 
+    @property
+    def fingerprint(self) -> str:
+        """What actually served the request, for a run record to pin.
+
+        `model` alone is not enough. An Azure deployment name is chosen by whoever created
+        the deployment: two workspaces can both call it `Cohere-rerank-v4.0-pro` and serve
+        different model versions, and the same name can be repointed at a new version
+        without any change here. An evaluation whose result is attributed to
+        `Cohere-rerank-v4.0-pro` and nothing else cannot be reproduced or compared across
+        releases, which is what the release gate needs it for.
+
+        The host distinguishes the deployment; the key does not appear.
+        """
+        host = self._base_url.split("//", 1)[-1].split("/", 1)[0]
+        return f"azure-rerank:{host}:{self._deployment}"
+
     async def score(self, query: str, documents: list[str]) -> list[float]:
         """Relevance for each document, in the order the documents were given.
 
@@ -98,17 +175,7 @@ class AzureReranker:
         }
 
         response = await self._post_with_retries(payload)
-        rows = response.json().get("results")
-        if not isinstance(rows, list) or len(rows) != len(documents):
-            raise RerankError(
-                f"Rerank response held {len(rows) if isinstance(rows, list) else 0} scores "
-                f"for {len(documents)} passages"
-            )
-
-        scores = [0.0] * len(documents)
-        for row in rows:
-            scores[int(row["index"])] = float(row["relevance_score"])
-        return scores
+        return _parse_scores(response.json().get("results"), expected=len(documents))
 
     async def _post_with_retries(self, payload: dict[str, object]) -> httpx.Response:
         import json
@@ -138,6 +205,11 @@ class AzureReranker:
                     last = f"{response.status_code}: {response.text[:200]}"
                     if response.status_code not in (429, 500, 502, 503, 504):
                         break
+                    # Nothing follows the last attempt, so waiting before it is time spent
+                    # to no purpose — 64 seconds at the fifth attempt, and once per query in
+                    # an evaluation run of a hundred of them.
+                    if attempt == MAX_ATTEMPTS:
+                        break
                     header = response.headers.get("retry-after")
                     delay = (
                         float(header)
@@ -147,18 +219,25 @@ class AzureReranker:
                     await asyncio.sleep(delay)
                     continue
 
+                if attempt == MAX_ATTEMPTS:
+                    break
                 await asyncio.sleep(BASE_BACKOFF_SECONDS * attempt)
 
         raise RerankError(f"Rerank request failed after {MAX_ATTEMPTS} attempts - {last}")
 
 
 def build_reranker(settings: Settings) -> Reranker:
-    if not settings.azure_openai_api_key or not settings.azure_rerank_base_url:
+    # The live workspace issues one key for both endpoints, so `azure_rerank_api_key` is
+    # normally empty and the embedding key is used. Naming it separately means a workspace
+    # that issues per-endpoint keys is configuration rather than a code change.
+    api_key = settings.azure_rerank_api_key or settings.azure_openai_api_key
+    if not api_key or not settings.azure_rerank_base_url:
         raise RerankError(
-            "AZURE_OPENAI_API_KEY and AZURE_RERANK_BASE_URL must be set to rerank passages."
+            "AZURE_RERANK_BASE_URL and an API key (AZURE_RERANK_API_KEY, or "
+            "AZURE_OPENAI_API_KEY) must be set to rerank passages."
         )
     return AzureReranker(
         base_url=settings.azure_rerank_base_url,
-        api_key=settings.azure_openai_api_key,
+        api_key=api_key,
         deployment=settings.azure_rerank_deployment,
     )

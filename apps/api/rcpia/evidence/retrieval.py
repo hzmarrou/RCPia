@@ -31,7 +31,7 @@ this module uses.
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field, replace
+from dataclasses import KW_ONLY, dataclass, field, replace
 from typing import Any
 
 import sqlalchemy as sa
@@ -71,6 +71,19 @@ UNSPECIFIED = "not_specified"
 # (15 of 33). That residue is a corpus finding rather than a filter bug, and it is recorded
 # in `docs/reviews/corpus-v3-change-request.md`.
 ADMISSIBLE_UNSPECIFIED_REASONS = ("general_principle", "spans_settings")
+
+# `clinical_purpose` labels what a passage is for — diagnosing, staging, choosing a therapy,
+# delivering it, following the patient up. It is required of every release by the loader and
+# carries its own index, and until now nothing filtered on it, so a follow-up question could
+# be answered with a screening passage and nothing noticed.
+#
+# `general` is admitted alongside whatever is asked for, the same way `therapy_line` admits
+# `not_applicable`. 257 eligible passages carry it and 243 carry nothing else, so excluding
+# it would drop a fifth of the corpus for every purpose-filtered question. It is also the
+# same shape of hazard as `not_specified_reason = general_principle` — a label meaning
+# "applies broadly" that a mislabelled passage can hide behind — which is why it is a
+# constant the retrieval evaluation can sweep rather than a rule written into the clause.
+UNIVERSAL_PURPOSE = "general"
 
 # Below this, a passage is discarded rather than returned. Measured against the loaded corpus
 # with three probe queries: the worst genuinely relevant candidate scored 0.579, and the best
@@ -150,19 +163,37 @@ class Filter:
     """
 
     cancer_type: str
+    # Everything after the cancer type is keyword-only. Adding `clinical_purpose` to this
+    # class shifted every later positional argument by one, and a call passing the agent role
+    # fourth silently bound `"urology_oncology"` to `clinical_purpose` — a `str` where a
+    # `tuple[str, ...]` was declared, which is truthy and iterable, so it would have reached
+    # PostgreSQL as an overlap against thirteen single characters. The next field added here
+    # would do the same thing to whoever is not looking.
+    _: KW_ONLY
     disease_setting: str | None = None
     therapy_line: str | None = None
+    # What the question is asking for — one purpose or several. A passage matches if it
+    # serves *any* of them, so this is array overlap rather than containment: 477 chunks
+    # carry more than one purpose, and requiring a passage to serve every purpose asked
+    # about would admit almost nothing.
+    clinical_purpose: tuple[str, ...] = ()
     agent_role: str | None = None
     # Which `not_specified` passages count as universally applicable. A parameter rather than
     # a constant so the retrieval evaluation can measure the choice instead of inheriting it.
     admit_unspecified: tuple[str, ...] = ADMISSIBLE_UNSPECIFIED_REASONS
+    # Whether `general` passages are admitted alongside the requested purposes. Same reason
+    # as `admit_unspecified`: measurable rather than inherited.
+    admit_universal_purpose: bool = True
 
     def widen(self) -> "Filter | None":
         """The next-looser filter, or None when nothing further may be dropped.
 
-        **Only the therapy line is ever relaxed.** It is the narrowest claim and the one a
-        guideline is least likely to state explicitly, so a passage that omits it is usually
-        still applicable.
+        **Therapy line first, then clinical purpose.** Both are claims a guideline often
+        leaves implicit, and both are narrower than the question of which patient a passage
+        is about. Therapy line goes first because it is the narrower of the two: a passage
+        that does not say which line it applies to is usually still applicable, whereas the
+        purpose is what the question was actually asking for and giving it up changes the
+        kind of answer returned.
 
         `disease_setting`, `cancer_type` and `agent_role` are never dropped. Dropping the
         cancer type would offer bladder guidance to a prostate patient. Dropping the disease
@@ -176,6 +207,8 @@ class Filter:
         """
         if self.therapy_line is not None:
             return replace(self, therapy_line=None)
+        if self.clinical_purpose:
+            return replace(self, clinical_purpose=())
         return None
 
     def as_clauses(self) -> list[sa.ColumnElement[bool]]:
@@ -198,6 +231,14 @@ class Filter:
             clauses.append(
                 EvidenceChunk.therapy_line.in_((self.therapy_line, "not_applicable"))
             )
+        if self.clinical_purpose:
+            # `overlap` is PostgreSQL's `&&`, not `@>`. The chunk must serve at least one of
+            # the purposes asked about, not all of them — 477 chunks carry more than one
+            # purpose and a question routinely spans two.
+            wanted = list(self.clinical_purpose)
+            if self.admit_universal_purpose:
+                wanted.append(UNIVERSAL_PURPOSE)
+            clauses.append(EvidenceChunk.clinical_purpose.overlap(wanted))
         if self.agent_role is not None:
             clauses.append(EvidenceChunk.agent_roles.contains([self.agent_role]))
         return clauses
@@ -240,8 +281,49 @@ class RetrievedChunk:
 
 
 @dataclass
+class AttemptTrace:
+    """One pass of the widening loop, in chunk ids rather than counts.
+
+    The evaluation measures four stages — whether the passage reached the candidate set,
+    whether the filter admitted it, whether the ranking surfaced it, whether the floor kept
+    it — and each has a different repair. Counts cannot separate them: `keyword_hits = 25`
+    does not say whether the passage a clinician labelled relevant was one of the 25.
+
+    Recorded per attempt because the strict pass and a widened pass are different searches
+    against different filters, and a report that blends them can say neither what the strict
+    filter would have returned nor what relaxing it bought.
+
+    Populated only when `trace=True`. The production path never allocates these lists.
+    """
+
+    filter_requested: Filter
+    widening_step: int
+    widened_from: Filter | None = None
+    keyword_ids: list[str] = field(default_factory=list)
+    dense_ids: list[str] = field(default_factory=list)
+    fused_ids: list[str] = field(default_factory=list)
+    candidate_ids: list[str] = field(default_factory=list)
+    relevances: dict[str, float] = field(default_factory=dict)
+    above_floor: list[str] = field(default_factory=list)
+    below_floor_ids: list[str] = field(default_factory=list)
+    returned: list[str] = field(default_factory=list)
+
+
+@dataclass
 class RetrievalReport:
-    """What the search did, so an empty result can be explained rather than guessed at."""
+    """What the search did, so an empty result can be explained rather than guessed at.
+
+    **The scalar fields describe the attempt that produced `chunks`**, and when nothing was
+    produced, the widest attempt that got as far as reranking. That was already true before
+    the fields were assigned where they are now — `_search` returns as soon as an attempt
+    succeeds, so whatever it had just assigned was the returning attempt's. It is written
+    deliberately rather than incidentally now, and stated here, because the next person to
+    add a `continue` to that loop would have broken it without noticing.
+
+    **The counts are not a substitute for `attempts`.** `keyword_hits = 25` does not say
+    whether any particular passage was among the 25, so no count can tell which stage lost a
+    passage the gold set says should have been returned. That is what the trace is for.
+    """
 
     widened: int = 0
     keyword_hits: int = 0
@@ -251,6 +333,8 @@ class RetrievalReport:
     below_floor: int = 0
     filter_used: Filter | None = None
     chunks: list[RetrievedChunk] = field(default_factory=list)
+    # Empty unless `trace=True`. Every attempt, in order, strict first.
+    attempts: list[AttemptTrace] = field(default_factory=list)
 
 
 def reciprocal_rank_fusion(rankings: list[list[str]], k: int = RRF_K) -> list[tuple[str, float]]:
@@ -301,6 +385,9 @@ _COLUMNS = (
     EvidenceChunk.chunk_id,
     EvidenceChunk.document_id,
     EvidenceChunk.text,
+    # What the cross-encoder reads. Not shown to a clinician — `text` is the passage as the
+    # guideline printed it — but see `_search` for why the reranker must not be given that.
+    EvidenceChunk.contextual_text,
     EvidenceChunk.citation_label,
     EvidenceChunk.page_start,
     EvidenceChunk.page_end,
@@ -402,6 +489,7 @@ async def _search(
     limit: int,
     reranker: Reranker | None,
     floor: float,
+    trace: bool,
 ) -> RetrievalReport:
     """Retrieve the passages an agent may see for one clinical question.
 
@@ -418,9 +506,22 @@ async def _search(
 
     report = RetrievalReport(keyword_skipped=not concepts)
     current: Filter | None = filter
+    previous: Filter | None = None
+    step = 0
+    # keyword hits, dense hits, below floor — of the last attempt that got as far as
+    # reranking. Stays at zeros when no filter admitted anything at all, which is itself the
+    # distinction a reader of an empty report is looking for.
+    exhausted = (0, 0, 0)
 
     while current is not None:
         clauses = current.as_clauses()
+        attempt = (
+            AttemptTrace(filter_requested=current, widening_step=step, widened_from=previous)
+            if trace
+            else None
+        )
+        if attempt is not None:
+            report.attempts.append(attempt)
 
         # An empty concept set produces an empty tsquery, which matches nothing. Running it
         # anyway would report zero keyword hits, which reads as "the corpus has nothing"
@@ -440,18 +541,23 @@ async def _search(
         )
 
         if keyword or dense:
-            attempted = current
-            report.keyword_hits = len(keyword)
-            report.dense_hits = len(dense)
-            report.filter_used = attempted
-
             by_id = {row.chunk_id: row for row in (*dense, *keyword)}
             keyword_order = {row.chunk_id: i for i, row in enumerate(keyword, start=1)}
             dense_order = {row.chunk_id: i for i, row in enumerate(dense, start=1)}
 
             fused = reciprocal_rank_fusion([list(keyword_order), list(dense_order)])
 
+            if attempt is not None:
+                attempt.keyword_ids = list(keyword_order)
+                attempt.dense_ids = list(dense_order)
+                attempt.fused_ids = [chunk_id for chunk_id, _ in fused]
+
             if reranker is None:
+                # No cross-encoder means no floor, so this attempt returns whatever it fused
+                # and the loop ends here. The scalars therefore describe it.
+                report.keyword_hits = len(keyword)
+                report.dense_hits = len(dense)
+                report.filter_used = current
                 report.chunks = [
                     _to_chunk(
                         by_id[chunk_id],
@@ -462,13 +568,28 @@ async def _search(
                     )
                     for chunk_id, score in fused[:limit]
                 ]
+                if attempt is not None:
+                    attempt.returned = [chunk.chunk_id for chunk in report.chunks]
                 return report
 
             # The whole fused set goes to the cross-encoder, not just the head of it: the
             # point of reranking is that fusion's order is not the final word.
+            #
+            # **`contextual_text`, not `text`** — the same string the dense leg embedded.
+            # It prefixes the source and the section path, and the section path is where a
+            # guideline states who the passage is about: "6.3.5.f Adjuvant treatment in pN1
+            # disease > 6.3.5.f.1 Adjuvant androgen ablation" against "6.4.4 The role of
+            # imaging in PSA-only recurrence". Given the bare passage, a cross-encoder is
+            # asked to tell those apart from a recommendation sentence that names neither.
+            # That is the disease-setting confusion this project keeps finding, arriving
+            # through the one stage that is supposed to catch it.
+            #
+            # It also matters across languages: AFU section paths are French, so a French
+            # question scoring a French passage gets back the lexical overlap that bare
+            # `text` throws away. EAU and AFU prefixes average 132 and 139 characters.
             candidates = fused[:CANDIDATE_LIMIT]
             relevances = await reranker.score(
-                question, [by_id[chunk_id].text for chunk_id, _ in candidates]
+                question, [by_id[chunk_id].contextual_text for chunk_id, _ in candidates]
             )
             report.reranked = True
 
@@ -476,11 +597,25 @@ async def _search(
                 (chunk_id, score, relevance)
                 for (chunk_id, score), relevance in zip(candidates, relevances, strict=True)
             ]
-            report.below_floor = sum(1 for _, _, relevance in scored if relevance < floor)
             kept = sorted(
                 (item for item in scored if item[2] >= floor), key=lambda item: -item[2]
             )
+
+            if attempt is not None:
+                attempt.candidate_ids = [chunk_id for chunk_id, _ in candidates]
+                attempt.relevances = {chunk_id: relevance for chunk_id, _, relevance in scored}
+                attempt.above_floor = [chunk_id for chunk_id, _, _ in kept]
+                attempt.below_floor_ids = [
+                    chunk_id for chunk_id, _, relevance in scored if relevance < floor
+                ]
+
             if kept:
+                # Assigned here rather than on entry to the attempt, so that the fields
+                # describing the returned passages are written on the path that returns them.
+                report.keyword_hits = len(keyword)
+                report.dense_hits = len(dense)
+                report.filter_used = current
+                report.below_floor = sum(1 for _, _, relevance in scored if relevance < floor)
                 report.chunks = [
                     _to_chunk(
                         by_id[chunk_id],
@@ -491,19 +626,37 @@ async def _search(
                     )
                     for chunk_id, score, relevance in kept[:limit]
                 ]
+                if attempt is not None:
+                    attempt.returned = [chunk.chunk_id for chunk in report.chunks]
                 return report
             # Everything the filter admitted was judged irrelevant. That can mean the corpus
             # has nothing to say — or that the filter was a shade too tight, and the passage
             # that answers the question sits one therapy-line relaxation away. Relaxing costs
             # one more round trip; not relaxing returns nothing when an answer existed.
+            #
+            # Held in case no later attempt returns anything either: an empty result is
+            # explained by the widest attempt's numbers, and `below_floor` is what separates
+            # "the filter admitted nothing" from "it admitted passages and none answered".
+            exhausted = (
+                len(keyword),
+                len(dense),
+                sum(1 for _, _, relevance in scored if relevance < floor),
+            )
 
+        previous = current
         current = current.widen()
         if current is not None:
             report.widened += 1
+            step += 1
 
     # Nothing survived even the widest admissible filter. Returning an empty report is the
     # correct answer: the alternative is offering a passage the filter refused.
+    #
+    # `filter_used` is None because no filter produced a result. The counts describe the last
+    # attempt, which is the widest one tried and therefore the strongest evidence that the
+    # corpus has nothing — that is what a reader of an empty report needs.
     report.filter_used = None
+    report.keyword_hits, report.dense_hits, report.below_floor = exhausted
     return report
 
 
@@ -518,6 +671,7 @@ async def search(
     reranker: Reranker,
     limit: int = 10,
     floor: float = RELEVANCE_FLOOR,
+    trace: bool = False,
 ) -> RetrievalReport:
     """Retrieve the passages an agent may see for one clinical question.
 
@@ -541,6 +695,7 @@ async def search(
         limit=limit,
         reranker=reranker,
         floor=floor,
+        trace=trace,
     )
 
 
@@ -553,6 +708,7 @@ async def search_without_reranking(
     embedding_model: str,
     filter: Filter,
     limit: int = 10,
+    trace: bool = False,
 ) -> RetrievalReport:
     """Filter, search and fuse, with no cross-encoder and no relevance floor.
 
@@ -574,4 +730,5 @@ async def search_without_reranking(
         limit=limit,
         reranker=None,
         floor=RELEVANCE_FLOOR,
+        trace=trace,
     )
