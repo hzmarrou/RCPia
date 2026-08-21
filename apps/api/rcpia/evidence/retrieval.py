@@ -185,17 +185,31 @@ class Filter:
     # as `admit_unspecified`: measurable rather than inherited.
     admit_universal_purpose: bool = True
 
+    def invariants(self) -> "Filter":
+        """The same filter with every routing dimension dropped.
+
+        What remains is what is true of the system rather than of this patient: the cancer
+        type, and `retrieval_eligible`. Used as the denominator when measuring how much the
+        routing filter costs — see `UnfilteredCandidates`.
+        """
+        return Filter(self.cancer_type, admit_unspecified=self.admit_unspecified)
+
     def widen(self) -> "Filter | None":
         """The next-looser filter, or None when nothing further may be dropped.
 
-        **Therapy line first, then clinical purpose.** Both are claims a guideline often
-        leaves implicit, and both are narrower than the question of which patient a passage
-        is about. Therapy line goes first because it is the narrower of the two: a passage
-        that does not say which line it applies to is usually still applicable, whereas the
-        purpose is what the question was actually asking for and giving it up changes the
-        kind of answer returned.
+        **Only the therapy line is ever relaxed.** It is the narrowest claim and the one a
+        guideline is least likely to state explicitly, so a passage that omits it is usually
+        still applicable.
 
-        `disease_setting`, `cancer_type` and `agent_role` are never dropped. Dropping the
+        **`clinical_purpose` was briefly relaxed here and is not any more.** Dropping it
+        admitted every purpose at once, so a follow-up question that found nothing could be
+        answered with a treatment-selection passage — which is not a weaker match to the same
+        question, it is an answer to a different one. It also made the filter untestable from
+        outside: a purpose test could pass because widening had rescued the passage by the
+        wrong route, which is exactly what happened to the first version of those tests.
+
+        `disease_setting`, `cancer_type`, `clinical_purpose` and `agent_role` are never
+        dropped. Dropping the
         cancer type would offer bladder guidance to a prostate patient. Dropping the disease
         setting is subtler and just as wrong: it admits passages written for *every other*
         stage — localized protocols for metastatic disease — and it re-admits every passage
@@ -207,8 +221,6 @@ class Filter:
         """
         if self.therapy_line is not None:
             return replace(self, therapy_line=None)
-        if self.clinical_purpose:
-            return replace(self, clinical_purpose=())
         return None
 
     def as_clauses(self) -> list[sa.ColumnElement[bool]]:
@@ -281,6 +293,29 @@ class RetrievedChunk:
 
 
 @dataclass
+class UnfilteredCandidates:
+    """What the legs return under the invariants alone, for one search.
+
+    **Filter loss cannot be computed from a filtered trace.** Every `AttemptTrace` records what
+    survived `Filter.as_clauses()`, so a passage the filter refused appears in none of them —
+    indistinguishable from one the corpus does not contain. `filter_retention` is defined as
+    recall over the filter-admitted set divided by recall over the unfiltered set, and without
+    the denominator it is not a number at all.
+
+    "Unfiltered" keeps the invariants on: the cancer type, and `retrieval_eligible`. Those are
+    properties of the system rather than routing choices — 214 of 1,513 chunks are ineligible
+    bibliography, appendices and superseded guidance, and dragging them in would make the
+    filter look better than it is by comparing it against a configuration nobody would ship.
+
+    Costs one extra query per leg, and only when `trace=True`.
+    """
+
+    keyword_ids: list[str] = field(default_factory=list)
+    dense_ids: list[str] = field(default_factory=list)
+    fused_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
 class AttemptTrace:
     """One pass of the widening loop, in chunk ids rather than counts.
 
@@ -335,6 +370,8 @@ class RetrievalReport:
     chunks: list[RetrievedChunk] = field(default_factory=list)
     # Empty unless `trace=True`. Every attempt, in order, strict first.
     attempts: list[AttemptTrace] = field(default_factory=list)
+    # None unless `trace=True`. The denominator for filter loss.
+    unfiltered: UnfilteredCandidates | None = None
 
 
 def reciprocal_rank_fusion(rankings: list[list[str]], k: int = RRF_K) -> list[tuple[str, float]]:
@@ -512,6 +549,38 @@ async def _search(
     # reranking. Stays at zeros when no filter admitted anything at all, which is itself the
     # distinction a reader of an empty report is looking for.
     exhausted = (0, 0, 0)
+
+    if trace:
+        # The denominator for filter loss, computed once: the invariants do not change as the
+        # filter widens. Two extra queries, and only when tracing.
+        invariant = filter.invariants().as_clauses()
+        bare_keyword = (
+            []
+            if report.keyword_skipped
+            else await _keyword_leg(session, concepts=concepts, clauses=invariant)
+        )
+        bare_dense = (
+            []
+            if embedding is None
+            else await _dense_leg(
+                session,
+                embedding=embedding,
+                embedding_model=embedding_model,
+                clauses=invariant,
+            )
+        )
+        bare_keyword_ids = [row.chunk_id for row in bare_keyword]
+        bare_dense_ids = [row.chunk_id for row in bare_dense]
+        report.unfiltered = UnfilteredCandidates(
+            keyword_ids=bare_keyword_ids,
+            dense_ids=bare_dense_ids,
+            fused_ids=[
+                chunk_id
+                for chunk_id, _ in reciprocal_rank_fusion(
+                    [bare_keyword_ids, bare_dense_ids]
+                )
+            ],
+        )
 
     while current is not None:
         clauses = current.as_clauses()

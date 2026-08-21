@@ -1037,12 +1037,13 @@ async def test_a_passage_serving_another_purpose_is_refused(session: AsyncSessio
         trace=True,
     )
 
-    # The strict filter refuses it. Widening then relaxes the purpose — deliberately, since
-    # a question is often reasonably served by an adjacent purpose — so the passage does come
-    # back, marked as widened. What must not happen is it arriving as a strict match.
+    # Refused, and not rescued. Widening once relaxed the purpose, which admitted every
+    # purpose at once — so a follow-up question that found nothing could be answered with a
+    # treatment-selection passage. That is not a weaker match to the same question, it is an
+    # answer to a different one.
     assert strict.attempts[0].keyword_ids == []
-    assert strict.widened == 1
-    assert strict.filter_used == Filter("prostate")
+    assert strict.widened == 0
+    assert strict.chunks == []
 
 
 async def test_serving_any_requested_purpose_is_enough(session: AsyncSession) -> None:
@@ -1113,37 +1114,77 @@ async def test_general_can_be_excluded_for_the_evaluation(session: AsyncSession)
         trace=True,
     )
 
-    # Refused by the strict filter. Widening drops the purpose clause entirely, so the
-    # passage returns as a widened match — the sweep is about what counts as a strict one.
     assert report.attempts[0].keyword_ids == []
-    assert report.widened == 1
+    assert report.chunks == []
 
 
-async def test_the_purpose_is_relaxed_only_after_the_therapy_line(
-    session: AsyncSession,
-) -> None:
-    """Order matters. The therapy line is the narrower claim and the one a guideline most
-    often leaves implicit; the purpose is what the question was actually asking for, so
-    giving it up changes the kind of answer returned."""
+async def test_only_the_therapy_line_is_ever_relaxed(session: AsyncSession) -> None:
+    """`clinical_purpose` was briefly relaxed and is not any more.
+
+    Dropping it admitted every purpose at once. It also made the purpose filter untestable
+    from outside: an `overlap`-versus-`contains` mutation survived because widening rescued
+    the passage by the wrong route, and the test could not tell the two apart.
+    """
     strict = Filter(
         "prostate",
         disease_setting="prostate_localized_low_risk",
         therapy_line="salvage",
         clinical_purpose=("follow_up",),
+        agent_role="urology_oncology",
     )
 
     once = strict.widen()
     assert once is not None
-    assert (once.therapy_line, once.clinical_purpose) == (None, ("follow_up",))
+    assert once.therapy_line is None
 
-    twice = once.widen()
-    assert twice is not None
-    assert (twice.therapy_line, twice.clinical_purpose) == (None, ())
+    # And there is nowhere further to go. Everything that says *who the passage is for* is
+    # held: the patient, the setting, what the question asks, and which specialist is asking.
+    assert once.widen() is None
+    assert once.clinical_purpose == ("follow_up",)
+    assert once.disease_setting == "prostate_localized_low_risk"
+    assert once.cancer_type == "prostate"
+    assert once.agent_role == "urology_oncology"
 
-    assert twice.widen() is None
-    # Neither relaxation touches who the passage is about.
-    assert twice.disease_setting == "prostate_localized_low_risk"
-    assert twice.cancer_type == "prostate"
+
+async def test_the_unfiltered_candidate_set_is_recorded_for_filter_loss(
+    session: AsyncSession,
+) -> None:
+    """Filter loss cannot be computed from a filtered trace.
+
+    Every `AttemptTrace` records what survived the filter, so a passage the filter refused
+    appears in none of them — indistinguishable from one the corpus does not contain.
+    `filter_retention` is recall over the admitted set divided by recall over the unfiltered
+    set, and without the denominator it is not a number.
+    """
+    await add_document(session, "doc")
+    await add_chunk(session, "wanted", text="protocole de suivi", clinical_purpose=("follow_up",))
+    await add_chunk(
+        session, "refused", text="protocole de suivi", clinical_purpose=("screening",)
+    )
+    # Ineligible passages stay out of the denominator: comparing the filter against a
+    # configuration nobody would ship would flatter it.
+    await add_chunk(
+        session,
+        "ineligible",
+        text="protocole de suivi",
+        clinical_purpose=("follow_up",),
+        retrieval_eligible=False,
+        retrieval_exclusion_reason="bibliography_entry",
+    )
+
+    report = await search_without_reranking(
+        session,
+        question="question de test",
+        concepts=Concepts(french=("protocole de suivi",)),
+        embedding=None,
+        embedding_model=MODEL,
+        filter=Filter("prostate", clinical_purpose=("follow_up",)),
+        trace=True,
+    )
+
+    assert report.unfiltered is not None
+    assert set(report.unfiltered.keyword_ids) == {"wanted", "refused"}
+    assert report.attempts[0].keyword_ids == ["wanted"]
 
 
 def test_the_filter_takes_only_the_cancer_type_positionally() -> None:

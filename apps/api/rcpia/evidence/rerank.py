@@ -79,8 +79,18 @@ def _parse_scores(rows: object, *, expected: int) -> list[float]:
     for position, row in enumerate(rows):
         if not isinstance(row, dict):
             raise RerankError(f"Rerank result {position} was {type(row).__name__}, not an object")
+        raw_index = row.get("index")
+        # **`int()` is a converter, not a validator.** `int(2.9)` is 2 and `int(True)` is 1,
+        # so a service returning a float or a boolean index would be silently coerced onto a
+        # neighbouring passage — the same silent misattribution the rest of this function
+        # exists to refuse. `bool` is checked first because it is a subclass of `int`.
+        if isinstance(raw_index, bool) or not isinstance(raw_index, int):
+            raise RerankError(
+                f"Rerank result {position} indexed with {raw_index!r} "
+                f"({type(raw_index).__name__}); an index must be an integer"
+            )
+        index = raw_index
         try:
-            index = int(row["index"])
             score = float(row["relevance_score"])
         except (KeyError, TypeError, ValueError) as exc:
             raise RerankError(f"Rerank result {position} was unreadable: {exc}") from exc

@@ -71,6 +71,18 @@ def test_not_a_number_is_refused() -> None:
         _parse_scores(rows((0, 0.9), (1, float("nan"))), expected=2)
 
 
+@pytest.mark.parametrize("index", [1.0, 0.5, True, "1", None])
+def test_a_non_integer_index_is_refused(index: object) -> None:
+    """`int()` is a converter, not a validator: `int(2.9)` is 2 and `int(True)` is 1, so a
+    float or boolean index would be coerced onto a neighbouring passage — the same silent
+    misattribution every other check here refuses."""
+    with pytest.raises(RerankError, match="must be an integer"):
+        _parse_scores(
+            [{"index": 0, "relevance_score": 0.9}, {"index": index, "relevance_score": 0.4}],
+            expected=2,
+        )
+
+
 def test_a_missing_key_is_refused_as_a_rerank_error() -> None:
     with pytest.raises(RerankError, match="unreadable"):
         _parse_scores([{"index": 0}, {"index": 1, "relevance_score": 0.4}], expected=2)
