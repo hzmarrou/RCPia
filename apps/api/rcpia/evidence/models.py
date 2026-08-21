@@ -82,6 +82,34 @@ class EvidenceDocument(Base):
     document_type: Mapped[str | None] = mapped_column(String(100))
     language: Mapped[str | None] = mapped_column(String(10))
 
+    # Which guideline family this document belongs to — `EAU`, `NCCN`, `AFU`, `SIOG`.
+    #
+    # Derived until now by splitting `document_id` on a dot, which worked by accident of the
+    # corpus agent's naming and would break the first time a document was named differently.
+    # Retrieval stratifies by family, so it has to be a declared property.
+    source_family: Mapped[str | None] = mapped_column(String(50))
+
+    # What kind of source this is. The vocabulary and its meaning are owned by RCPia --
+    # `rcpia.evidence.manifest.SOURCE_ROLES`, versioned -- and a release selects from it. It
+    # was briefly read from the release instead, which is circular: a release could invent a
+    # role, declare it position-bearing, and validate itself.
+    source_role: Mapped[str | None] = mapped_column(String(50))
+
+    # Which `clinical_purpose` domains this source may hold a position in. Empty means none
+    # anywhere — a classification, a measurement convention, an instrument.
+    #
+    # **Load-bearing, not descriptive.** A specialist reference compared as a peer of AFU, EAU
+    # and NCCN makes the divergence step report a disagreement that does not exist — SIOG's
+    # entire prostate footprint is `geriatric_frailty`, so it is not disagreeing about
+    # treatment, it is answering a different question. A false conflict shown to a clinician
+    # is the failure most likely to end their trust in the mechanism.
+    #
+    # A boolean was the first shape and was already wrong for sources we hold: ESPEN holds no
+    # position on treatment choice but does on nutritional support, and `false` reads as
+    # "holds none". A domain is a `clinical_purpose`, so the comparison step asks a question
+    # it already knows how to phrase.
+    position_domains: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+
     # The edition a passage was cited against. An opinion must stay reproducible when the
     # guideline is superseded, so this is stored rather than implied by the corpus release.
     version_label: Mapped[str | None] = mapped_column(String(100))
@@ -101,6 +129,13 @@ class EvidenceDocument(Base):
 
     chunks: Mapped[list["EvidenceChunk"]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        # Retrieval stratifies by family: one candidate search per applicable family, so that
+        # a global ranking cannot silently drop the one that disagrees. Declared here as well
+        # as in the migration, or `alembic check` proposes removing it.
+        Index("ix_evidence_documents_source_family", "source_family"),
     )
 
 

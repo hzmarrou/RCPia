@@ -26,6 +26,23 @@ invisible — the system reports no relevant evidence, and that reads as a gap i
 rather than a mistake of ours.
 """
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Block:
+    """One refused passage, and the document that owns it.
+
+    `document_id` is declared rather than parsed out of `chunk_id`. The ingestion loader has
+    to know whether a release is responsible for a block — an AFU-only slice must not fail
+    over an NCCN passage it was never going to touch — and inferring that from an id prefix
+    means a corpus that renames a document silently changes which blocks apply.
+    """
+
+    document_id: str
+    reason: str
+
+
 # Passages whose subject is a disease setting other than the one they claim to serve. Each is
 # labelled `not_specified` with `not_specified_reason = general_principle`, which our filter
 # reads as "applies to every patient". Their sections say otherwise.
@@ -74,7 +91,38 @@ _NOT_GUIDANCE = {
     "siog.geriatric-assessment.2014.2013-cox-regression-analysis-log-rank.p015.0109",
 }
 
-LOCALLY_BLOCKED: dict[str, str] = {
+# The document each block belongs to, declared once. Every blocked id below is a passage of
+# one of these, and the loader uses the mapping to decide whether a release is responsible.
+_OWNERS = {
+    "nccn.prostate.6.2026": (
+        "nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.08.0085",
+        "nccn.prostate.6.2026.principles-of-risk-stratification-and-biomarkers.05.0091",
+        "nccn.prostate.6.2026.prostate-cancer.02.0002",
+        "nccn.prostate.6.2026.prostate-cancer.03.0007",
+        "nccn.prostate.6.2026.prostate-cancer.05.0009",
+        "nccn.prostate.6.2026.prostate-cancer.07.0011",
+        "nccn.prostate.6.2026.prostate-cancer.09.0013",
+    ),
+    "siog.geriatric-assessment.2014": (
+        "siog.geriatric-assessment.2014.12-some-studies-found-no-predic.p004.0017",
+        "siog.geriatric-assessment.2014.2011-cox-regression-analysis-log-rank.p014.0105",
+        "siog.geriatric-assessment.2014.2013-cox-regression-analysis-log-rank.p015.0109",
+    ),
+}
+
+_REASONS = {
     **{chunk_id: "local_setting_mislabelled" for chunk_id in _MISLABELLED_SETTING},
     **{chunk_id: "local_not_guidance" for chunk_id in _NOT_GUIDANCE},
 }
+
+LOCALLY_BLOCKED: dict[str, Block] = {
+    chunk_id: Block(document_id=document_id, reason=_REASONS[chunk_id])
+    for document_id, chunk_ids in _OWNERS.items()
+    for chunk_id in chunk_ids
+}
+
+# Every listed passage must have an owner and a reason, or a block silently does not exist.
+assert set(LOCALLY_BLOCKED) == set(_REASONS), (
+    "local_blocks: _OWNERS and the reason lists disagree — "
+    f"{sorted(set(_REASONS) ^ set(LOCALLY_BLOCKED))}"
+)

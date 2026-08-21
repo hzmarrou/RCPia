@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from rcpia.core.config import get_settings
 from rcpia.evidence.embedding import EmbeddingError, build_embedder
 from rcpia.evidence.ingestion import CorpusError, ingest_release
-from rcpia.evidence.manifest import ManifestError
+from rcpia.evidence.manifest import MANIFEST_FILENAME, ManifestError
 
 if sys.platform == "win32":
     # psycopg's async driver cannot run on Windows' default ProactorEventLoop.
@@ -26,17 +26,35 @@ if sys.platform == "win32":
 
 
 async def run(directory: Path, *, dry_run: bool) -> int:
+    # `routing.json` predates the manifest and both name the release. The manifest is the one
+    # that was validated, so it wins — and a disagreement is refused rather than resolved,
+    # because the database would otherwise record a release different from the one whose
+    # coverage was proved.
+    release_id = None
+    routing = directory / "routing.json"
+    if routing.exists():
+        release_id = json.loads(routing.read_text(encoding="utf-8")).get("release_id")
+    manifest_path = directory / MANIFEST_FILENAME
+    if manifest_path.exists():
+        declared = json.loads(manifest_path.read_text(encoding="utf-8")).get("release_id")
+        if declared is not None:
+            if release_id is not None and release_id != declared:
+                print(
+                    f"release refused: routing.json names {release_id!r} and "
+                    f"{MANIFEST_FILENAME} names {declared!r}. The manifest is the file whose "
+                    "coverage was validated; storing the other name would record a release "
+                    "nobody proved.",
+                    file=sys.stderr,
+                )
+                return 1
+            release_id = declared
+
     settings = get_settings()
     try:
         embedder = build_embedder(settings)
     except EmbeddingError as exc:
         print(f"cannot embed: {exc}", file=sys.stderr)
         return 2
-
-    release_id = None
-    routing = directory / "routing.json"
-    if routing.exists():
-        release_id = json.loads(routing.read_text(encoding="utf-8")).get("release_id")
 
     engine = create_async_engine(settings.database_url)
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -78,6 +96,24 @@ async def run(directory: Path, *, dry_run: bool) -> int:
     if report.chunks_removed or report.documents_removed:
         print(f"  removed        {report.chunks_removed} passages"
               + (f", {report.documents_removed} documents" if report.documents_removed else ""))
+
+    # A concern and a declared gap are the two things a release states that nothing else
+    # surfaces. Printed last, so they are what an operator is left looking at: "no renal
+    # source" as a line here is the whole difference from nobody noticing for five releases.
+    #
+    # Structural failures refuse the release. These do not — a gap is a working outcome, and a
+    # concern is information about a document we chose to load. They are warnings by design.
+    manifest = report.manifest
+    if manifest is not None:
+        if manifest.concerns:
+            print(f"\nconcerns ({len(manifest.concerns)})")
+            for note in manifest.concerns:
+                print(f"  {note}")
+        if manifest.declared_gaps:
+            print(f"\ndeclared gaps ({len(manifest.declared_gaps)})")
+            for gap in manifest.declared_gaps:
+                print(f"  {gap}")
+
     if dry_run:
         print("\ndry run — rolled back, nothing stored")
     return 0

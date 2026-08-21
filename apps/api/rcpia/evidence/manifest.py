@@ -23,6 +23,14 @@ relearning — `not_specified_reason`, the v3 metadata corrections, `retrieval_e
 
 **A release with no manifest is refused outright.** Not warned about. A warning is what the
 last four releases would have produced, and nobody would have read it.
+
+**What this module cannot check, stated plainly.** The reference library lives outside the
+release. We receive a directory of JSONL files and this manifest; we cannot enumerate folders
+we never see. So a file the manifest simply never lists is invisible here — the founding
+failure, one level down. `_check_folder_coverage` catches the largest version of it, a wholly
+omitted or mislabelled folder. Closing the rest needs the corpus agent to ship a file
+inventory with digests for `verify_checksums` to check, which is requested in
+`docs/reviews/corpus-v5-manifest-contract.md` and not yet delivered.
 """
 
 import hashlib
@@ -47,6 +55,94 @@ _DISPOSITION_FIELDS = {
 # not render identically — the whole point of the file.
 _FOLDER_STATUSES = frozenset({"accounted", "empty"})
 
+# Every key each object may carry. **This module repeated the failure it was written to
+# prevent**: it read the keys it knew and ignored the rest, so a manifest could carry
+# `processed_from`, a folder relationship, or a misspelled `dispositons` and be accepted
+# without a word — exactly how `not_specified_reason`, the v3 metadata, `retrieval_eligible`
+# and `clinical_purpose` were each lost.
+_MANIFEST_FIELDS = frozenset(
+    {
+        "artifacts",
+        "checksums",
+        "gaps",
+        "generated_at",
+        "reference_folders",
+        "references",
+        "release_id",
+        "schema_version",
+        "source_roles_version",
+    }
+)
+_REFERENCE_FIELDS = frozenset(
+    {
+        "concerns",
+        "dispositions",
+        "files",
+        "folders",
+        "position_domains",
+        "processed_from",
+        "reference_id",
+        "source_family",
+        "source_role",
+        "title",
+    }
+)
+_ARTIFACT_FIELDS = frozenset(
+    {"artifact_id", "belongs_to", "files", "kind", "note"}
+)
+_FOLDER_FIELDS = frozenset({"folder", "note", "status"})
+_DISPOSITION_FIELDS_ALLOWED = frozenset(
+    {"calculator_id", "chunks", "covers", "document_id", "kind", "reason", "tool_id"}
+)
+_GAP_FIELDS = frozenset({"gap_id", "note", "status", "topic"})
+
+# The manifest shape this loader implements. A release built against another version is
+# refused rather than read under the wrong rules.
+MANIFEST_SCHEMA_VERSION = "1.0"
+
+# **RCPia owns this table, and the release selects from it.**
+#
+# The first version read the mapping from the release, on the argument that a role we did not
+# recognise should be a question rather than a silent default. That is circular: a release
+# could invent `expert_opinion`, declare it position-bearing, and validate itself. The meaning
+# of a source_role is a decision about how the comparison step behaves, so it belongs here,
+# versioned with the code that acts on it.
+# **Domains, not a boolean.** `position_bearing: true|false` was the first shape and it was
+# already wrong for sources we hold. ESPEN does not hold a position on treatment choice, so
+# the boolean is false — but it holds positions on nutritional support, and if two nutrition
+# sources ever disagreed we would want them compared. A boolean says "holds no position",
+# which is not what we mean and not true.
+#
+# A domain is a `clinical_purpose`, so the comparison step can ask a question it already knows
+# how to phrase: *for this purpose, which sources may hold a position?* An empty set means the
+# source holds none anywhere — a classification, a measurement convention, an instrument.
+#
+# The values a role permits; a reference declares the subset it actually covers.
+SOURCE_ROLES: dict[str, frozenset[str]] = {
+    # AFU, EAU, NCCN, ESMO. The recommendation-producing purposes.
+    "treatment_guideline": frozenset(
+        {"therapy_indication", "modality_selection", "treatment_delivery"}
+    ),
+    # A joint position between two authorities. Same reach; see the note in
+    # `docs/reviews/corpus-v5-manifest-contract.md` about double-counting.
+    "treatment_consensus": frozenset(
+        {"therapy_indication", "modality_selection", "treatment_delivery"}
+    ),
+    # SIOG, ESPEN, renal, psycho-oncology: positions in their own domain, never on the
+    # treatment decision itself.
+    "specialist_guidance": frozenset(
+        {"supportive_care", "safety", "risk_stratification", "follow_up"}
+    ),
+    "classification_standard": frozenset(),  # WHO/IARC, PI-RADS, TNM
+    "measurement_standard": frozenset(),     # RECIST
+    "assessment_instrument": frozenset(),    # G8, MNA, IPSS, IIEF-5, ADL
+    "predictive_model": frozenset(),         # Briganti, MSKCC
+}
+
+# Bumped when a role is added, removed, or its position-bearing meaning changes. A release
+# declaring a version we do not know is refused rather than interpreted under the wrong rules.
+SOURCE_ROLES_VERSION = "2.0"
+
 
 class ManifestError(Exception):
     """The release's manifest does not account for what the release delivers."""
@@ -61,7 +157,7 @@ class CorpusEntry:
     chunks: int
     source_family: str | None
     source_role: str | None
-    position_bearing: bool | None
+    position_domains: tuple[str, ...] | None
 
 
 @dataclass
@@ -69,8 +165,8 @@ class Manifest:
     """A release's declared coverage, already checked for internal consistency.
 
     Loading validates the manifest against itself — every folder accounted for, every file
-    named exactly once, every disposition carrying its required field, `position_bearing`
-    agreeing with the declared `source_roles` mapping. Checking it against what the release
+    named exactly once, every disposition carrying its required field, `position_domains`
+    within what its `source_role` permits. Checking it against what the release
     actually delivers is `verify_against_release`, which needs the parsed documents.
     """
 
@@ -93,6 +189,15 @@ def _require_mapping(value: Any, what: str) -> dict[str, Any]:
             f"{MANIFEST_FILENAME}: {what} must be an object, got {type(value).__name__}"
         )
     return value
+
+
+def _reject_unknown(value: dict[str, Any], allowed: frozenset[str], what: str) -> None:
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: {what} carries fields this loader does not implement: "
+            f"{', '.join(unknown)}. A field nobody reads is a decision nobody made."
+        )
 
 
 def _require_list(value: Any, what: str) -> list[Any]:
@@ -120,23 +225,41 @@ def load_manifest(directory: Path) -> Manifest:
         raise ManifestError(f"{MANIFEST_FILENAME} is not valid JSON: {exc}") from exc
 
     document = _require_mapping(document, "the manifest")
+    schema_version = document.get("schema_version")
+    if schema_version is not None and schema_version != MANIFEST_SCHEMA_VERSION:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME} declares schema_version {schema_version!r}; this loader "
+            f"implements {MANIFEST_SCHEMA_VERSION!r}. Reading a manifest under the wrong "
+            "rules is how a coverage proof stops proving anything."
+        )
 
-    # `source_roles` maps a role to whether it can hold a position on treatment choice. It is
-    # declared in the release rather than hardcoded here so both sides read the same table:
-    # a role we do not recognise is a question for the corpus agent, not a silent default.
-    role_map: dict[str, bool] = {}
-    for role, spec in _require_mapping(document.get("source_roles") or {}, "source_roles").items():
-        bearing = _require_mapping(spec, f"source_roles.{role}").get("position_bearing")
-        if not isinstance(bearing, bool):
-            raise ManifestError(
-                f"{MANIFEST_FILENAME}: source_roles.{role} must declare position_bearing "
-                "as a boolean"
-            )
-        role_map[role] = bearing
+    # A release states which vocabulary it was built against; it does not get to define one.
+    declared_version = document.get("source_roles_version")
+    if declared_version is not None and declared_version != SOURCE_ROLES_VERSION:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME} was built against source_roles_version "
+            f"{declared_version!r}; this loader implements {SOURCE_ROLES_VERSION!r}. The "
+            "meaning of a source_role decides how the comparison step behaves, so a "
+            "release cannot be interpreted under a version we do not implement."
+        )
+    if "source_roles" in document:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME} declares its own source_roles mapping. RCPia owns that "
+            "vocabulary and versions it -- a release that defines both a role and its "
+            "meaning validates itself. State source_roles_version and select from "
+            f"{', '.join(sorted(SOURCE_ROLES))}."
+        )
+    role_map = SOURCE_ROLES
+
+    # After the two version checks, so a release built against a vocabulary or shape we do not
+    # implement is told which, rather than being handed a list of fields it did not expect to
+    # be wrong about.
+    _reject_unknown(document, _MANIFEST_FIELDS, "the manifest")
 
     folders: dict[str, str] = {}
     for entry in _require_list(document.get("reference_folders") or [], "reference_folders"):
         entry = _require_mapping(entry, "a reference_folders entry")
+        _reject_unknown(entry, _FOLDER_FIELDS, f"folder {entry.get('folder')}")
         name = entry.get("folder")
         status = entry.get("status")
         if not name:
@@ -157,12 +280,16 @@ def load_manifest(directory: Path) -> Manifest:
 
     for entry in _require_list(document.get("references") or [], "references"):
         entry = _require_mapping(entry, "a references entry")
+        _reject_unknown(
+            entry, _REFERENCE_FIELDS, f"reference {entry.get('reference_id')}"
+        )
         reference_id = entry.get("reference_id")
         if not reference_id:
             raise ManifestError(f"{MANIFEST_FILENAME}: a references entry has no reference_id")
 
         _claim_files(entry, reference_id, seen_files)
-        _check_position_bearing(entry, reference_id, role_map)
+        _check_position_domains(entry, reference_id, role_map)
+        _require_source_metadata(entry, reference_id)
 
         for note in entry.get("concerns") or []:
             concerns.append(f"{reference_id}: {note}")
@@ -187,13 +314,16 @@ def load_manifest(directory: Path) -> Manifest:
 
     for entry in _require_list(document.get("artifacts") or [], "artifacts"):
         entry = _require_mapping(entry, "an artifacts entry")
+        _reject_unknown(entry, _ARTIFACT_FIELDS, f"artifact {entry.get('artifact_id')}")
         _claim_files(entry, entry.get("artifact_id") or "an artifact", seen_files)
 
-    gaps = [
-        gap.get("gap_id") or gap.get("topic") or "unnamed gap"
-        for gap in _require_list(document.get("gaps") or [], "gaps")
-        if isinstance(gap, dict)
-    ]
+    _check_folder_coverage(folders, seen_files)
+
+    gaps: list[str] = []
+    for gap in _require_list(document.get("gaps") or [], "gaps"):
+        gap = _require_mapping(gap, "a gaps entry")
+        _reject_unknown(gap, _GAP_FIELDS, f"gap {gap.get('gap_id')}")
+        gaps.append(gap.get("gap_id") or gap.get("topic") or "unnamed gap")
 
     checksums = _require_mapping(document.get("checksums") or {}, "checksums")
     files = _require_mapping(checksums.get("files") or {}, "checksums.files")
@@ -209,6 +339,59 @@ def load_manifest(directory: Path) -> Manifest:
     )
 
 
+def _check_folder_coverage(folders: dict[str, str], seen_files: dict[str, str]) -> None:
+    """Every accounted folder must have at least one file claimed from it, and every claimed
+    file must sit in a declared folder.
+
+    **This is a weaker check than the docstring above once claimed, and the difference
+    matters.** "Every physical file appears exactly once" was only ever enforced against files
+    the manifest *listed* — a file omitted from the manifest was invisible, which is the
+    manifest's own founding failure reproduced inside the module written to fix it.
+
+    A loader cannot do better on its own. The reference library lives outside the release; we
+    receive `documents.jsonl`, `chunks.jsonl` and this manifest, and we cannot enumerate a
+    directory we never see. Closing the gap properly needs the corpus agent to ship a file
+    inventory with digests, which `verify_checksums` can then check — that is asked for in
+    `docs/reviews/corpus-v5-manifest-contract.md`.
+
+    What is enforceable here is the shape: a folder declared `accounted` that nothing claims a
+    file from is either mislabelled or forgotten, and a file claimed from a folder nobody
+    declared means the folder list is incomplete. Both are the wholly-omitted-folder case,
+    which is the largest version of the failure.
+    """
+    claimed_folders = {name.split("/", 1)[0] for name in seen_files if "/" in name}
+
+    empty_but_claimed = sorted(
+        folder
+        for folder, status in folders.items()
+        if status == "empty" and folder in claimed_folders
+    )
+    if empty_but_claimed:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: {', '.join(empty_but_claimed)} declared empty, but files "
+            "are claimed from them"
+        )
+
+    accounted_but_bare = sorted(
+        folder
+        for folder, status in folders.items()
+        if status == "accounted" and folder not in claimed_folders
+    )
+    if accounted_but_bare:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: {', '.join(accounted_but_bare)} declared accounted, but "
+            "no reference or artifact claims a file from them. A folder nobody claims from "
+            "is either empty and mislabelled, or forgotten."
+        )
+
+    undeclared = sorted(claimed_folders - set(folders))
+    if undeclared:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: files are claimed from {', '.join(undeclared)}, which "
+            "reference_folders does not declare. The folder list is incomplete."
+        )
+
+
 def _claim_files(entry: dict[str, Any], owner: str, seen: dict[str, str]) -> None:
     for name in entry.get("files") or []:
         if name in seen:
@@ -219,36 +402,84 @@ def _claim_files(entry: dict[str, Any], owner: str, seen: dict[str, str]) -> Non
         seen[name] = owner
 
 
-def _check_position_bearing(
-    entry: dict[str, Any], reference_id: str, role_map: dict[str, bool]
-) -> None:
-    """`source_role` is authoritative; `position_bearing` must agree with it.
+def _require_source_metadata(entry: dict[str, Any], reference_id: str) -> None:
+    """A reference entering the corpus must say what kind of source it is.
 
-    Two fields that must agree are two fields that can disagree, and the release that first
-    disagrees is the one nobody reads carefully. The consequence is not cosmetic: a
-    specialist reference treated as a peer of AFU, EAU and NCCN makes the comparison step
-    report a divergence that does not exist — SIOG is not disagreeing about treatment, it is
-    answering a different question — and a false conflict shown to a clinician is the failure
+    Optional was not good enough. Retrieval stratifies by family and the comparison step
+    refuses to treat a non-position-bearing source as a peer; a reference that declares
+    neither is admitted to both and behaves as though it were a treatment guideline, which is
+    the failure the fields exist to prevent.
+
+    Only required of references that actually enter the corpus. A tool, a calculator or an
+    excluded reference has nothing for retrieval to route.
+    """
+    enters_corpus = any(
+        isinstance(disposition, dict) and disposition.get("kind") == "corpus"
+        for disposition in entry.get("dispositions") or []
+    )
+    if not enters_corpus:
+        return
+    absent = [
+        name
+        for name in ("source_family", "source_role", "position_domains")
+        if entry.get(name) is None
+    ]
+    if absent:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: reference {reference_id} enters the corpus without "
+            f"{', '.join(absent)}. A source whose kind is unstated is routed as though it "
+            "were a treatment guideline."
+        )
+
+
+def _check_position_domains(
+    entry: dict[str, Any], reference_id: str, role_map: dict[str, frozenset[str]]
+) -> None:
+    """`source_role` sets the ceiling; `position_domains` says what this source actually covers.
+
+    **Load-bearing rather than descriptive.** A specialist reference compared as a peer of AFU,
+    EAU and NCCN makes the divergence step report a disagreement that does not exist — SIOG's
+    entire prostate footprint is `geriatric_frailty`, so it is not disagreeing about treatment,
+    it is answering a different question. A false conflict shown to a clinician is the failure
     most likely to end their trust in the mechanism.
+
+    A domain is a `clinical_purpose`, so the comparison step asks a question it already knows
+    how to phrase: for this purpose, which sources may hold a position? A role that permits
+    none — a classification, a measurement convention, an instrument — must declare an empty
+    list, which is a statement rather than an omission.
     """
     role = entry.get("source_role")
-    bearing = entry.get("position_bearing")
-    if role is None and bearing is None:
+    domains = entry.get("position_domains")
+    if role is None and domains is None:
         return
     if role is None:
         raise ManifestError(
-            f"{MANIFEST_FILENAME}: reference {reference_id} declares position_bearing "
-            "without a source_role to justify it"
+            f"{MANIFEST_FILENAME}: reference {reference_id} declares position_domains "
+            "without a source_role to justify them"
         )
     if role not in role_map:
         raise ManifestError(
             f"{MANIFEST_FILENAME}: reference {reference_id} has source_role {role!r}, which "
-            "the manifest's source_roles mapping does not define"
+            f"this loader does not implement. Choose from {', '.join(sorted(role_map))}."
         )
-    if bearing is not None and bearing != role_map[role]:
+    if domains is None:
+        return
+    if not isinstance(domains, list):
         raise ManifestError(
-            f"{MANIFEST_FILENAME}: reference {reference_id} declares position_bearing="
-            f"{bearing} but source_role {role!r} maps to {role_map[role]}"
+            f"{MANIFEST_FILENAME}: reference {reference_id} declares position_domains as "
+            f"{type(domains).__name__}, expected a list"
+        )
+    permitted = role_map[role]
+    beyond = sorted(set(domains) - permitted)
+    if beyond:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: reference {reference_id} claims positions in "
+            f"{', '.join(beyond)}, which source_role {role!r} does not cover"
+            + (
+                f" (it covers {', '.join(sorted(permitted))})"
+                if permitted
+                else " (it covers none — this source holds no positions)"
+            )
         )
 
 
@@ -256,6 +487,9 @@ def _read_disposition(
     disposition: Any, entry: dict[str, Any], reference_id: str
 ) -> CorpusEntry | None:
     disposition = _require_mapping(disposition, f"a disposition of {reference_id}")
+    _reject_unknown(
+        disposition, _DISPOSITION_FIELDS_ALLOWED, f"a disposition of {reference_id}"
+    )
     kind = disposition.get("kind")
     if kind not in _DISPOSITION_FIELDS:
         raise ManifestError(
@@ -294,7 +528,11 @@ def _read_disposition(
         chunks=chunks,
         source_family=entry.get("source_family"),
         source_role=entry.get("source_role"),
-        position_bearing=entry.get("position_bearing"),
+        position_domains=(
+            tuple(entry["position_domains"])
+            if isinstance(entry.get("position_domains"), list)
+            else None
+        ),
     )
 
 
@@ -341,6 +579,50 @@ def verify_against_release(
         raise ManifestError(
             f"{MANIFEST_FILENAME} chunk counts do not match the release: "
             f"{'; '.join(mismatched)}"
+        )
+
+
+def verify_source_metadata(manifest: Manifest, documents: list[dict[str, Any]]) -> None:
+    """The manifest and `documents.jsonl` must agree about family, role and position.
+
+    The same three facts are stated in two files. A manifest that says one thing while the
+    document record says another is a coverage proof describing a different release — and the
+    disagreement would be invisible, because retrieval reads the document record and the
+    comparison step's correctness rests on the manifest's declared `source_roles` mapping.
+
+    Only checked where the manifest states a value: a release may leave any of the three
+    unstated, and older ones state none of them.
+    """
+    by_id = {
+        record["document_id"]: record
+        for record in documents
+        if isinstance(record.get("document_id"), str)
+    }
+    disagreements: list[str] = []
+    for document_id, entry in sorted(manifest.corpus_entries.items()):
+        record = by_id.get(document_id)
+        if record is None:
+            continue
+        for field_name, declared in (
+            ("source_family", entry.source_family),
+            ("source_role", entry.source_role),
+            ("position_domains", entry.position_domains),
+        ):
+            if declared is None:
+                continue
+            delivered = record.get(field_name)
+            # `position_domains` arrives from JSON as a list and is parsed here as a tuple.
+            # Comparing them raw reports every well-formed release as a disagreement.
+            if isinstance(declared, tuple):
+                delivered = tuple(delivered) if isinstance(delivered, list) else delivered
+            if delivered != declared:
+                disagreements.append(
+                    f"{document_id}.{field_name}: manifest says {declared!r}, "
+                    f"documents.jsonl says {delivered!r}"
+                )
+    if disagreements:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME} and documents.jsonl disagree: " + "; ".join(disagreements)
         )
 
 

@@ -21,8 +21,8 @@ from rcpia.evidence.ingestion import (
     validate_chunk,
     verify_search_configurations,
 )
-from rcpia.evidence.local_blocks import LOCALLY_BLOCKED
-from rcpia.evidence.manifest import ManifestError
+from rcpia.evidence.local_blocks import LOCALLY_BLOCKED, Block
+from rcpia.evidence.manifest import SOURCE_ROLES_VERSION, ManifestError
 from rcpia.evidence.models import (
     EMBEDDING_DIMENSIONS,
     EvidenceChunk,
@@ -62,6 +62,11 @@ def document(document_id: str = "afu.prostate.2024-2026", **overrides) -> dict:
         "publisher": "Association francaise d'urologie",
         "language": "fr",
         "clinical_status": "unreviewed",
+        # Required of anything entering the corpus, and mirrored into the fixture manifest so
+        # the two agree by construction. A test that wants them to disagree says so.
+        "source_family": "TEST",
+        "source_role": "treatment_guideline",
+        "position_domains": ["therapy_indication"],
         "version": {"label": "2024-2026"},
         "source": {"source_url": "https://www.urofrance.org/x"},
         "licence": {"status": "unknown", "ai_use_allowed": True},
@@ -153,12 +158,6 @@ SCHEMA = {
 # default cannot be None.
 _DERIVE = object()
 
-SOURCE_ROLES = {
-    "treatment_guideline": {"position_bearing": True},
-    "specialist_guidance": {"position_bearing": False},
-}
-
-
 def manifest_for(documents: list[dict], chunks: list[dict]) -> dict:
     """The coverage proof a release must carry, derived from what it delivers.
 
@@ -173,17 +172,28 @@ def manifest_for(documents: list[dict], chunks: list[dict]) -> dict:
     return {
         "schema_version": "1.0",
         "release_id": "test-release",
-        "source_roles": SOURCE_ROLES,
+        "source_roles_version": SOURCE_ROLES_VERSION,
         "reference_folders": [{"folder": "ref-01", "status": "accounted"}],
         "references": [
             {
                 "reference_id": record["document_id"],
                 "files": [f"ref-01/{record['document_id']}.md"],
-                "source_family": "TEST",
-                "source_role": "treatment_guideline",
-                "position_bearing": True,
+                # A document the release withdraws is still accounted for -- that is what the
+                # `excluded` disposition exists for, and dropping it from the manifest would
+                # leave its folder claimed by nothing.
+                **(
+                    {}
+                    if record.get("clinical_status") == "excluded"
+                    else {
+                        "source_family": record.get("source_family", "TEST"),
+                        "source_role": record.get("source_role", "treatment_guideline"),
+                        "position_domains": record.get("position_domains", ["therapy_indication"]),
+                    }
+                ),
                 "dispositions": [
-                    {
+                    {"kind": "excluded", "reason": "withdrawn by this release"}
+                    if record.get("clinical_status") == "excluded"
+                    else {
                         "kind": "corpus",
                         "document_id": record["document_id"],
                         "chunks": counts.get(record["document_id"], 0),
@@ -191,7 +201,6 @@ def manifest_for(documents: list[dict], chunks: list[dict]) -> dict:
                 ],
             }
             for record in documents
-            if record.get("clinical_status") != "excluded"
         ],
     }
 
@@ -967,16 +976,32 @@ async def test_locally_blocked_passages_survive_a_reingest(
     Metadata is written unconditionally on every load, so a block applied by hand would be
     undone by the next ingest -- silently, since nothing would report it.
     """
-    blocked_id = next(iter(LOCALLY_BLOCKED))
-    directory = release(tmp_path, [document()], [chunk(blocked_id)])
+    # The block's own declared owner, not the default fixture document. This test passed
+    # before only because the blocking UPDATE was unscoped -- it reached rows belonging to
+    # documents the release had never declared, which was itself the bug.
+    blocked_id, blocked = next(iter(LOCALLY_BLOCKED.items()))
+    owned = [
+        chunk_id
+        for chunk_id, block in LOCALLY_BLOCKED.items()
+        if block.document_id == blocked.document_id
+    ]
+    # Every block the document owns, because a release that delivers only some of them has
+    # lost the rest -- which the loader refuses, correctly.
+    directory = release(
+        tmp_path,
+        [document(document_id=blocked.document_id)],
+        [chunk(chunk_id, document_id=blocked.document_id) for chunk_id in owned],
+    )
 
     first = await ingest_release(session, directory=directory, embedder=FakeEmbedder())
-    assert first.locally_blocked == 1
+    assert first.locally_blocked == len(owned)
 
     second = await ingest_release(session, directory=directory, embedder=FakeEmbedder())
-    assert second.locally_blocked == 1
+    assert second.locally_blocked == len(owned)
 
-    stored = await session.scalar(sa.select(EvidenceChunk))
+    stored = await session.scalar(
+        sa.select(EvidenceChunk).where(EvidenceChunk.chunk_id == blocked_id)
+    )
     assert stored is not None and stored.retrieval_eligible is False
 
 
@@ -1067,7 +1092,11 @@ async def test_a_block_whose_passage_vanished_from_the_release_is_refused(
     """
     monkeypatch.setattr(
         "rcpia.evidence.ingestion.LOCALLY_BLOCKED",
-        {"afu.prostate.2024-2026.moved.99.9999": "local_setting_mislabelled"},
+        {
+            "afu.prostate.2024-2026.moved.99.9999": Block(
+                document_id="afu.prostate.2024-2026", reason="local_setting_mislabelled"
+            )
+        },
     )
 
     with pytest.raises(CorpusError, match="not in this release"):
@@ -1085,7 +1114,11 @@ async def test_a_block_for_a_document_this_release_does_not_carry_is_ignored(
     slices and always has been."""
     monkeypatch.setattr(
         "rcpia.evidence.ingestion.LOCALLY_BLOCKED",
-        {"nccn.prostate.6.2026.elsewhere.01.0001": "local_not_guidance"},
+        {
+            "nccn.prostate.6.2026.elsewhere.01.0001": Block(
+                document_id="nccn.prostate.6.2026", reason="local_not_guidance"
+            )
+        },
     )
 
     report = await ingest_release(
@@ -1096,3 +1129,184 @@ async def test_a_block_for_a_document_this_release_does_not_carry_is_ignored(
 
     assert report.chunks_inserted == 1
     assert report.locally_blocked == 0
+
+
+async def test_a_document_carrying_a_field_we_do_not_implement_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Chunks have had this guard since v3; documents never did.
+
+    `_document_row` builds an explicit dictionary and drops everything it does not name, so a
+    document field this loader does not implement disappears without a word. It came within
+    one release of mattering: v5 adds `source_family`, `source_role` and `position_domains`
+    to `documents.jsonl`, and a dry-run before those columns existed would have reported
+    success while discarding all three.
+    """
+    with pytest.raises(CorpusError, match="does not implement: jurisdiction"):
+        await ingest_release(
+            session,
+            directory=release(
+                tmp_path, [{**document(), "jurisdiction": "MA"}], [chunk()]
+            ),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_source_metadata_is_stored(session: AsyncSession, tmp_path: Path) -> None:
+    """`source_family` was derived by splitting `document_id` on a dot, which worked by
+    accident of the corpus agent's naming. Retrieval stratifies by family, so it has to be a
+    declared property."""
+    record = {
+        **document(),
+        "source_family": "AFU",
+        "source_role": "treatment_guideline",
+        "position_domains": ["therapy_indication"],
+    }
+    await ingest_release(
+        session,
+        directory=release(tmp_path, [record], [chunk()]),
+        embedder=FakeEmbedder(),
+    )
+
+    stored = await session.get(EvidenceDocument, "afu.prostate.2024-2026")
+    assert stored is not None
+    assert (stored.source_family, stored.source_role, stored.position_domains) == (
+        "AFU",
+        "treatment_guideline",
+        ["therapy_indication"],
+    )
+
+
+async def test_a_manifest_disagreeing_with_the_document_record_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """The same three facts live in two files, and a disagreement would be invisible:
+    retrieval reads the document record, while the comparison step's correctness rests on the
+    manifest's declared roles."""
+    record = {
+        **document(),
+        "source_family": "AFU",
+        "source_role": "specialist_guidance",
+        "position_domains": ["supportive_care"],
+    }
+    claims_otherwise = manifest_for([record], [chunk()])
+    claims_otherwise["references"][0]["source_role"] = "treatment_guideline"
+    claims_otherwise["references"][0]["position_domains"] = ["therapy_indication"]
+
+    with pytest.raises(ManifestError, match="disagree"):
+        await ingest_release(
+            session,
+            directory=release(
+                tmp_path, [record], [chunk()], manifest=claims_otherwise
+            ),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_a_rechunk_that_moves_a_blocked_passage_is_refused(
+    session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**The case the first version of this guard did not catch.**
+
+    It read the rows the blocking UPDATE had touched. On a re-chunk the *old* row is still in
+    the database when that UPDATE runs, so it is blocked, satisfies the check, and is then
+    deleted as stale a few lines later — while its replacement, carrying a new id, is never
+    blocked at all. The guard written to stop a silent unblocking silently permitted one.
+
+    Here the passage is loaded and blocked, then the same document is re-delivered with the
+    passage under a new id. Nothing about the database has changed at the moment of the check.
+    """
+    blocked = Block(
+        document_id="afu.prostate.2024-2026", reason="local_setting_mislabelled"
+    )
+    monkeypatch.setattr(
+        "rcpia.evidence.ingestion.LOCALLY_BLOCKED",
+        {"afu.prostate.2024-2026.original.01.0001": blocked},
+    )
+
+    first = await ingest_release(
+        session,
+        directory=release(
+            tmp_path,
+            [document()],
+            [chunk(chunk_id="afu.prostate.2024-2026.original.01.0001")],
+        ),
+        embedder=FakeEmbedder(),
+    )
+    assert first.locally_blocked == 1
+
+    # Same document, same text, new chunk id -- exactly what a re-chunk produces.
+    with pytest.raises(CorpusError, match="not in this release"):
+        await ingest_release(
+            session,
+            directory=release(
+                tmp_path,
+                [document()],
+                [chunk(chunk_id="afu.prostate.2024-2026.rechunked.01.0001")],
+            ),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_a_slice_does_not_touch_blocks_it_does_not_own(
+    session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The blocking UPDATE was unscoped, so loading an AFU slice would update NCCN and SIOG
+    rows it never touched and report them as this release's work."""
+    monkeypatch.setattr(
+        "rcpia.evidence.ingestion.LOCALLY_BLOCKED",
+        {
+            "nccn.prostate.6.2026.elsewhere.01.0001": Block(
+                document_id="nccn.prostate.6.2026", reason="local_not_guidance"
+            )
+        },
+    )
+    # A row belonging to a document this release does not declare.
+    await ingest_release(
+        session,
+        directory=release(
+            tmp_path,
+            [document(document_id="nccn.prostate.6.2026")],
+            [
+                chunk(
+                    chunk_id="nccn.prostate.6.2026.elsewhere.01.0001",
+                    document_id="nccn.prostate.6.2026",
+                )
+            ],
+        ),
+        embedder=FakeEmbedder(),
+    )
+
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk()]),
+        embedder=FakeEmbedder(),
+    )
+
+    assert report.locally_blocked == 0
+
+
+async def test_an_unknown_field_inside_a_nested_document_object_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """`version.get("label")` reads one key and ignores the rest, so a release adding
+    `version.superseded_by` would be accepted in full and understood in part."""
+    record = {**document(), "version": {"label": "2024-2026", "superseded_by": "2027"}}
+    with pytest.raises(CorpusError, match="version carries fields"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [record], [chunk()]),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_a_nested_document_object_that_is_not_an_object_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    record = {**document(), "licence": "unknown"}
+    with pytest.raises(CorpusError, match="licence must be an object"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [record], [chunk()]),
+            embedder=FakeEmbedder(),
+        )

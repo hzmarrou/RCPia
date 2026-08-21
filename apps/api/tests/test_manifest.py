@@ -12,16 +12,12 @@ from pathlib import Path
 import pytest
 
 from rcpia.evidence.manifest import (
+    SOURCE_ROLES_VERSION,
     ManifestError,
     load_manifest,
     verify_against_release,
     verify_checksums,
 )
-
-ROLES = {
-    "treatment_guideline": {"position_bearing": True},
-    "specialist_guidance": {"position_bearing": False},
-}
 
 
 def reference(
@@ -29,12 +25,13 @@ def reference(
     *,
     files: list[str] | None = None,
     source_role: str | None = "treatment_guideline",
-    position_bearing: bool | None = True,
+    position_domains: list[str] | None = None,
     dispositions: list[dict] | None = None,
     concerns: list[str] | None = None,
 ) -> dict:
     entry: dict = {
         "reference_id": reference_id,
+        "source_family": "EAU",
         "files": files if files is not None else [f"ref-01/{reference_id}.md"],
         "dispositions": (
             dispositions
@@ -44,8 +41,13 @@ def reference(
     }
     if source_role is not None:
         entry["source_role"] = source_role
-    if position_bearing is not None:
-        entry["position_bearing"] = position_bearing
+        # A role implies domains; omitting both is the "unstated kind" case a test asks for
+        # deliberately.
+        entry["position_domains"] = (
+            position_domains if position_domains is not None else ["therapy_indication"]
+        )
+    elif position_domains is not None:
+        entry["position_domains"] = position_domains
     if concerns is not None:
         entry["concerns"] = concerns
     return entry
@@ -64,7 +66,7 @@ def manifest(tmp_path: Path, **overrides: object) -> Path:
     document: dict = {
         "schema_version": "1.0",
         "release_id": "rcpia-corpus-v5.0",
-        "source_roles": ROLES,
+        "source_roles_version": SOURCE_ROLES_VERSION,
         "reference_folders": [
             {"folder": "ref-01", "status": "accounted"},
             {"folder": "ref-26", "status": "empty", "note": "Confirmed empty"},
@@ -160,6 +162,10 @@ def test_a_file_may_be_claimed_by_an_artifact_instead(tmp_path: Path) -> None:
     loaded = load_manifest(
         manifest(
             tmp_path,
+            reference_folders=[
+                {"folder": "ref-01", "status": "accounted"},
+                {"folder": "ref-19", "status": "accounted"},
+            ],
             artifacts=[
                 {
                     "artifact_id": "tnm-validation-cases",
@@ -201,7 +207,7 @@ def test_two_references_claiming_one_document_are_refused(tmp_path: Path) -> Non
 # --------------------------------------------------------------------------------------
 
 
-def test_position_bearing_must_match_the_declared_role(tmp_path: Path) -> None:
+def test_domains_beyond_what_the_role_covers_are_refused(tmp_path: Path) -> None:
     """Two fields that must agree are two fields that can disagree.
 
     The consequence is not cosmetic. A specialist reference treated as a peer of AFU, EAU and
@@ -209,15 +215,52 @@ def test_position_bearing_must_match_the_declared_role(tmp_path: Path) -> None:
     disagreeing about treatment, it is answering a different question — and a false conflict
     shown to a clinician is the failure most likely to end their trust in it.
     """
-    with pytest.raises(ManifestError, match="position_bearing=True but source_role"):
+    with pytest.raises(ManifestError, match="claims positions in therapy_indication"):
         load_manifest(
             manifest(
                 tmp_path,
                 references=[
-                    reference(source_role="specialist_guidance", position_bearing=True)
+                    reference(
+                        source_role="specialist_guidance",
+                        position_domains=["therapy_indication"],
+                    )
                 ],
             )
         )
+
+
+def test_a_role_covering_no_domain_may_claim_none(tmp_path: Path) -> None:
+    """WHO/IARC and RECIST hold positions nowhere. An empty list is a statement; omitting the
+    field would be an absence."""
+    loaded = load_manifest(
+        manifest(
+            tmp_path,
+            references=[
+                reference(source_role="classification_standard", position_domains=[])
+            ],
+        )
+    )
+    assert loaded.corpus_entries["eau.prostate.2026"].position_domains == ()
+
+
+def test_espen_holds_positions_without_holding_one_on_treatment(tmp_path: Path) -> None:
+    """The case the boolean got wrong. `position_bearing: false` reads as "holds no
+    position", and ESPEN has plenty — on nutritional support, not on treatment choice."""
+    loaded = load_manifest(
+        manifest(
+            tmp_path,
+            references=[
+                reference(
+                    source_role="specialist_guidance",
+                    position_domains=["supportive_care", "safety"],
+                )
+            ],
+        )
+    )
+    assert loaded.corpus_entries["eau.prostate.2026"].position_domains == (
+        "supportive_care",
+        "safety",
+    )
 
 
 def test_a_role_the_mapping_does_not_define_is_refused(tmp_path: Path) -> None:
@@ -226,28 +269,61 @@ def test_a_role_the_mapping_does_not_define_is_refused(tmp_path: Path) -> None:
         load_manifest(
             manifest(
                 tmp_path,
-                references=[
-                    reference(source_role="expert_opinion", position_bearing=True)
-                ],
+                references=[reference(source_role="expert_opinion")],
             )
         )
 
 
-def test_position_bearing_without_a_role_is_refused(tmp_path: Path) -> None:
+def test_domains_without_a_role_are_refused(tmp_path: Path) -> None:
     with pytest.raises(ManifestError, match="without a source_role"):
         load_manifest(
             manifest(
                 tmp_path,
-                references=[reference(source_role=None, position_bearing=True)],
+                references=[reference(source_role=None, position_domains=["safety"])],
             )
         )
 
 
-def test_a_role_mapping_without_a_boolean_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(ManifestError, match="must declare position_bearing"):
+def test_a_release_defining_its_own_roles_is_refused(tmp_path: Path) -> None:
+    """A release that defines both a role and its meaning validates itself. The meaning of
+    `position_bearing` decides how the comparison step behaves, so RCPia owns the table."""
+    with pytest.raises(ManifestError, match="declares its own source_roles"):
         load_manifest(
-            manifest(tmp_path, source_roles={"treatment_guideline": {"note": "yes"}})
+            manifest(tmp_path, source_roles={"expert_opinion": {"position_bearing": True}})
         )
+
+
+def test_a_manifest_built_against_another_vocabulary_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="source_roles_version"):
+        load_manifest(manifest(tmp_path, source_roles_version="0.9"))
+
+
+def test_a_corpus_reference_without_source_metadata_is_refused(tmp_path: Path) -> None:
+    """A source whose kind is unstated is routed as though it were a treatment guideline."""
+    with pytest.raises(ManifestError, match="enters the corpus without"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                references=[reference(source_role=None)],
+            )
+        )
+
+
+def test_a_tool_reference_needs_no_source_metadata(tmp_path: Path) -> None:
+    """A tool, a calculator or an excluded reference has nothing for retrieval to route."""
+    loaded = load_manifest(
+        manifest(
+            tmp_path,
+            references=[
+                reference(
+                    "g8",
+                    source_role=None,
+                    dispositions=[{"kind": "tool", "tool_id": "g8"}],
+                )
+            ],
+        )
+    )
+    assert loaded.corpus_entries == {}
 
 
 # --------------------------------------------------------------------------------------
@@ -386,3 +462,108 @@ def test_a_correct_checksum_passes(tmp_path: Path) -> None:
         },
     )
     verify_checksums(load_manifest(directory), directory)
+
+
+# --------------------------------------------------------------------------------------
+# Folder coverage — the largest version of an omitted file
+# --------------------------------------------------------------------------------------
+
+
+def test_an_accounted_folder_nothing_claims_from_is_refused(tmp_path: Path) -> None:
+    """The reviewer's blocker: "every physical file appears exactly once" was enforced only
+    against files the manifest listed, so an omitted file was invisible — the manifest's own
+    founding failure, inside the module written to fix it.
+
+    A loader cannot enumerate a library it never sees. What it can catch is the shape: a
+    folder declared accounted that nothing claims a file from is either empty and mislabelled,
+    or forgotten. That is the wholly-omitted-folder case, the largest version of the failure.
+    """
+    with pytest.raises(ManifestError, match="ref-02 declared accounted"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                reference_folders=[
+                    {"folder": "ref-01", "status": "accounted"},
+                    {"folder": "ref-02", "status": "accounted"},
+                ],
+            )
+        )
+
+
+def test_a_folder_declared_empty_that_files_come_from_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="ref-01 declared empty"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                reference_folders=[{"folder": "ref-01", "status": "empty"}],
+            )
+        )
+
+
+def test_a_file_from_an_undeclared_folder_is_refused(tmp_path: Path) -> None:
+    """The folder list is the coverage claim. A file from outside it means the claim is
+    incomplete."""
+    with pytest.raises(ManifestError, match="ref-99"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                references=[reference(files=["ref-99/stray.md"])],
+                reference_folders=[{"folder": "ref-99", "status": "empty"}],
+            )
+        )
+
+
+# --------------------------------------------------------------------------------------
+# Unknown fields — the pattern this module was written to fix, and repeated
+# --------------------------------------------------------------------------------------
+
+
+def test_an_unknown_top_level_field_is_refused(tmp_path: Path) -> None:
+    """The module built to stop silent discard read the keys it knew and ignored the rest."""
+    with pytest.raises(ManifestError, match="does not implement: coverage_summary"):
+        load_manifest(manifest(tmp_path, coverage_summary={"folders": 27}))
+
+
+def test_an_unknown_reference_field_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="does not implement: curation_state"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                references=[{**reference(), "curation_state": "requires curation"}],
+            )
+        )
+
+
+def test_a_misspelled_field_is_refused_rather_than_ignored(tmp_path: Path) -> None:
+    """`dispositons` would otherwise read as a reference with no disposition at all — a
+    different error, pointing somewhere else."""
+    entry = reference()
+    entry["dispositons"] = entry.pop("dispositions")
+    with pytest.raises(ManifestError, match="dispositons"):
+        load_manifest(manifest(tmp_path, references=[entry]))
+
+
+def test_an_unknown_disposition_field_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="does not implement: retrieval_eligible"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                references=[
+                    reference(
+                        dispositions=[
+                            {
+                                "kind": "corpus",
+                                "document_id": "eau.prostate.2026",
+                                "chunks": 443,
+                                "retrieval_eligible": True,
+                            }
+                        ]
+                    )
+                ],
+            )
+        )
+
+
+def test_a_manifest_of_another_schema_version_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="schema_version"):
+        load_manifest(manifest(tmp_path, schema_version="2.0"))

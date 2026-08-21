@@ -49,6 +49,7 @@ from rcpia.evidence.manifest import (
     load_manifest,
     verify_against_release,
     verify_checksums,
+    verify_source_metadata,
 )
 from rcpia.evidence.models import EvidenceChunk, EvidenceDocument
 
@@ -177,6 +178,38 @@ KNOWN_CHUNK_FIELDS = frozenset(
         "therapy_line",
         "title",
         "unit_type",
+    }
+)
+
+
+# The same guard chunks have had since corpus v3, applied one level up.
+#
+# `_document_row` builds an explicit dictionary and drops everything it does not name, so a
+# document field this loader does not implement disappears without a word. That is how
+# `not_specified_reason`, the v3 metadata corrections, `retrieval_eligible` and
+# `clinical_purpose` were each lost in turn — every time, the corpus agent encoded something
+# that mattered and we discarded it silently.
+#
+# It came within one release of happening again: v5 adds `source_family`, `source_role` and
+# `position_domains` to `documents.jsonl`, and a dry-run before these columns existed would
+# have reported success while dropping all three.
+KNOWN_DOCUMENT_FIELDS = frozenset(
+    {
+        "authority",
+        "clinical_status",
+        "document_id",
+        "document_type",
+        "language",
+        "licence",
+        "position_domains",
+        "publisher",
+        "ref_id",
+        "short_title",
+        "source",
+        "source_family",
+        "source_role",
+        "title",
+        "version",
     }
 )
 
@@ -480,6 +513,34 @@ def validate_chunk(
     return None
 
 
+# The nested objects a document record may carry, and every key each may hold. Same reason as
+# `KNOWN_DOCUMENT_FIELDS`: `version.get("label")` reads one key and ignores the rest, so a
+# release adding `version.superseded_by` would be accepted in full and understood in part.
+_NESTED_DOCUMENT_FIELDS = {
+    "version": frozenset({"label", "published_on", "edition"}),
+    "source": frozenset({"source_url", "retrieved_on"}),
+    "licence": frozenset({"status", "ai_use_allowed", "note"}),
+}
+
+
+def _check_nested_document_fields(record: dict[str, Any]) -> None:
+    for name, allowed in _NESTED_DOCUMENT_FIELDS.items():
+        nested = record.get(name)
+        if nested is None:
+            continue
+        if not isinstance(nested, dict):
+            raise CorpusError(
+                f"document {record.get('document_id', '?')}: {name} must be an object, got "
+                f"{type(nested).__name__}"
+            )
+        unknown = sorted(set(nested) - allowed)
+        if unknown:
+            raise CorpusError(
+                f"document {record.get('document_id', '?')}: {name} carries fields this "
+                f"loader does not implement: {', '.join(unknown)}."
+            )
+
+
 def _document_row(record: dict[str, Any], release_id: str | None) -> dict[str, Any]:
     version = record.get("version") or {}
     source = record.get("source") or {}
@@ -492,6 +553,9 @@ def _document_row(record: dict[str, Any], release_id: str | None) -> dict[str, A
         "publisher": record.get("publisher"),
         "authority": record.get("authority"),
         "document_type": record.get("document_type"),
+        "source_family": record.get("source_family"),
+        "source_role": record.get("source_role"),
+        "position_domains": record.get("position_domains"),
         "language": record.get("language"),
         "version_label": version.get("label"),
         "source_url": source.get("source_url"),
@@ -588,6 +652,15 @@ async def ingest_release(
         # A document the release itself excluded should not be loaded, however tidy the
         # record looks — and if a previous release loaded it, it must now be removed.
         # Skipping it would leave withdrawn guidance in place, citable and looking current.
+        unknown = sorted(set(record) - KNOWN_DOCUMENT_FIELDS)
+        if unknown:
+            raise CorpusError(
+                f"document {record.get('document_id', '?')} carries fields this loader does "
+                f"not implement: {', '.join(unknown)}. A field we do not read is a decision "
+                "nobody has made — four routing fields were lost this way before the same "
+                "guard was added for chunks."
+            )
+        _check_nested_document_fields(record)
         if record.get("clinical_status") == "excluded":
             excluded.append(record["document_id"])
             continue
@@ -619,6 +692,10 @@ async def ingest_release(
     verify_against_release(
         manifest, delivered_documents=declared, chunk_counts=dict(counts)
     )
+    # The same three facts live in two files. A disagreement would be invisible: retrieval
+    # reads the document record, while the comparison step's correctness rests on the
+    # manifest's declared roles.
+    verify_source_metadata(manifest, documents)
 
     await session.flush()
 
@@ -727,54 +804,72 @@ async def ingest_release(
 
     # Applied after the release's own metadata, so a re-ingest cannot quietly restore a
     # passage we have refused. Stopgap until the corpus is corrected -- see `local_blocks`.
-    blocking = (
-        sa.update(EvidenceChunk)
-        .where(EvidenceChunk.chunk_id.in_(LOCALLY_BLOCKED))
-        .values(
-            retrieval_eligible=False,
-            retrieval_exclusion_reason=sa.case(
-                *[
-                    (EvidenceChunk.chunk_id == chunk_id, reason)
-                    for chunk_id, reason in LOCALLY_BLOCKED.items()
-                ],
-                else_=EvidenceChunk.retrieval_exclusion_reason,
-            ),
-        )
-        .returning(EvidenceChunk.chunk_id)
-    )
-    blocked_now = set((await session.execute(blocking)).scalars().all())
-    report.locally_blocked = len(blocked_now)
-
-    # **A block is keyed on a chunk id, and a re-chunked release changes chunk ids.**
-    #
-    # The blocks are an `UPDATE ... WHERE chunk_id IN (...)`, so an id that no longer exists
-    # matches nothing, updates nothing, and raises nothing. `locally_blocked` would simply
-    # fall to zero and the line would stop printing. Among the ten is
-    # `nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.08.0085` — the passage
-    # a review reproduced leaking at relevance 0.774, offering androgen deprivation for
-    # biochemical recurrence to a question about early low-risk disease. A silent re-chunk
-    # would put it back.
-    #
-    # A missing id has two causes and both need a person. Either the corpus fixed the passage
-    # and the entry should be retired, or re-chunking moved it and the block has evaporated.
-    # Refusing is right for the same reason the rest of this module refuses: the alternative
-    # is a release that looks like it worked.
-    unmatched = {
-        chunk_id: reason
-        for chunk_id, reason in LOCALLY_BLOCKED.items()
-        if chunk_id not in blocked_now
-        # Only blocks whose document this release actually carries. Loading an AFU-only
-        # slice must not fail over an NCCN passage it was never going to touch.
-        and any(chunk_id.startswith(f"{document}.") for document in declared)
+    # Which blocks this release is responsible for. `document_id` is declared by the block
+    # rather than parsed out of its chunk id: a corpus that renames a document would otherwise
+    # silently change which blocks apply.
+    owned = {
+        chunk_id: block
+        for chunk_id, block in LOCALLY_BLOCKED.items()
+        if block.document_id in declared
     }
-    if unmatched:
+
+    # **Checked against the release's own chunk ids, never against the database.**
+    #
+    # The first version of this check read the rows the UPDATE had touched, and it did not
+    # work. On a re-chunk the *old* row is still present when the UPDATE runs, so it is
+    # blocked, satisfies the check, and is then deleted as stale a few lines below — while its
+    # replacement, carrying a new id, is never blocked at all. The guard written to stop a
+    # silent unblocking silently permitted one.
+    #
+    # `seen_chunks` is what the release actually delivered, so a block whose passage is not in
+    # it has genuinely lost its target, whatever the database still holds.
+    #
+    # Among the ten is `nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.08.0085`
+    # — the passage a review reproduced leaking at relevance 0.774, offering androgen
+    # deprivation for biochemical recurrence to a question about early low-risk disease.
+    #
+    # Two causes, opposite responses, both needing a person: the corpus corrected the passage
+    # and the entry should be retired, or re-chunking moved it and the block has evaporated.
+    missing = {
+        chunk_id: block for chunk_id, block in owned.items() if chunk_id not in seen_chunks
+    }
+    if missing:
         raise CorpusError(
-            f"{len(unmatched)} locally blocked passage(s) are not in this release: "
-            + ", ".join(f"{chunk_id} ({reason})" for chunk_id, reason in sorted(unmatched.items()))
+            f"{len(missing)} locally blocked passage(s) are not in this release: "
+            + ", ".join(
+                f"{chunk_id} ({block.reason}, from {block.document_id})"
+                for chunk_id, block in sorted(missing.items())
+            )
             + ". Either the corpus corrected them, in which case retire the entries from "
             "rcpia.evidence.local_blocks, or re-chunking changed their ids, in which case "
             "the block has silently stopped applying. Both need a decision."
         )
+
+    # Scoped to the documents this release declares. Unscoped, loading an AFU slice would
+    # update NCCN and SIOG rows it never touched and report them as this release's work.
+    blocking = (
+        sa.update(EvidenceChunk)
+        .where(
+            EvidenceChunk.chunk_id.in_(owned),
+            EvidenceChunk.document_id.in_(declared or {""}),
+        )
+        .values(
+            retrieval_eligible=False,
+            retrieval_exclusion_reason=sa.case(
+                *[
+                    (EvidenceChunk.chunk_id == chunk_id, block.reason)
+                    for chunk_id, block in owned.items()
+                ],
+                else_=EvidenceChunk.retrieval_exclusion_reason,
+            )
+            if owned
+            else EvidenceChunk.retrieval_exclusion_reason,
+        )
+        .returning(EvidenceChunk.chunk_id)
+    )
+    report.locally_blocked = (
+        len((await session.execute(blocking)).scalars().all()) if owned else 0
+    )
 
     # Reconcile every declared document, including one whose chunks were all rejected: a
     # release that declares a document and supplies nothing valid for it has emptied it, and
