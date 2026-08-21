@@ -11,9 +11,10 @@ will do with the result.
 
 > **Revision note.** The first draft of this plan was reviewed and found to be roughly 75–80%
 > of a credible design. Six critical gaps were identified, all confirmed against the code and
-> the loaded corpus. **Two of them are production defects rather than evaluation gaps** and are
-> tracked as such in §3. The rest of this document is the revised plan; §2 lists what changed
-> so the reasoning is not lost.
+> the loaded corpus. **Two of them are gaps in shipped code rather than in the plan** and are
+> tracked as such in §3. One of the six was confirmed but not for the reason given, and one
+> claim this document itself made in response has since been withdrawn — see §3.1. The rest is
+> the revised plan; §2 lists what changed so the reasoning is not lost.
 
 ---
 
@@ -43,7 +44,7 @@ Order matters when reading the results: **fix the ceiling before touching the ra
 
 | # | Finding | Status | Where |
 |---|---|---|---|
-| 1 | The report cannot observe the stages the plan proposes to measure | **confirmed — production defect** | §3.1, §5 |
+| 1 | The report cannot observe the stages the plan proposes to measure | **confirmed** — though not for the reason given, see §3.1 | §3.1, §5 |
 | 2 | `clinical_purpose` is filtered on by nothing, despite being indexed | **confirmed — production gap** | §3.2 |
 | 3 | "Unsafe" defined only by hand-listed chunk ids | accepted | §7 |
 | 4 | Passage-level recall distorted by equivalent evidence | accepted, with a correction to its premise | §6.2 |
@@ -58,26 +59,29 @@ One correction to the review's own reasoning is recorded in §6.2.
 
 ---
 
-## 3. Two production defects to fix first
+## 3. Two shipped-code gaps to close first
 
-These are not evaluation work. They are wrong today, in the shipped path, and the evaluation
-merely cannot proceed without them.
+Neither is evaluation work. One is a gap in what the shipped path records, the other is a
+routing dimension the shipped path ignores, and the evaluation cannot proceed without either.
 
-### 3.1 `RetrievalReport` is overwritten by widening
+### 3.1 `RetrievalReport` keeps no intermediate chunk ids
 
-`_search` loops over progressively wider filters, and on each pass assigns
-`report.keyword_hits`, `report.dense_hits`, `report.filter_used` and `report.below_floor`
-(`retrieval.py:443–447`, `:479`). A widened search therefore reports **only the last attempt**.
-The strict attempt's counts are gone.
+`keyword_order`, `dense_order`, `fused`, `candidates` and `relevances` are locals in `_search`
+and are discarded. `RetrievedChunk.keyword_rank` and `dense_rank` exist only for chunks that
+survived to the end. So `ceiling_recall` and `filter_retention` **cannot** be computed from the
+report, contrary to what the first draft of §8 claimed.
 
-The docstring claims the opposite — *"A widened search is recorded in the report rather than
-blended in silently"* — and `report.widened` does survive as a count. But the numbers beside it
-describe a different filter than the one the reader assumes.
+Counts cannot substitute. `keyword_hits = 25` does not say whether the passage a clinician
+labelled relevant was one of the 25, so no combination of the scalar fields can tell which
+stage lost it — which is the entire purpose of §1.
 
-Nothing intermediate is kept at all: `keyword_order`, `dense_order`, `fused`, `candidates` and
-`relevances` are locals and are discarded. `RetrievedChunk.keyword_rank` and `dense_rank` exist
-only for chunks that survived to the end. So `ceiling_recall` and `filter_retention` **cannot**
-be computed from the report, contrary to what the first draft of §8 claimed.
+> **A claim withdrawn.** The first revision of this document also asserted that the scalar
+> fields were overwritten by widening, leaving a widened search reporting the counts and the
+> filter of a discarded attempt. **That is wrong**, and it was caught by mutation-testing the
+> fix: restoring the old assignment order failed no test, because `_search` returns as soon as
+> an attempt succeeds, so whatever it had just assigned belonged to the returning attempt. The
+> code is now written to make that deliberate rather than incidental, and says so — but it
+> fixed no observable defect and is not a bug fix. The trace below is the real gap.
 
 **Fix: an explicit trace, opt-in.**
 
@@ -106,9 +110,10 @@ class RetrievalReport:
 carries no extra memory. Everything the four stage metrics need comes out of one `AttemptTrace`,
 and strict-versus-widened (§10) comes out of having more than one.
 
-Keep the existing scalar fields; they are what the clinician-facing page reads. Make them
-describe the **attempt that produced the returned chunks**, which is what a reader already
-assumes they mean.
+The existing scalar fields stay; they are what the clinician-facing page reads. They already
+describe the attempt that produced the returned chunks, and now do so deliberately — assigned
+on the branch that returns, with a comment saying why, so that adding a `continue` to that loop
+cannot quietly break it.
 
 ### 3.2 `clinical_purpose` is stored, indexed, and filtered on by nothing
 
@@ -623,7 +628,7 @@ calls alone — small enough to run on every corpus release, which is the point 
 
 | Step | Deliverable | Blocked on |
 |---|---|---|
-| 0a | `AttemptTrace` + `trace=True`, with the widening test | nothing — production defect |
+| 0a | `AttemptTrace` + `trace=True`, with the widening test | nothing |
 | 0b | `clinical_purpose` in `Filter`, semantics decided, widening order decided | nothing — production gap |
 | 1 | `metrics.py`, `violations.py`, `stats.py` + unit tests, all pure | nothing |
 | 2 | `goldset.py`, format, loader, refusal cases | 1 |
