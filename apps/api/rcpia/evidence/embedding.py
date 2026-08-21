@@ -37,6 +37,86 @@ class EmbeddingError(Exception):
     """The embedding service could not be reached, or refused the request."""
 
 
+def _parse_vectors(rows: object, *, expected: int, dimensions: int) -> list[list[float]]:
+    """One vector per passage, in the order the passages were sent — or refuse the response.
+
+    **This had the same defect as the reranker's, and a worse consequence.** The first version
+    counted the rows and then did this:
+
+        ordered = sorted(rows, key=lambda row: row.get("index", 0))
+
+    A row with no `index` silently became 0 and sorted first. Duplicated indexes both survived
+    and shifted every later position by one. Negative and fractional indexes sorted without
+    complaint. The comment above it called sorting "cheap insurance", and it insured against
+    nothing: sorting by a key that repeats or is missing preserves no order at all.
+
+    **A wrong vector is permanent in a way a wrong rerank score is not.** A rerank corruption
+    spoils one query. A vector is stored, and `embedding_sha256` is computed from *our* text —
+    so on the next ingest the hash matches, the loader reports the passage unchanged, and the
+    misattached vector survives every later release until somebody forces a re-embed. The
+    passage would simply retrieve for the wrong questions, quietly, for as long as the corpus
+    lives.
+
+    So the response is refused whole rather than repaired. An embedding call is retryable and
+    its failure is loud; a corpus embedded against the wrong text is neither.
+    """
+    if not isinstance(rows, list):
+        raise EmbeddingError(
+            f"Embedding response held no data list, got {type(rows).__name__}"
+        )
+    if len(rows) != expected:
+        raise EmbeddingError(
+            f"Embedding response held {len(rows)} vectors for {expected} passages"
+        )
+
+    vectors: list[list[float] | None] = [None] * expected
+    for position, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise EmbeddingError(
+                f"Embedding result {position} was {type(row).__name__}, not an object"
+            )
+        index = row.get("index")
+        # `bool` first: it is a subclass of `int`, and `int()` would have coerced a float.
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise EmbeddingError(
+                f"Embedding result {position} indexed with {index!r} "
+                f"({type(index).__name__}); an index must be an integer"
+            )
+        if not 0 <= index < expected:
+            raise EmbeddingError(
+                f"Embedding result {position} indexed passage {index}, outside "
+                f"0..{expected - 1}"
+            )
+        if vectors[index] is not None:
+            raise EmbeddingError(f"Embedding response returned passage {index} twice")
+
+        vector = row.get("embedding")
+        if not isinstance(vector, list) or len(vector) != dimensions:
+            raise EmbeddingError(
+                f"Embedding for passage {index} has "
+                f"{len(vector) if isinstance(vector, list) else 'no'} dimensions, expected "
+                f"{dimensions}"
+            )
+        for value in vector:
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise EmbeddingError(
+                    f"Embedding for passage {index} holds {value!r}, which is not a number"
+                )
+            # `x != x` is true only for NaN. A non-finite component makes every cosine
+            # distance against this vector meaningless, and pgvector stores it happily.
+            if value != value or value in (float("inf"), float("-inf")):
+                raise EmbeddingError(
+                    f"Embedding for passage {index} holds {value}, which is not finite"
+                )
+        vectors[index] = [float(value) for value in vector]
+
+    # Unreachable: `expected` distinct indexes in `0..expected-1` fill every slot. Asserted
+    # rather than assumed, because the alternative is a `None` reaching a vector column.
+    if any(vector is None for vector in vectors):
+        raise EmbeddingError("Embedding response left passages without a vector")
+    return [vector for vector in vectors if vector is not None]
+
+
 class Embedder(Protocol):
     """What the ingestion needs. Implemented by Azure, and by a fake in the tests."""
 
@@ -103,6 +183,10 @@ class AzureEmbedder:
                     last = f"{response.status_code}: {response.text[:200]}"
                     if response.status_code not in (429, 500, 502, 503, 504):
                         break
+                    # Nothing follows the last attempt, so waiting before it is time spent
+                    # to no purpose -- 64 seconds at the fifth, once per batch.
+                    if attempt == MAX_ATTEMPTS:
+                        break
                     # Azure names the wait where it can; otherwise back off.
                     header = response.headers.get("retry-after")
                     delay = (
@@ -113,6 +197,8 @@ class AzureEmbedder:
                     await asyncio.sleep(delay)
                     continue
 
+                if attempt == MAX_ATTEMPTS:
+                    break
                 await asyncio.sleep(BASE_BACKOFF_SECONDS * attempt)
 
         raise EmbeddingError(f"Embedding request failed after {MAX_ATTEMPTS} attempts — {last}")
@@ -128,26 +214,17 @@ class AzureEmbedder:
             return []
 
         response = await self._post_with_retries(texts)
-
-        payload = response.json()
-        rows = payload.get("data")
-        if not isinstance(rows, list) or len(rows) != len(texts):
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise EmbeddingError(f"Embedding response was not JSON: {exc}") from exc
+        if not isinstance(payload, dict):
             raise EmbeddingError(
-                f"Embedding response held {len(rows) if isinstance(rows, list) else 0} "
-                f"vectors for {len(texts)} passages"
+                f"Embedding response was {type(payload).__name__}, not an object"
             )
-
-        # Azure returns an `index` per row. Sorting by it rather than trusting arrival
-        # order is cheap insurance against the failure above.
-        ordered = sorted(rows, key=lambda row: row.get("index", 0))
-        vectors = [row["embedding"] for row in ordered]
-
-        for vector in vectors:
-            if len(vector) != self._dimensions:
-                raise EmbeddingError(
-                    f"Embedding has {len(vector)} dimensions, expected {self._dimensions}"
-                )
-        return vectors
+        return _parse_vectors(
+            payload.get("data"), expected=len(texts), dimensions=self._dimensions
+        )
 
 
 def build_embedder(settings: Settings) -> Embedder:
