@@ -22,6 +22,7 @@ from rcpia.evidence.ingestion import (
     verify_search_configurations,
 )
 from rcpia.evidence.local_blocks import LOCALLY_BLOCKED
+from rcpia.evidence.manifest import ManifestError
 from rcpia.evidence.models import (
     EMBEDDING_DIMENSIONS,
     EvidenceChunk,
@@ -148,18 +149,72 @@ SCHEMA = {
 }
 
 
+# Sentinel: `manifest=None` means "write no manifest", which is itself a test case, so the
+# default cannot be None.
+_DERIVE = object()
+
+SOURCE_ROLES = {
+    "treatment_guideline": {"position_bearing": True},
+    "specialist_guidance": {"position_bearing": False},
+}
+
+
+def manifest_for(documents: list[dict], chunks: list[dict]) -> dict:
+    """The coverage proof a release must carry, derived from what it delivers.
+
+    Agrees with the release by construction, so a test that wants a *disagreeing* manifest
+    passes one explicitly and the disagreement is the thing under test.
+    """
+    counts: dict[str, int] = {}
+    for record in chunks:
+        owner = record.get("document_id")
+        if isinstance(owner, str):
+            counts[owner] = counts.get(owner, 0) + 1
+    return {
+        "schema_version": "1.0",
+        "release_id": "test-release",
+        "source_roles": SOURCE_ROLES,
+        "reference_folders": [{"folder": "ref-01", "status": "accounted"}],
+        "references": [
+            {
+                "reference_id": record["document_id"],
+                "files": [f"ref-01/{record['document_id']}.md"],
+                "source_family": "TEST",
+                "source_role": "treatment_guideline",
+                "position_bearing": True,
+                "dispositions": [
+                    {
+                        "kind": "corpus",
+                        "document_id": record["document_id"],
+                        "chunks": counts.get(record["document_id"], 0),
+                    }
+                ],
+            }
+            for record in documents
+            if record.get("clinical_status") != "excluded"
+        ],
+    }
+
+
 def release(
     tmp_path: Path,
     documents: list[dict],
     chunks: list[dict],
     *,
     schema: dict | None = SCHEMA,
+    manifest: object = _DERIVE,
 ) -> Path:
     directory = tmp_path / "release"
     directory.mkdir(exist_ok=True)
     if schema is not None:
         (directory / "chunk.schema.json").write_text(
             json.dumps(schema), encoding="utf-8"
+        )
+    if manifest is _DERIVE:
+        manifest = manifest_for(documents, chunks)
+    if manifest is not None:
+        (directory / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
         )
     for name, records in (("documents", documents), ("chunks", chunks)):
         (directory / f"{name}.jsonl").write_text(
@@ -950,3 +1005,94 @@ async def test_an_altered_dictionary_stops_ingestion(session: AsyncSession) -> N
 
     with pytest.raises(CorpusError, match="dictionary has been altered"):
         await verify_search_configurations(session)
+
+
+async def test_a_release_whose_manifest_omits_a_delivered_document_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """A coverage proof that omits delivered content proves nothing about its release."""
+    documents = [document(), document(document_id="doc-2")]
+    chunks = [chunk(), chunk(chunk_id="c2", document_id="doc-2")]
+    partial = manifest_for([document()], [chunk()])
+
+    with pytest.raises(ManifestError, match="does not account for: doc-2"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, documents, chunks, manifest=partial),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_a_manifest_declaring_a_document_that_did_not_arrive_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """The EAU bladder case, end to end: two parsed guidelines in the same folder and
+    edition as one that was loaded, and they never came."""
+    overreaching = manifest_for([document(), document(document_id="doc-2")], [chunk()])
+
+    with pytest.raises(ManifestError, match="does not deliver: doc-2"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [document()], [chunk()], manifest=overreaching),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_a_release_is_refused_before_anything_is_embedded(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Checked before the embedding loop, because a release that does not match its manifest
+    should cost nothing and every passage below that line is billed per thousand tokens."""
+    embedder = FakeEmbedder()
+    with pytest.raises(ManifestError):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [document()], [chunk()], manifest=None),
+            embedder=embedder,
+        )
+
+    assert embedder.embedded == []
+
+
+async def test_a_block_whose_passage_vanished_from_the_release_is_refused(
+    session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A block is an `UPDATE ... WHERE chunk_id IN (...)`, and a re-chunked release changes
+    chunk ids. A missing id matches nothing, updates nothing and raises nothing: the count
+    falls to zero and the line stops printing.
+
+    One of the ten is the passage a review reproduced leaking at relevance 0.774 — androgen
+    deprivation for biochemical recurrence, offered to a question about early low-risk
+    disease. A silent re-chunk would put it back.
+    """
+    monkeypatch.setattr(
+        "rcpia.evidence.ingestion.LOCALLY_BLOCKED",
+        {"afu.prostate.2024-2026.moved.99.9999": "local_setting_mislabelled"},
+    )
+
+    with pytest.raises(CorpusError, match="not in this release"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [document()], [chunk()]),
+            embedder=FakeEmbedder(),
+        )
+
+
+async def test_a_block_for_a_document_this_release_does_not_carry_is_ignored(
+    session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Loading one document must not fail over a block on another. The corpus is loaded in
+    slices and always has been."""
+    monkeypatch.setattr(
+        "rcpia.evidence.ingestion.LOCALLY_BLOCKED",
+        {"nccn.prostate.6.2026.elsewhere.01.0001": "local_not_guidance"},
+    )
+
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk()]),
+        embedder=FakeEmbedder(),
+    )
+
+    assert report.chunks_inserted == 1
+    assert report.locally_blocked == 0

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from rcpia.core.config import get_settings
 from rcpia.evidence.embedding import EmbeddingError, build_embedder
 from rcpia.evidence.ingestion import CorpusError, ingest_release
+from rcpia.evidence.manifest import ManifestError
 
 if sys.platform == "win32":
     # psycopg's async driver cannot run on Windows' default ProactorEventLoop.
@@ -48,6 +49,9 @@ async def run(directory: Path, *, dry_run: bool) -> int:
                 await session.rollback()
             else:
                 await session.commit()
+    except ManifestError as exc:
+        print(f"release refused: {exc}", file=sys.stderr)
+        return 1
     except CorpusError as exc:
         print(f"corpus refused: {exc}", file=sys.stderr)
         return 1

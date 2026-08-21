@@ -34,6 +34,7 @@ six-document slice does not delete the rest of the corpus.
 import hashlib
 import json
 import re
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.evidence.embedding import BATCH_SIZE, Embedder
 from rcpia.evidence.local_blocks import LOCALLY_BLOCKED
+from rcpia.evidence.manifest import (
+    Manifest,
+    load_manifest,
+    verify_against_release,
+    verify_checksums,
+)
 from rcpia.evidence.models import EvidenceChunk, EvidenceDocument
 
 # Every field the loader needs. A record missing one of these cannot be routed or cited,
@@ -378,6 +385,9 @@ class IngestionReport:
     """What a run did, so a re-run can be compared with the one before it."""
 
     release_id: str | None = None
+    # The release's coverage proof, kept so the operator command can print declared gaps and
+    # concerns. None only for a release loaded before manifests were required.
+    manifest: "Manifest | None" = None
     documents: int = 0
     chunks_seen: int = 0
     chunks_inserted: int = 0
@@ -559,6 +569,13 @@ async def ingest_release(
     if not documents:
         raise CorpusError(f"{directory} holds no documents")
 
+    # The coverage proof, checked before anything is written. Every other guard in this module
+    # asks whether what arrived is well-formed; this one asks whether everything that should
+    # have arrived did. See `manifest.py` for what it cost to have no such check.
+    manifest = load_manifest(directory)
+    verify_checksums(manifest, directory)
+    report.manifest = manifest
+
     # ------------------------------------------------------------------ documents
     # Scope comes from what the release *declares*, never from what PostgreSQL happens to
     # hold. Two failures follow from getting this wrong: a release for document A would
@@ -590,6 +607,18 @@ async def ingest_release(
         if existing_excluded is not None:
             await session.delete(existing_excluded)
             report.documents_removed += 1
+
+    # Checked here rather than after ingestion: a release that does not match its manifest
+    # should cost nothing, and everything below this line embeds passages at a price per
+    # thousand tokens.
+    counts: dict[str, int] = defaultdict(int)
+    for record in chunks:
+        owner = record.get("document_id")
+        if isinstance(owner, str):
+            counts[owner] += 1
+    verify_against_release(
+        manifest, delivered_documents=declared, chunk_counts=dict(counts)
+    )
 
     await session.flush()
 
@@ -713,7 +742,39 @@ async def ingest_release(
         )
         .returning(EvidenceChunk.chunk_id)
     )
-    report.locally_blocked = len((await session.execute(blocking)).scalars().all())
+    blocked_now = set((await session.execute(blocking)).scalars().all())
+    report.locally_blocked = len(blocked_now)
+
+    # **A block is keyed on a chunk id, and a re-chunked release changes chunk ids.**
+    #
+    # The blocks are an `UPDATE ... WHERE chunk_id IN (...)`, so an id that no longer exists
+    # matches nothing, updates nothing, and raises nothing. `locally_blocked` would simply
+    # fall to zero and the line would stop printing. Among the ten is
+    # `nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.08.0085` — the passage
+    # a review reproduced leaking at relevance 0.774, offering androgen deprivation for
+    # biochemical recurrence to a question about early low-risk disease. A silent re-chunk
+    # would put it back.
+    #
+    # A missing id has two causes and both need a person. Either the corpus fixed the passage
+    # and the entry should be retired, or re-chunking moved it and the block has evaporated.
+    # Refusing is right for the same reason the rest of this module refuses: the alternative
+    # is a release that looks like it worked.
+    unmatched = {
+        chunk_id: reason
+        for chunk_id, reason in LOCALLY_BLOCKED.items()
+        if chunk_id not in blocked_now
+        # Only blocks whose document this release actually carries. Loading an AFU-only
+        # slice must not fail over an NCCN passage it was never going to touch.
+        and any(chunk_id.startswith(f"{document}.") for document in declared)
+    }
+    if unmatched:
+        raise CorpusError(
+            f"{len(unmatched)} locally blocked passage(s) are not in this release: "
+            + ", ".join(f"{chunk_id} ({reason})" for chunk_id, reason in sorted(unmatched.items()))
+            + ". Either the corpus corrected them, in which case retire the entries from "
+            "rcpia.evidence.local_blocks, or re-chunking changed their ids, in which case "
+            "the block has silently stopped applying. Both need a decision."
+        )
 
     # Reconcile every declared document, including one whose chunks were all rejected: a
     # release that declares a document and supplies nothing valid for it has emptied it, and
