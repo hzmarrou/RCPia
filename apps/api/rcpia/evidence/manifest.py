@@ -37,8 +37,11 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+
+from rcpia.evidence.domain_approvals import PROVISIONAL, approval_state
+from rcpia.evidence.release_files import RELEASE_FILES
 
 MANIFEST_FILENAME = "manifest.json"
 
@@ -137,7 +140,6 @@ SOURCE_ROLES: frozenset[str] = frozenset(
 
 SOURCE_ROLES_VERSION = "2.0"
 
-
 class ManifestError(Exception):
     """The release's manifest does not account for what the release delivers."""
 
@@ -152,6 +154,10 @@ class CorpusEntry:
     source_family: str | None
     source_role: str | None
     position_domains: tuple[str, ...] | None
+    # `provisional` unless a clinician has signed these exact domains off for this release.
+    # Never self-asserted: only `rcpia.evidence.domain_approvals` sets it, and a manifest
+    # carrying a `domain_approval` field is refused as unknown.
+    domain_approval: str = PROVISIONAL
 
 
 @dataclass
@@ -164,8 +170,8 @@ class Manifest:
     actually delivers is `verify_against_release`, which needs the parsed documents.
     """
 
-    release_id: str | None
-    schema_version: str | None
+    release_id: str
+    schema_version: str
     corpus_entries: dict[str, CorpusEntry]
     folders: dict[str, str]
     declared_gaps: list[str] = field(default_factory=list)
@@ -225,17 +231,35 @@ def load_manifest(
         raise ManifestError(f"{MANIFEST_FILENAME} is not valid JSON: {exc}") from exc
 
     document = _require_mapping(document, "the manifest")
-    schema_version = document.get("schema_version")
-    if schema_version is not None and schema_version != MANIFEST_SCHEMA_VERSION:
+
+    # A release states which vocabulary it was built against; it does not get to define one.
+    # **Required, not optional.** Every one of these was read with a `.get` and checked only
+    # when present, so omitting a field read as compliance — the same shape as the omissions
+    # this whole module exists to catch, built into the code written to catch them.
+    #
+    # `release_id` is the worst of the three. `ingest_release` reconciles the caller's name
+    # against the manifest's only `if manifest.release_id is not None`, so a manifest that
+    # simply leaves it out silently restores the behaviour that reconciliation replaced.
+    for name in ("release_id", "schema_version", "source_roles_version"):
+        value = document.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise ManifestError(
+                f"{MANIFEST_FILENAME} declares {name} as {value!r}. All three of release_id, "
+                "schema_version and source_roles_version are required: a release that does "
+                "not say what it is, or which rules it was built under, cannot be checked "
+                "against either."
+            )
+
+    schema_version = document["schema_version"]
+    if schema_version != MANIFEST_SCHEMA_VERSION:
         raise ManifestError(
             f"{MANIFEST_FILENAME} declares schema_version {schema_version!r}; this loader "
             f"implements {MANIFEST_SCHEMA_VERSION!r}. Reading a manifest under the wrong "
             "rules is how a coverage proof stops proving anything."
         )
 
-    # A release states which vocabulary it was built against; it does not get to define one.
-    declared_version = document.get("source_roles_version")
-    if declared_version is not None and declared_version != SOURCE_ROLES_VERSION:
+    declared_version = document["source_roles_version"]
+    if declared_version != SOURCE_ROLES_VERSION:
         raise ManifestError(
             f"{MANIFEST_FILENAME} was built against source_roles_version "
             f"{declared_version!r}; this loader implements {SOURCE_ROLES_VERSION!r}. The "
@@ -258,16 +282,19 @@ def load_manifest(
     for entry in _require_list(document.get("reference_folders") or [], "reference_folders"):
         entry = _require_mapping(entry, "a reference_folders entry")
         _reject_unknown(entry, _FOLDER_FIELDS, f"folder {entry.get('folder')}")
-        name = entry.get("folder")
+        folder_name = entry.get("folder")
         status = entry.get("status")
-        if not name:
-            raise ManifestError(f"{MANIFEST_FILENAME}: a reference_folders entry has no folder")
+        if not isinstance(folder_name, str) or not folder_name.strip():
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: a reference_folders entry names no folder"
+            )
         if status not in _FOLDER_STATUSES:
             raise ManifestError(
-                f"{MANIFEST_FILENAME}: folder {name} has status {status!r}; expected one of "
+                f"{MANIFEST_FILENAME}: folder {folder_name} has status {status!r}; expected "
+                f"one of "
                 f"{', '.join(sorted(_FOLDER_STATUSES))}"
             )
-        folders[name] = status
+        folders[folder_name] = status
 
     corpus_entries: dict[str, CorpusEntry] = {}
     concerns: list[str] = []
@@ -297,6 +324,16 @@ def load_manifest(
         for note in entry.get("concerns") or []:
             concerns.append(f"{reference_id}: {note}")
 
+        # A reference that delivers a document must name the file it came from. An empty
+        # `files` list satisfied every per-entry check by having no entries to check, so a
+        # corpus document could arrive with no stated source at all.
+        if _delivers_corpus(entry) and not entry.get("files"):
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: reference {reference_id} delivers a corpus document "
+                "and names no file. A passage whose source nobody recorded cannot be traced "
+                "back to a guideline."
+            )
+
         dispositions = _require_list(
             entry.get("dispositions"), f"references[{reference_id}].dispositions"
         )
@@ -306,7 +343,9 @@ def load_manifest(
                 "A reference nobody decided about is indistinguishable from one nobody saw."
             )
         for disposition in dispositions:
-            corpus_entry = _read_disposition(disposition, entry, reference_id)
+            corpus_entry = _read_disposition(
+                disposition, entry, reference_id, document["release_id"]
+            )
             if corpus_entry is not None:
                 if corpus_entry.document_id in corpus_entries:
                     raise ManifestError(
@@ -333,8 +372,8 @@ def load_manifest(
     files = _read_checksums(document.get("checksums"))
 
     return Manifest(
-        release_id=document.get("release_id"),
-        schema_version=document.get("schema_version"),
+        release_id=document["release_id"],
+        schema_version=document["schema_version"],
         corpus_entries=corpus_entries,
         folders=folders,
         declared_gaps=gaps,
@@ -345,6 +384,19 @@ def load_manifest(
 
 # What `checksums` may hold, and the only digest we verify.
 _CHECKSUM_FIELDS = frozenset({"algorithm", "files", "release"})
+
+# The files a release cannot be checked without: whatever the loader actually reads. Their
+# digests are required, because a checksum block that names nothing verifies nothing while
+# looking as though it verified everything — the same shape as an absent block, one level in.
+#
+# Imported rather than repeated. A second copy of this list was correct the day it was written
+# and would have gone stale the first time the release format grew a file — a list standing in
+# for a rule, which is the finding that removed the domain ceiling.
+_MUST_BE_CHECKSUMMED = RELEASE_FILES
+
+# Key under which the release-level digest is recorded. Not a path, so `verify_checksums`
+# skips it rather than looking for a file of that name.
+_RELEASE_DIGEST = "<release>"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 
 
@@ -361,7 +413,10 @@ def _read_checksums(checksums: object) -> dict[str, str]:
     ignoring it would verify nothing while appearing to.
     """
     if checksums is None:
-        return {}
+        raise ManifestError(
+            f"{MANIFEST_FILENAME} carries no checksums. v3 and v3.1 shipped one and v4 did "
+            "not; a release nobody can verify is exactly the one that needs verifying."
+        )
     block = _require_mapping(checksums, "checksums")
     _reject_unknown(block, _CHECKSUM_FIELDS, "checksums")
 
@@ -380,6 +435,18 @@ def _read_checksums(checksums: object) -> dict[str, str]:
     files = _require_mapping(block.get("files") or {}, "checksums.files")
     digests: dict[str, str] = {}
     for name, digest in files.items():
+        cleaned = str(name).strip().replace("\\", "/")
+        if (
+            cleaned != name
+            or cleaned.startswith("/")
+            or PureWindowsPath(cleaned).is_absolute()
+            or PurePosixPath(cleaned).is_absolute()
+            or ".." in cleaned.split("/")
+        ):
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: checksums.files names {name!r}; paths must be "
+                "relative to the release directory and must not climb out of it"
+            )
         if not isinstance(digest, str) or not _SHA256.match(digest):
             raise ManifestError(
                 f"{MANIFEST_FILENAME}: checksums.files[{name}] is {digest!r}, which is not a "
@@ -387,15 +454,24 @@ def _read_checksums(checksums: object) -> dict[str, str]:
             )
         digests[name] = digest
 
+    missing = [name for name in _MUST_BE_CHECKSUMMED if name not in digests]
+    if missing:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: checksums.files omits {', '.join(missing)}. A checksum "
+            "block naming none of the release's own files succeeds while verifying nothing, "
+            "which reads identically to a release that was verified."
+        )
+
     # The release-level digest is over the corpus agent's own bundle, which we never
-    # reconstruct, so it is recorded rather than verified. Refusing a malformed one anyway:
-    # a value we cannot check should at least be the right shape.
+    # reconstruct. Required in the right shape and recorded, so that a release can be named
+    # by content in correspondence even though this loader cannot recompute it.
     release = block.get("release")
-    if release is not None and (not isinstance(release, str) or not _SHA256.match(release)):
+    if not isinstance(release, str) or not _SHA256.match(release):
         raise ManifestError(
             f"{MANIFEST_FILENAME}: checksums.release is {release!r}, which is not a "
             "64-character hexadecimal SHA-256 digest"
         )
+    digests[_RELEASE_DIGEST] = release
     return digests
 
 
@@ -453,7 +529,52 @@ def _check_folder_coverage(folders: dict[str, str], claimed_folders: set[str]) -
 def _claim_files(
     entry: dict[str, Any], owner: str, seen: dict[str, str], folders: set[str]
 ) -> None:
+    """Record the files this reference or artifact claims, and the folders it draws from.
+
+    **`files` was not validated at all.** A bare string was iterated character by character,
+    each character becoming a "file" — and since `"/"` is a character, one of them even
+    contributed an empty-string folder to the coverage set. `[null]` was accepted outright, so
+    a reference could enter the corpus naming no real source file while its declared `folders`
+    satisfied coverage on its own.
+
+    **Explicit `folders` is authoritative; a path prefix is a fallback for entries that give
+    none.** They were merged, so `folders: ["ref-01"]` beside `files: ["ref-02/x.md"]` claimed
+    both and neither statement was ever tested against the other. Two sources for one fact, in
+    the function written to stop exactly that — a disagreement fails now.
+    """
+    names = entry.get("files")
+    if names is None:
+        names = []
+    if not isinstance(names, list):
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: {owner} declares files as {type(names).__name__}; expected "
+            "a list. A string here is iterated character by character."
+        )
+    paths: list[str] = []
+    for name in names:
+        if not isinstance(name, str) or not name.strip():
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: {owner} claims a file named {name!r}; each must be a "
+                "non-empty relative path"
+            )
+        cleaned = name.strip().replace("\\", "/")
+        # `startswith("/")` misses `C:/secret.txt`, which `Path.is_absolute` catches on
+        # Windows. A drive-qualified path is absolute wherever the manifest was written, not
+        # wherever it is read.
+        if (
+            cleaned.startswith("/")
+            or PureWindowsPath(cleaned).is_absolute()
+            or PurePosixPath(cleaned).is_absolute()
+            or ".." in cleaned.split("/")
+        ):
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: {owner} claims {name!r}; paths must be relative and "
+                "must not climb out of the library"
+            )
+        paths.append(cleaned)
+
     declared = entry.get("folders")
+    inferred = {path.split("/", 1)[0] for path in paths if "/" in path}
     if declared is not None:
         if not isinstance(declared, list) or not all(
             isinstance(folder, str) and folder.strip() for folder in declared
@@ -462,17 +583,40 @@ def _claim_files(
                 f"{MANIFEST_FILENAME}: {owner} declares folders as {declared!r}; expected a "
                 "list of folder names"
             )
-        folders.update(declared)
-    for name in entry.get("files") or []:
-        # A path prefix is a fallback for entries that give one, not the source of truth.
-        if isinstance(name, str) and "/" in name:
-            folders.add(name.split("/", 1)[0])
-        if name in seen:
+        stated = {folder.strip() for folder in declared}
+        contradicted = sorted(inferred - stated)
+        if contradicted:
             raise ManifestError(
-                f"{MANIFEST_FILENAME}: file {name} is claimed by both {seen[name]} and "
+                f"{MANIFEST_FILENAME}: {owner} declares folders {', '.join(sorted(stated))} "
+                f"but claims files from {', '.join(contradicted)}. The declared list is "
+                "authoritative; a disagreement means one of the two is wrong."
+            )
+        folders.update(stated)
+    else:
+        # Legacy entries that give paths and no folder list.
+        folders.update(inferred)
+
+    for path in paths:
+        if path in seen:
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: file {path} is claimed by both {seen[path]} and "
                 f"{owner}. A file claimed twice is a document ingested twice under two ids."
             )
-        seen[name] = owner
+        seen[path] = owner
+
+
+def _delivers_corpus(entry: dict[str, Any]) -> bool:
+    """Whether this reference actually puts a document into the corpus.
+
+    `document_id: null` is a declared gap — guidance that should exist and does not — so it
+    delivers nothing and is held to none of the requirements that describe delivered content.
+    """
+    return any(
+        isinstance(disposition, dict)
+        and disposition.get("kind") == "corpus"
+        and disposition.get("document_id") is not None
+        for disposition in entry.get("dispositions") or []
+    )
 
 
 def _require_source_metadata(entry: dict[str, Any], reference_id: str) -> None:
@@ -490,13 +634,7 @@ def _require_source_metadata(entry: dict[str, Any], reference_id: str) -> None:
     # that should exist and does not, like what an abnormal G8 implies when the questionnaire
     # is in one reference and the guidance in another we have not chosen. Nothing is delivered,
     # so there is nothing for retrieval to route and nothing to describe.
-    enters_corpus = any(
-        isinstance(disposition, dict)
-        and disposition.get("kind") == "corpus"
-        and disposition.get("document_id") is not None
-        for disposition in entry.get("dispositions") or []
-    )
-    if not enters_corpus:
+    if not _delivers_corpus(entry):
         return
     absent = [
         name
@@ -576,7 +714,7 @@ def _check_position_domains(
 
 
 def _read_disposition(
-    disposition: Any, entry: dict[str, Any], reference_id: str
+    disposition: Any, entry: dict[str, Any], reference_id: str, release_id: str
 ) -> CorpusEntry | None:
     disposition = _require_mapping(disposition, f"a disposition of {reference_id}")
     _reject_unknown(
@@ -614,16 +752,20 @@ def _read_disposition(
             "disposition must state how many passages it produces, so a document delivered "
             "empty is visible as a defect rather than as an absence"
         )
+    domains = (
+        tuple(entry["position_domains"])
+        if isinstance(entry.get("position_domains"), list)
+        else None
+    )
     return CorpusEntry(
         reference_id=reference_id,
         document_id=document_id,
         chunks=chunks,
         source_family=entry.get("source_family"),
         source_role=entry.get("source_role"),
-        position_domains=(
-            tuple(entry["position_domains"])
-            if isinstance(entry.get("position_domains"), list)
-            else None
+        position_domains=domains,
+        domain_approval=approval_state(
+            reference_id, domains=domains, release_id=release_id
         ),
     )
 
@@ -725,6 +867,10 @@ def verify_checksums(manifest: Manifest, directory: Path) -> None:
     what a checksum is for.
     """
     for name, expected in sorted(manifest.checksums.items()):
+        if name == _RELEASE_DIGEST:
+            # Over the corpus agent's bundle, which we never reconstruct. Recorded, not
+            # verified — and said plainly rather than left to look like a check.
+            continue
         path = directory / name
         if not path.exists():
             raise ManifestError(

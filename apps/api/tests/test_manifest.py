@@ -62,6 +62,19 @@ def write(tmp_path: Path, document: dict | str | None) -> Path:
     return directory
 
 
+# A well-formed checksum block. Required now: one that names none of the release's own files
+# succeeds while verifying nothing, which reads identically to a release that was verified.
+CHECKSUMS = {
+    "algorithm": "sha256",
+    "release": "a" * 64,
+    "files": {
+        "documents.jsonl": "b" * 64,
+        "chunks.jsonl": "c" * 64,
+        "chunk.schema.json": "d" * 64,
+    },
+}
+
+
 def manifest(tmp_path: Path, **overrides: object) -> Path:
     document: dict = {
         "schema_version": "1.0",
@@ -72,6 +85,7 @@ def manifest(tmp_path: Path, **overrides: object) -> Path:
             {"folder": "ref-26", "status": "empty", "note": "Confirmed empty"},
         ],
         "references": [reference()],
+        "checksums": CHECKSUMS,
     }
     document.update(overrides)
     return write(tmp_path, document)
@@ -470,9 +484,22 @@ def test_concerns_are_carried_with_their_reference(tmp_path: Path) -> None:
 def test_a_wrong_checksum_is_refused(tmp_path: Path) -> None:
     """v3 and v3.1 carried one and v4 did not. It has caught nothing so far, which is what a
     checksum is for."""
+    import hashlib
+
+    empty = hashlib.sha256(b"").hexdigest()
     directory = manifest(
-        tmp_path, checksums={"algorithm": "sha256", "files": {"chunks.jsonl": "00" * 32}}
+        tmp_path,
+        checksums={
+            **CHECKSUMS,
+            "files": {
+                "documents.jsonl": empty,
+                "chunk.schema.json": empty,
+                "chunks.jsonl": "0" * 64,
+            },
+        },
     )
+    for name in ("documents.jsonl", "chunk.schema.json"):
+        (directory / name).write_bytes(b"")
     (directory / "chunks.jsonl").write_text("{}", encoding="utf-8")
     loaded = load_manifest(directory)
     with pytest.raises(ManifestError, match="does not match the checksum"):
@@ -481,7 +508,8 @@ def test_a_wrong_checksum_is_refused(tmp_path: Path) -> None:
 
 def test_a_checksum_for_a_file_that_is_not_there_is_refused(tmp_path: Path) -> None:
     directory = manifest(
-        tmp_path, checksums={"algorithm": "sha256", "files": {"absent.jsonl": "00" * 32}}
+        tmp_path,
+        checksums={**CHECKSUMS, "files": {**CHECKSUMS["files"], "absent.jsonl": "0" * 64}},
     )
     loaded = load_manifest(directory)
     with pytest.raises(ManifestError, match="which the release does not contain"):
@@ -497,8 +525,30 @@ def test_a_correct_checksum_passes(tmp_path: Path) -> None:
     directory = manifest(
         tmp_path,
         checksums={
-            "algorithm": "sha256",
-            "files": {"chunks.jsonl": hashlib.sha256(payload).hexdigest()},
+            **CHECKSUMS,
+            "files": {
+                **CHECKSUMS["files"],
+                "chunks.jsonl": hashlib.sha256(payload).hexdigest(),
+            },
+        },
+    )
+    # The other declared files are absent, so only the one under test is checked here.
+    for name in ("documents.jsonl", "chunk.schema.json"):
+        (directory / name).write_bytes(b"")
+    loaded = load_manifest(directory)
+    with pytest.raises(ManifestError, match="does not match"):
+        verify_checksums(loaded, directory)
+    # And with every digest right, it passes.
+    empty = hashlib.sha256(b"").hexdigest()
+    directory = manifest(
+        tmp_path,
+        checksums={
+            **CHECKSUMS,
+            "files": {
+                "documents.jsonl": empty,
+                "chunk.schema.json": empty,
+                "chunks.jsonl": hashlib.sha256(payload).hexdigest(),
+            },
         },
     )
     verify_checksums(load_manifest(directory), directory)
@@ -693,7 +743,9 @@ def test_a_folder_list_that_is_not_a_list_is_refused(tmp_path: Path) -> None:
 def test_checksums_without_an_algorithm_are_refused(tmp_path: Path) -> None:
     """A manifest carrying no usable checksum looked exactly like one that had been verified."""
     with pytest.raises(ManifestError, match="declares no algorithm"):
-        load_manifest(manifest(tmp_path, checksums={"files": {"chunks.jsonl": "a" * 64}}))
+        load_manifest(
+            manifest(tmp_path, checksums={**CHECKSUMS, "algorithm": None})
+        )
 
 
 def test_an_algorithm_we_do_not_verify_is_refused(tmp_path: Path) -> None:
@@ -702,7 +754,7 @@ def test_an_algorithm_we_do_not_verify_is_refused(tmp_path: Path) -> None:
         load_manifest(
             manifest(
                 tmp_path,
-                checksums={"algorithm": "md5", "files": {"chunks.jsonl": "a" * 32}},
+                checksums={**CHECKSUMS, "algorithm": "md5"},
             )
         )
 
@@ -713,7 +765,7 @@ def test_a_misspelled_checksum_field_is_refused(tmp_path: Path) -> None:
         load_manifest(
             manifest(
                 tmp_path,
-                checksums={"algorithm": "sha256", "file": {"chunks.jsonl": "a" * 64}},
+                checksums={**CHECKSUMS, "file": {"chunks.jsonl": "a" * 64}},
             )
         )
 
@@ -723,7 +775,10 @@ def test_a_digest_of_the_wrong_shape_is_refused(tmp_path: Path) -> None:
         load_manifest(
             manifest(
                 tmp_path,
-                checksums={"algorithm": "sha256", "files": {"chunks.jsonl": "deadbeef"}},
+                checksums={
+                    **CHECKSUMS,
+                    "files": {**CHECKSUMS["files"], "chunks.jsonl": "deadbeef"},
+                },
             )
         )
 
@@ -733,5 +788,188 @@ def test_a_malformed_release_digest_is_refused(tmp_path: Path) -> None:
     cannot check should at least be the right shape."""
     with pytest.raises(ManifestError, match="checksums.release"):
         load_manifest(
-            manifest(tmp_path, checksums={"algorithm": "sha256", "release": "nope"})
+            manifest(tmp_path, checksums={**CHECKSUMS, "release": "nope"})
         )
+
+
+# --------------------------------------------------------------------------------------
+# Absence as compliance — the shape this module exists to refuse, found inside it
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "field", ["release_id", "schema_version", "source_roles_version"]
+)
+def test_an_omitted_identity_field_is_refused(tmp_path: Path, field: str) -> None:
+    """All three were read with a `.get` and checked only when present, so omitting one read
+    as compliance.
+
+    `release_id` is the worst. `ingest_release` reconciles the caller's name against the
+    manifest's only when the manifest has one — so leaving it out silently restored the exact
+    behaviour that reconciliation had just replaced.
+    """
+    document = json.loads((manifest(tmp_path) / "manifest.json").read_text(encoding="utf-8"))
+    del document[field]
+    with pytest.raises(ManifestError, match=f"declares {field}"):
+        load_manifest(write(tmp_path, document))
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_an_empty_identity_field_is_refused(tmp_path: Path, value: str) -> None:
+    with pytest.raises(ManifestError, match="declares release_id"):
+        load_manifest(manifest(tmp_path, release_id=value))
+
+
+def test_files_given_as_a_string_is_refused(tmp_path: Path) -> None:
+    """A bare string was iterated character by character, each character becoming a "file" --
+    and since `"/"` is a character, one of them contributed an empty-string folder."""
+    entry = reference()
+    entry["files"] = "ref-01/eau.md"
+    with pytest.raises(ManifestError, match="declares files as str"):
+        load_manifest(manifest(tmp_path, references=[entry]))
+
+
+def test_a_null_file_name_is_refused(tmp_path: Path) -> None:
+    """`[null]` was accepted, so a reference could enter the corpus naming no real source file
+    while its declared `folders` satisfied coverage on its own."""
+    with pytest.raises(ManifestError, match="claims a file named None"):
+        load_manifest(manifest(tmp_path, references=[reference(files=[None])]))
+
+
+def test_a_path_climbing_out_of_the_library_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="must be relative"):
+        load_manifest(
+            manifest(tmp_path, references=[reference(files=["../../etc/passwd"])])
+        )
+
+
+def test_folders_disagreeing_with_the_paths_is_refused(tmp_path: Path) -> None:
+    """They were merged, so a reference claiming `ref-01` while its files came from `ref-02`
+    claimed both and neither statement was ever tested against the other. Two sources for one
+    fact, in the function written to stop exactly that."""
+    entry = reference(files=["ref-02/eau.md"]) | {"folders": ["ref-01"]}
+    with pytest.raises(ManifestError, match="but claims files from ref-02"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                references=[entry],
+                reference_folders=[
+                    {"folder": "ref-01", "status": "accounted"},
+                    {"folder": "ref-02", "status": "accounted"},
+                ],
+            )
+        )
+
+
+def test_a_release_with_no_checksums_is_refused(tmp_path: Path) -> None:
+    """v3 and v3.1 shipped one and v4 did not. A release nobody can verify is exactly the one
+    that needs verifying."""
+    document = json.loads((manifest(tmp_path) / "manifest.json").read_text(encoding="utf-8"))
+    del document["checksums"]
+    with pytest.raises(ManifestError, match="carries no checksums"):
+        load_manifest(write(tmp_path, document))
+
+
+def test_checksums_naming_none_of_the_release_files_are_refused(tmp_path: Path) -> None:
+    """A block naming nothing succeeded while verifying nothing, which reads identically to a
+    release that was verified."""
+    with pytest.raises(ManifestError, match="omits documents.jsonl"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                checksums={**CHECKSUMS, "files": {"chunks.jsonl": "a" * 64}},
+            )
+        )
+
+
+def test_a_checksum_path_climbing_out_of_the_release_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="must be relative"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                checksums={
+                    **CHECKSUMS,
+                    "files": {**CHECKSUMS["files"], "../secrets.env": "a" * 64},
+                },
+            )
+        )
+
+
+def test_declared_domains_are_provisional_until_a_clinician_approves(
+    tmp_path: Path,
+) -> None:
+    """**Unconstrained is not the same as safe.**
+
+    Nothing now limits which purposes a source may claim beyond the purpose being real, which
+    is right — the previous limit was a mapping invented by an engineer. But a release could
+    declare that RECIST holds positions on therapy indication and we would accept it, and once
+    comparison retrieval consumes these declarations a wrong one becomes a false conflict shown
+    to a clinician.
+
+    So the approval state travels with the declaration, and `clinician_approved` cannot be
+    self-asserted: no field in the manifest can set it.
+    """
+    loaded = load_manifest(manifest(tmp_path))
+    entry = loaded.corpus_entries["eau.prostate.2026"]
+    assert entry.domain_approval == "provisional"
+
+
+def test_a_release_cannot_assert_its_own_approval(tmp_path: Path) -> None:
+    reference_entry = reference()
+    reference_entry["domain_approval"] = "clinician_approved"
+    with pytest.raises(ManifestError, match="does not implement: domain_approval"):
+        load_manifest(manifest(tmp_path, references=[reference_entry]))
+
+
+def test_nothing_is_approved_yet_and_that_is_the_honest_state() -> None:
+    """An empty approval record is a statement, not an oversight. Until it is populated the
+    divergence comparison has no approved authorities and must say so rather than proceed."""
+    from rcpia.evidence.domain_approvals import APPROVALS
+
+    assert APPROVALS == ()
+
+
+def test_an_approval_covers_the_domains_it_named_and_no_others() -> None:
+    """**Approving a source once does not approve whatever it declares later.**
+
+    A flag on a temporary object was the first shape: not stored, not auditable, readable by
+    nothing after the load. An approval is a clinical decision with a person behind it, so it
+    records who, when, which domains, and which release — and a release that widens the
+    domains, or arrives under a new id, falls back to provisional.
+    """
+    from datetime import date
+
+    from rcpia.evidence import domain_approvals
+    from rcpia.evidence.domain_approvals import Approval, approval_state
+
+    approval = Approval(
+        reference_id="eau-2026-prostate",
+        domains=("therapy_indication",),
+        clinician="Dr Example",
+        approved_on=date(2026, 8, 21),
+        release_id="rcpia-corpus-v5.0",
+    )
+    original = domain_approvals._BY_REFERENCE
+    domain_approvals._BY_REFERENCE = {approval.reference_id: approval}
+    try:
+        exact = approval_state(
+            "eau-2026-prostate",
+            domains=("therapy_indication",),
+            release_id="rcpia-corpus-v5.0",
+        )
+        widened = approval_state(
+            "eau-2026-prostate",
+            domains=("therapy_indication", "follow_up"),
+            release_id="rcpia-corpus-v5.0",
+        )
+        later = approval_state(
+            "eau-2026-prostate",
+            domains=("therapy_indication",),
+            release_id="rcpia-corpus-v6.0",
+        )
+    finally:
+        domain_approvals._BY_REFERENCE = original
+
+    assert exact == "clinician_approved"
+    assert widened == "provisional"
+    assert later == "provisional"

@@ -191,9 +191,19 @@ class Filter:
 
         What remains is what is true of the system rather than of this patient: the cancer
         type, and `retrieval_eligible`. Used as the denominator when measuring how much the
-        routing filter costs — see `UnfilteredCandidates`.
+        routing filter costs — see `FilterDecision`.
+
+        **The admission options travel with it.** `admit_universal_purpose` was reset to its
+        default here, so a filter that had switched it off got an invariant filter with it on
+        — and refusal attribution, which builds each single-dimension filter from this one,
+        could then fail to name `clinical_purpose` as the dimension responsible. These are
+        parameters of how a dimension is applied, not dimensions of their own.
         """
-        return Filter(self.cancer_type, admit_unspecified=self.admit_unspecified)
+        return Filter(
+            self.cancer_type,
+            admit_unspecified=self.admit_unspecified,
+            admit_universal_purpose=self.admit_universal_purpose,
+        )
 
     def widen(self) -> "Filter | None":
         """The next-looser filter, or None when nothing further may be dropped.
@@ -293,9 +303,40 @@ class RetrievedChunk:
         return self.keyword_rank is not None and self.dense_rank is not None
 
 
+# The routing dimensions, each with the clause that tests it. Named so a refusal can say
+# *which* one turned a passage away rather than only that something did.
+_ROUTING_DIMENSIONS = ("disease_setting", "therapy_line", "clinical_purpose", "agent_role")
+
+
+@dataclass(frozen=True)
+class PassageDecision:
+    """What the filter did with one named passage, and why."""
+
+    chunk_id: str
+    # False when the corpus holds no passage with this id at all — a gold label that has
+    # drifted against a re-chunked release, which is a defect in the gold set rather than a
+    # loss attributable to the filter.
+    found: bool
+    admitted: bool
+    invariant: bool
+    # Which routing dimensions refused it, in the order `Filter` applies them. Empty when the
+    # passage was admitted, or when the invariants turned it away before routing was reached.
+    refused_by: tuple[str, ...] = ()
+
+    @property
+    def reason(self) -> str:
+        if not self.found:
+            return "not in the corpus"
+        if self.admitted:
+            return "admitted"
+        if not self.invariant:
+            return "refused by an invariant (cancer type or eligibility)"
+        return "refused by " + ", ".join(self.refused_by)
+
+
 @dataclass(frozen=True)
 class FilterDecision:
-    """Which of a named set of passages the filter admits, and which the invariants alone do.
+    """What the filter did with a named set of passages, per passage.
 
     **Filter loss is a property of the predicate, not of a ranked list.** The first attempt at
     this ran both legs with the routing clauses removed and recorded what came back — but both
@@ -304,19 +345,30 @@ class FilterDecision:
     comfortably inside the filtered fifty, which produces retention above 100% and conflates
     ranking with filtering. The number would have been not merely imprecise but incoherent.
 
-    So the filter is asked about specific passages instead: the gold set names them, and both
-    predicates are applied directly. No limit, no ordering, nothing to compete over.
+    **And returning two sets was not enough either.** A gold id that no longer exists appeared
+    in neither, so it silently shrank the denominator — and a gold set drifting against a
+    re-chunked corpus would score *better*, not worse. A metric that rewards its own decay is
+    worse than no metric. `found` separates "the filter refused it" from "the label is stale".
 
-    `admitted` is what the full filter allows. `invariant` is what survives the cancer type and
-    `retrieval_eligible` alone — the constraints that are properties of the system rather than
-    routing choices. `filter_retention` is `|gold ∩ admitted| / |gold ∩ invariant|`, which
-    measures routing loss and deliberately not eligibility loss: 214 of 1,513 chunks are
-    ineligible bibliography, appendices and superseded guidance, and counting those as losses
-    would blame the router for the corpus.
+    `refused_by` names the routing dimensions that turned a passage away, so a low retention
+    can be attributed rather than merely observed.
     """
 
-    admitted: frozenset[str]
-    invariant: frozenset[str]
+    passages: tuple[PassageDecision, ...]
+
+    @property
+    def missing(self) -> frozenset[str]:
+        """Gold ids the corpus does not contain. Any of these invalidates the measurement."""
+        return frozenset(p.chunk_id for p in self.passages if not p.found)
+
+    @property
+    def admitted(self) -> frozenset[str]:
+        return frozenset(p.chunk_id for p in self.passages if p.admitted)
+
+    @property
+    def invariant(self) -> frozenset[str]:
+        """The denominator: found passages the invariants allow, whatever routing decided."""
+        return frozenset(p.chunk_id for p in self.passages if p.found and p.invariant)
 
 
 async def filter_admits(
@@ -324,9 +376,9 @@ async def filter_admits(
 ) -> FilterDecision:
     """Ask the filter about named passages, for the evaluation's filter-loss measurement."""
     if not chunk_ids:
-        return FilterDecision(admitted=frozenset(), invariant=frozenset())
+        return FilterDecision(passages=())
 
-    wanted = list(chunk_ids)
+    wanted = list(dict.fromkeys(chunk_ids))
 
     async def surviving(clauses: list[sa.ColumnElement[bool]]) -> frozenset[str]:
         rows = await session.execute(
@@ -336,9 +388,51 @@ async def filter_admits(
         )
         return frozenset(rows.scalars().all())
 
+    # Existence first, so a stale gold label is reported as stale rather than as a loss.
+    present = await surviving([])
+    invariant = await surviving(filter.invariants().as_clauses())
+    admitted = await surviving(filter.as_clauses())
+
+    # Three queries for existence, invariants and the full filter, plus one per constrained
+    # dimension — up to seven in all. Offline only: the evaluation calls this once per
+    # question, never a clinician-facing search.
+    #
+    # One query per constrained dimension, each applying **that dimension alone** on top of
+    # the invariants.
+    #
+    # Relaxing one dimension at a time was the first attempt and it under-reports: a passage
+    # refused by both the setting and the purpose survives neither relaxation, so neither is
+    # named and the refusal looks unattributable. Testing each dimension by itself names every
+    # one that refuses, which is what "why was this lost" actually asks.
+    bare = filter.invariants()
+    alone = (
+        ("disease_setting", replace(bare, disease_setting=filter.disease_setting)),
+        ("therapy_line", replace(bare, therapy_line=filter.therapy_line)),
+        ("clinical_purpose", replace(bare, clinical_purpose=filter.clinical_purpose)),
+        ("agent_role", replace(bare, agent_role=filter.agent_role)),
+    )
+    blamed: dict[str, frozenset[str]] = {}
+    for dimension, only in alone:
+        if only == bare:
+            # The dimension was not constrained, so it refused nothing.
+            continue
+        blamed[dimension] = invariant - await surviving(only.as_clauses())
+
     return FilterDecision(
-        admitted=await surviving(filter.as_clauses()),
-        invariant=await surviving(filter.invariants().as_clauses()),
+        passages=tuple(
+            PassageDecision(
+                chunk_id=chunk_id,
+                found=chunk_id in present,
+                admitted=chunk_id in admitted,
+                invariant=chunk_id in invariant,
+                refused_by=tuple(
+                    dimension
+                    for dimension in _ROUTING_DIMENSIONS
+                    if chunk_id in blamed.get(dimension, ())
+                ),
+            )
+            for chunk_id in wanted
+        )
     )
 
 

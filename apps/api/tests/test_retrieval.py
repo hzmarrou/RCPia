@@ -1156,8 +1156,6 @@ async def test_filter_loss_is_measured_by_predicate_not_by_rank(
     back — but both legs cut at `CANDIDATE_LIMIT`, so "unfiltered" meant the top fifty of a
     wider pool. A labelled passage could fall below fifty unfiltered while sitting inside the
     filtered fifty, giving retention above 100% and conflating ranking with filtering.
-
-    The gold set names the passages, so the filter is asked about those directly.
     """
     await add_document(session, "doc")
     await add_chunk(session, "wanted", clinical_purpose=("follow_up",))
@@ -1177,20 +1175,102 @@ async def test_filter_loss_is_measured_by_predicate_not_by_rank(
         chunk_ids=["wanted", "wrong-purpose", "ineligible", "other-cancer"],
     )
 
-    # Routing loss: `wrong-purpose` is the only passage the router turned away.
     assert decision.admitted == {"wanted"}
     # The denominator excludes what the invariants refuse, so an ineligible bibliography entry
     # and another cancer's guidance are not counted against the router.
     assert decision.invariant == {"wanted", "wrong-purpose"}
 
 
+async def test_a_gold_id_the_corpus_does_not_hold_is_reported_not_hidden(
+    session: AsyncSession,
+) -> None:
+    """**A metric that rewards its own decay is worse than no metric.**
+
+    Returning two sets was not enough. A gold id that no longer exists appeared in neither, so
+    it silently shrank the denominator — and a gold set drifting against a re-chunked corpus
+    would score *better*, not worse. `found` separates "the filter refused it" from "the label
+    is stale", and `missing` is what invalidates the measurement.
+    """
+    await add_document(session, "doc")
+    await add_chunk(session, "wanted", clinical_purpose=("follow_up",))
+
+    decision = await filter_admits(
+        session,
+        filter=Filter("prostate", clinical_purpose=("follow_up",)),
+        chunk_ids=["wanted", "renamed-by-a-rechunk"],
+    )
+
+    assert decision.missing == {"renamed-by-a-rechunk"}
+    # The stale label is not counted in the denominator either -- but it is *named*, so the
+    # measurement can be refused rather than quietly computed over a shrunken set.
+    assert decision.invariant == {"wanted"}
+    stale = next(p for p in decision.passages if p.chunk_id == "renamed-by-a-rechunk")
+    assert stale.reason == "not in the corpus"
+
+
+async def test_a_refusal_names_the_dimension_responsible(session: AsyncSession) -> None:
+    """A low retention should be attributable, not merely observed."""
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "wrong-setting-and-purpose",
+        disease_setting="prostate_metastatic_hormone_sensitive",
+        clinical_purpose=("screening",),
+    )
+    await add_chunk(session, "wrong-line", therapy_line="salvage")
+
+    decision = await filter_admits(
+        session,
+        filter=Filter(
+            "prostate",
+            disease_setting="prostate_localized_low_risk",
+            therapy_line="primary",
+            clinical_purpose=("follow_up",),
+        ),
+        chunk_ids=["wrong-setting-and-purpose", "wrong-line"],
+    )
+
+    by_id = {p.chunk_id: p for p in decision.passages}
+    # `wrong-line` also carries the fixture's default purpose, which the filter does not ask
+    # for -- so two dimensions refuse it, and both are named.
+    assert by_id["wrong-line"].refused_by == ("clinical_purpose", "therapy_line") or by_id[
+        "wrong-line"
+    ].refused_by == ("therapy_line", "clinical_purpose")
+    # Relaxing either of those alone would still leave it out, which is why attribution tests
+    # each dimension by itself rather than relaxing one at a time.
+    assert set(by_id["wrong-setting-and-purpose"].refused_by) == {
+        "disease_setting",
+        "clinical_purpose",
+    }
+
+
+async def test_an_invariant_refusal_is_distinguished_from_a_routing_one(
+    session: AsyncSession,
+) -> None:
+    """Eligibility and cancer type are properties of the system, not of this patient. A
+    passage they refuse is not a routing loss and must not read as one."""
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "bibliography",
+        retrieval_eligible=False,
+        retrieval_exclusion_reason="bibliography_entry",
+    )
+
+    decision = await filter_admits(
+        session, filter=Filter("prostate"), chunk_ids=["bibliography"]
+    )
+
+    only = decision.passages[0]
+    assert (only.found, only.admitted, only.invariant) == (True, False, False)
+    assert only.reason.startswith("refused by an invariant")
+
+
 async def test_asking_the_filter_about_nothing_costs_nothing(
     session: AsyncSession,
 ) -> None:
-    decision = await filter_admits(
-        session, filter=Filter("prostate"), chunk_ids=[]
-    )
-    assert (decision.admitted, decision.invariant) == (frozenset(), frozenset())
+    decision = await filter_admits(session, filter=Filter("prostate"), chunk_ids=[])
+    assert decision.passages == ()
 
 
 
@@ -1351,3 +1431,31 @@ async def test_an_empty_result_is_explained_by_the_widest_attempt(
     assert report.chunks == []
     assert report.filter_used is None
     assert (report.keyword_hits, report.below_floor) == (1, 1)
+
+
+async def test_attribution_survives_a_filter_that_excludes_general_purposes(
+    session: AsyncSession,
+) -> None:
+    """`invariants()` reset `admit_universal_purpose` to its default.
+
+    So a filter that had switched it off produced an invariant filter with it on, and refusal
+    attribution — which builds each single-dimension filter from that one — could fail to name
+    `clinical_purpose` as the dimension responsible. The option is a parameter of how the
+    dimension is applied, not a dimension of its own, and it has to travel.
+    """
+    await add_document(session, "doc")
+    await add_chunk(session, "general-only", clinical_purpose=("general",))
+
+    decision = await filter_admits(
+        session,
+        filter=Filter(
+            "prostate",
+            clinical_purpose=("follow_up",),
+            admit_universal_purpose=False,
+        ),
+        chunk_ids=["general-only"],
+    )
+
+    only = decision.passages[0]
+    assert only.found and not only.admitted
+    assert only.refused_by == ("clinical_purpose",)
