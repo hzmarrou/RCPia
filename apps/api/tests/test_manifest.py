@@ -607,3 +607,131 @@ def test_an_unknown_disposition_field_is_refused(tmp_path: Path) -> None:
 def test_a_manifest_of_another_schema_version_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ManifestError, match="schema_version"):
         load_manifest(manifest(tmp_path, schema_version="2.0"))
+
+
+# --------------------------------------------------------------------------------------
+# What "declared" has to mean
+# --------------------------------------------------------------------------------------
+
+
+def test_a_null_document_id_needs_no_source_metadata(tmp_path: Path) -> None:
+    """A corpus disposition with no document id is a *declared gap*, not delivered content.
+
+    The interpretive half of an instrument usually lives in a different reference — what an
+    abnormal G8 implies is not in the questionnaire. Nothing is delivered, so there is nothing
+    for retrieval to route and nothing to describe, and requiring a family and a role would
+    force the corpus agent to invent them.
+    """
+    loaded = load_manifest(
+        manifest(
+            tmp_path,
+            references=[
+                reference(
+                    "g8-interpretation",
+                    source_role=None,
+                    dispositions=[
+                        {
+                            "kind": "corpus",
+                            "document_id": None,
+                            "covers": "what an abnormal G8 implies",
+                        }
+                    ],
+                )
+            ],
+        )
+    )
+    assert loaded.corpus_entries == {}
+
+
+def test_an_empty_source_family_is_refused(tmp_path: Path) -> None:
+    """`""` satisfies "is not None" and then vanishes from family-stratified retrieval without
+    a word — the passages load, and no family search ever names them."""
+    entry = reference()
+    entry["source_family"] = "   "
+    with pytest.raises(ManifestError, match="enters the corpus without source_family"):
+        load_manifest(manifest(tmp_path, references=[entry]))
+
+
+def test_the_declared_folders_field_is_what_counts(tmp_path: Path) -> None:
+    """It was allowlisted and ignored, with coverage inferred from slashes in file names.
+
+    The contract allows bare filenames beside a separate folder list — and a reference drawn
+    from two folders, which the GGPO and Mini-GDS duplicates are, cannot be expressed by a path
+    prefix at all.
+    """
+    loaded = load_manifest(
+        manifest(
+            tmp_path,
+            references=[
+                reference(
+                    "ggpo",
+                    files=["GGPO_Psycho_Oncology.md", "GGPO_Psycho-oncology.md"],
+                )
+                | {"folders": ["ref-01", "ref-22"]}
+            ],
+            reference_folders=[
+                {"folder": "ref-01", "status": "accounted"},
+                {"folder": "ref-22", "status": "accounted"},
+            ],
+        )
+    )
+    assert loaded.folders == {"ref-01": "accounted", "ref-22": "accounted"}
+
+
+def test_a_folder_list_that_is_not_a_list_is_refused(tmp_path: Path) -> None:
+    entry = reference()
+    entry["folders"] = "ref-01"
+    with pytest.raises(ManifestError, match="declares folders as"):
+        load_manifest(manifest(tmp_path, references=[entry]))
+
+
+# --------------------------------------------------------------------------------------
+# Checksums — the field whose whole job is to make tampering loud
+# --------------------------------------------------------------------------------------
+
+
+def test_checksums_without_an_algorithm_are_refused(tmp_path: Path) -> None:
+    """A manifest carrying no usable checksum looked exactly like one that had been verified."""
+    with pytest.raises(ManifestError, match="declares no algorithm"):
+        load_manifest(manifest(tmp_path, checksums={"files": {"chunks.jsonl": "a" * 64}}))
+
+
+def test_an_algorithm_we_do_not_verify_is_refused(tmp_path: Path) -> None:
+    """Ignoring it would verify nothing while appearing to."""
+    with pytest.raises(ManifestError, match="verifies sha256 only"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                checksums={"algorithm": "md5", "files": {"chunks.jsonl": "a" * 32}},
+            )
+        )
+
+
+def test_a_misspelled_checksum_field_is_refused(tmp_path: Path) -> None:
+    """`file` rather than `files` previously meant no digest was checked, silently."""
+    with pytest.raises(ManifestError, match="does not implement: file"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                checksums={"algorithm": "sha256", "file": {"chunks.jsonl": "a" * 64}},
+            )
+        )
+
+
+def test_a_digest_of_the_wrong_shape_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="not a 64-character hexadecimal"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                checksums={"algorithm": "sha256", "files": {"chunks.jsonl": "deadbeef"}},
+            )
+        )
+
+
+def test_a_malformed_release_digest_is_refused(tmp_path: Path) -> None:
+    """Recorded rather than verified -- we never reconstruct their bundle -- but a value we
+    cannot check should at least be the right shape."""
+    with pytest.raises(ManifestError, match="checksums.release"):
+        load_manifest(
+            manifest(tmp_path, checksums={"algorithm": "sha256", "release": "nope"})
+        )

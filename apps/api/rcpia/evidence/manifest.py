@@ -35,6 +35,7 @@ inventory with digests for `verify_checksums` to check, which is requested in
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -274,6 +275,11 @@ def load_manifest(
     # it the manifest proves nothing: a file listed twice is a document ingested twice under
     # two ids, and a file listed nowhere is the omission this file exists to catch.
     seen_files: dict[str, str] = {}
+    # Which folders each reference says it draws from. Read from the declared `folders` field
+    # rather than inferred from slashes in file names -- the contract allows bare filenames
+    # beside a separate folder list, and a reference spanning two folders (the GGPO and
+    # Mini-GDS duplicates do) cannot be expressed by a path prefix at all.
+    claimed_folders: set[str] = set()
 
     for entry in _require_list(document.get("references") or [], "references"):
         entry = _require_mapping(entry, "a references entry")
@@ -284,7 +290,7 @@ def load_manifest(
         if not reference_id:
             raise ManifestError(f"{MANIFEST_FILENAME}: a references entry has no reference_id")
 
-        _claim_files(entry, reference_id, seen_files)
+        _claim_files(entry, reference_id, seen_files, claimed_folders)
         _check_position_domains(entry, reference_id, purposes)
         _require_source_metadata(entry, reference_id)
 
@@ -312,9 +318,11 @@ def load_manifest(
     for entry in _require_list(document.get("artifacts") or [], "artifacts"):
         entry = _require_mapping(entry, "an artifacts entry")
         _reject_unknown(entry, _ARTIFACT_FIELDS, f"artifact {entry.get('artifact_id')}")
-        _claim_files(entry, entry.get("artifact_id") or "an artifact", seen_files)
+        _claim_files(
+            entry, entry.get("artifact_id") or "an artifact", seen_files, claimed_folders
+        )
 
-    _check_folder_coverage(folders, seen_files)
+    _check_folder_coverage(folders, claimed_folders)
 
     gaps: list[str] = []
     for gap in _require_list(document.get("gaps") or [], "gaps"):
@@ -322,8 +330,7 @@ def load_manifest(
         _reject_unknown(gap, _GAP_FIELDS, f"gap {gap.get('gap_id')}")
         gaps.append(gap.get("gap_id") or gap.get("topic") or "unnamed gap")
 
-    checksums = _require_mapping(document.get("checksums") or {}, "checksums")
-    files = _require_mapping(checksums.get("files") or {}, "checksums.files")
+    files = _read_checksums(document.get("checksums"))
 
     return Manifest(
         release_id=document.get("release_id"),
@@ -332,11 +339,67 @@ def load_manifest(
         folders=folders,
         declared_gaps=gaps,
         concerns=concerns,
-        checksums={name: str(value) for name, value in files.items()},
+        checksums=files,
     )
 
 
-def _check_folder_coverage(folders: dict[str, str], seen_files: dict[str, str]) -> None:
+# What `checksums` may hold, and the only digest we verify.
+_CHECKSUM_FIELDS = frozenset({"algorithm", "files", "release"})
+_SHA256 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+
+
+def _read_checksums(checksums: object) -> dict[str, str]:
+    """The per-file digests, or refuse the block.
+
+    It was read with two `.get`s and no checks at all, which meant a misspelled `file`, an
+    unknown or absent `algorithm`, and a digest of the wrong shape all passed — and a manifest
+    carrying no usable checksum then looked exactly like one that had been verified. That is
+    the same silent-acceptance shape the rest of this module refuses, in the field whose whole
+    job is to make tampering and truncation loud.
+
+    Only SHA-256 is accepted. Naming another algorithm is refused rather than ignored, because
+    ignoring it would verify nothing while appearing to.
+    """
+    if checksums is None:
+        return {}
+    block = _require_mapping(checksums, "checksums")
+    _reject_unknown(block, _CHECKSUM_FIELDS, "checksums")
+
+    algorithm = block.get("algorithm")
+    if algorithm is None:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: checksums declares no algorithm. A digest whose algorithm "
+            "is unstated cannot be checked."
+        )
+    if not isinstance(algorithm, str) or algorithm.lower() not in {"sha256", "sha-256"}:
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: checksums names algorithm {algorithm!r}; this loader "
+            "verifies sha256 only, and would otherwise appear to verify without doing so."
+        )
+
+    files = _require_mapping(block.get("files") or {}, "checksums.files")
+    digests: dict[str, str] = {}
+    for name, digest in files.items():
+        if not isinstance(digest, str) or not _SHA256.match(digest):
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: checksums.files[{name}] is {digest!r}, which is not a "
+                "64-character hexadecimal SHA-256 digest"
+            )
+        digests[name] = digest
+
+    # The release-level digest is over the corpus agent's own bundle, which we never
+    # reconstruct, so it is recorded rather than verified. Refusing a malformed one anyway:
+    # a value we cannot check should at least be the right shape.
+    release = block.get("release")
+    if release is not None and (not isinstance(release, str) or not _SHA256.match(release)):
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: checksums.release is {release!r}, which is not a "
+            "64-character hexadecimal SHA-256 digest"
+        )
+    return digests
+
+
+def _check_folder_coverage(folders: dict[str, str], claimed_folders: set[str]) -> None:
     """Every accounted folder must have at least one file claimed from it, and every claimed
     file must sit in a declared folder.
 
@@ -356,8 +419,6 @@ def _check_folder_coverage(folders: dict[str, str], seen_files: dict[str, str]) 
     declared means the folder list is incomplete. Both are the wholly-omitted-folder case,
     which is the largest version of the failure.
     """
-    claimed_folders = {name.split("/", 1)[0] for name in seen_files if "/" in name}
-
     empty_but_claimed = sorted(
         folder
         for folder, status in folders.items()
@@ -389,8 +450,23 @@ def _check_folder_coverage(folders: dict[str, str], seen_files: dict[str, str]) 
         )
 
 
-def _claim_files(entry: dict[str, Any], owner: str, seen: dict[str, str]) -> None:
+def _claim_files(
+    entry: dict[str, Any], owner: str, seen: dict[str, str], folders: set[str]
+) -> None:
+    declared = entry.get("folders")
+    if declared is not None:
+        if not isinstance(declared, list) or not all(
+            isinstance(folder, str) and folder.strip() for folder in declared
+        ):
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: {owner} declares folders as {declared!r}; expected a "
+                "list of folder names"
+            )
+        folders.update(declared)
     for name in entry.get("files") or []:
+        # A path prefix is a fallback for entries that give one, not the source of truth.
+        if isinstance(name, str) and "/" in name:
+            folders.add(name.split("/", 1)[0])
         if name in seen:
             raise ManifestError(
                 f"{MANIFEST_FILENAME}: file {name} is claimed by both {seen[name]} and "
@@ -410,8 +486,14 @@ def _require_source_metadata(entry: dict[str, Any], reference_id: str) -> None:
     Only required of references that actually enter the corpus. A tool, a calculator or an
     excluded reference has nothing for retrieval to route.
     """
+    # `document_id: null` on a corpus disposition is a *declared gap* -- interpretive guidance
+    # that should exist and does not, like what an abnormal G8 implies when the questionnaire
+    # is in one reference and the guidance in another we have not chosen. Nothing is delivered,
+    # so there is nothing for retrieval to route and nothing to describe.
     enters_corpus = any(
-        isinstance(disposition, dict) and disposition.get("kind") == "corpus"
+        isinstance(disposition, dict)
+        and disposition.get("kind") == "corpus"
+        and disposition.get("document_id") is not None
         for disposition in entry.get("dispositions") or []
     )
     if not enters_corpus:
@@ -419,7 +501,10 @@ def _require_source_metadata(entry: dict[str, Any], reference_id: str) -> None:
     absent = [
         name
         for name in ("source_family", "source_role", "position_domains")
+        # An empty string satisfies "is not None" and then vanishes from family-stratified
+        # retrieval without a word -- the passages load, and no family search ever names them.
         if entry.get(name) is None
+        or (isinstance(entry.get(name), str) and not str(entry[name]).strip())
     ]
     if absent:
         raise ManifestError(
