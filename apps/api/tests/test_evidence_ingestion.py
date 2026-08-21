@@ -5,6 +5,7 @@ routing metadata would be invisible to every filter, which reads exactly like a 
 does not cover the topic — so it is refused rather than stored with a hole in it.
 """
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -22,7 +23,11 @@ from rcpia.evidence.ingestion import (
     verify_search_configurations,
 )
 from rcpia.evidence.local_blocks import LOCALLY_BLOCKED, Block
-from rcpia.evidence.manifest import SOURCE_ROLES_VERSION, ManifestError
+from rcpia.evidence.manifest import (
+    MANIFEST_SCHEMA_VERSION,
+    SOURCE_ROLES_VERSION,
+    ManifestError,
+)
 from rcpia.evidence.models import (
     EMBEDDING_DIMENSIONS,
     EvidenceChunk,
@@ -170,7 +175,7 @@ def manifest_for(documents: list[dict], chunks: list[dict]) -> dict:
         if isinstance(owner, str):
             counts[owner] = counts.get(owner, 0) + 1
     return {
-        "schema_version": "1.0",
+        "schema_version": MANIFEST_SCHEMA_VERSION,
         "release_id": "test-release",
         "source_roles_version": SOURCE_ROLES_VERSION,
         "reference_folders": [{"folder": "ref-01", "status": "accounted"}],
@@ -219,16 +224,31 @@ def release(
         (directory / "chunk.schema.json").write_text(
             json.dumps(schema), encoding="utf-8"
         )
-    if manifest is _DERIVE:
-        manifest = manifest_for(documents, chunks)
-    if manifest is not None:
-        (directory / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
-        )
     for name, records in (("documents", documents), ("chunks", chunks)):
         (directory / f"{name}.jsonl").write_text(
             "\n".join(json.dumps(record, ensure_ascii=False) for record in records),
             encoding="utf-8",
+        )
+    if manifest is _DERIVE:
+        manifest = manifest_for(documents, chunks)
+    if manifest is not None:
+        assert isinstance(manifest, dict)
+        # Digests over the files just written. A checksum block naming none of the release's
+        # own files verifies nothing while looking as though it verified everything.
+        manifest.setdefault(
+            "checksums",
+            {
+                "algorithm": "sha256",
+                "release": "0" * 64,
+                "files": {
+                    name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
+                    for name in ("documents.jsonl", "chunks.jsonl", "chunk.schema.json")
+                    if (directory / name).exists()
+                },
+            },
+        )
+        (directory / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
         )
     return directory
 
