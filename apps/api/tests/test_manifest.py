@@ -207,23 +207,63 @@ def test_two_references_claiming_one_document_are_refused(tmp_path: Path) -> Non
 # --------------------------------------------------------------------------------------
 
 
-def test_domains_beyond_what_the_role_covers_are_refused(tmp_path: Path) -> None:
-    """Two fields that must agree are two fields that can disagree.
+def test_a_domain_the_release_does_not_recognise_is_refused(tmp_path: Path) -> None:
+    """**The role no longer constrains this, and that is deliberate.**
 
-    The consequence is not cosmetic. A specialist reference treated as a peer of AFU, EAU and
-    NCCN makes the comparison step report a divergence that does not exist — SIOG is not
-    disagreeing about treatment, it is answering a different question — and a false conflict
-    shown to a clinician is the failure most likely to end their trust in it.
+    A previous version had `treatment_guideline` permit exactly three treatment domains — a
+    mapping invented here that no clinician had seen, and wrong on its face, since AFU, EAU and
+    NCCN also hold positions on risk stratification, follow-up, safety, diagnosis and staging.
+    An unreviewed role acting as a clinical ceiling is a scope decision made by omission.
+
+    What is checkable without deciding anything clinical: a domain must name a purpose the
+    release's own chunk schema declares, because a domain no chunk can carry is not a claim
+    about anything.
     """
-    with pytest.raises(ManifestError, match="claims positions in therapy_indication"):
+    with pytest.raises(ManifestError, match="claims positions in invented_purpose"):
+        load_manifest(
+            manifest(
+                tmp_path,
+                references=[reference(position_domains=["invented_purpose"])],
+            ),
+            purposes=frozenset({"therapy_indication", "supportive_care"}),
+        )
+
+
+def test_a_comprehensive_guideline_may_claim_any_real_purpose(tmp_path: Path) -> None:
+    """The case the ceiling got wrong. AFU, EAU and NCCN are comprehensive."""
+    loaded = load_manifest(
+        manifest(
+            tmp_path,
+            references=[
+                reference(
+                    source_role="treatment_guideline",
+                    position_domains=["therapy_indication", "follow_up", "staging"],
+                )
+            ],
+        ),
+        purposes=frozenset({"therapy_indication", "follow_up", "staging"}),
+    )
+    assert loaded.corpus_entries["eau.prostate.2026"].position_domains == (
+        "therapy_indication",
+        "follow_up",
+        "staging",
+    )
+
+
+def test_an_empty_domain_string_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="non-empty clinical purpose"):
+        load_manifest(
+            manifest(tmp_path, references=[reference(position_domains=["  "])])
+        )
+
+
+def test_a_repeated_domain_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="repeats a position domain"):
         load_manifest(
             manifest(
                 tmp_path,
                 references=[
-                    reference(
-                        source_role="specialist_guidance",
-                        position_domains=["therapy_indication"],
-                    )
+                    reference(position_domains=["therapy_indication", "therapy_indication"])
                 ],
             )
         )

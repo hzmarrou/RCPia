@@ -303,7 +303,11 @@ async def test_an_excluded_document_is_not_loaded(
 async def test_a_release_loads_with_its_provenance(
     session: AsyncSession, tmp_path: Path
 ) -> None:
-    directory = release(tmp_path, [document()], [chunk()])
+    # The caller's name must agree with the manifest's -- checked in `ingest_release`, since
+    # storing a name the validated manifest does not carry records a release nobody proved.
+    named = manifest_for([document()], [chunk()])
+    named["release_id"] = "corpus-v2.0"
+    directory = release(tmp_path, [document()], [chunk()], manifest=named)
     embedder = FakeEmbedder()
 
     report = await ingest_release(
@@ -1310,3 +1314,42 @@ async def test_a_nested_document_object_that_is_not_an_object_is_refused(
             directory=release(tmp_path, [record], [chunk()]),
             embedder=FakeEmbedder(),
         )
+
+
+async def test_a_release_named_differently_by_caller_and_manifest_is_refused(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """**Checked in ingestion, not in the command that usually calls it.**
+
+    It was enforced in `load.py`, so `ingest_release(..., release_id="wrong")` stored a name
+    differing from the manifest whose coverage had just been validated. The CLI is one caller;
+    the property is about ingestion.
+    """
+    named = manifest_for([document()], [chunk()])
+    named["release_id"] = "rcpia-corpus-v5.0"
+
+    with pytest.raises(ManifestError, match="caller names this release 'rcpia-corpus-v4.0'"):
+        await ingest_release(
+            session,
+            directory=release(tmp_path, [document()], [chunk()], manifest=named),
+            embedder=FakeEmbedder(),
+            release_id="rcpia-corpus-v4.0",
+        )
+
+
+async def test_the_manifest_name_is_what_gets_stored(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """The manifest is the file whose coverage was validated, so it is the name recorded."""
+    named = manifest_for([document()], [chunk()])
+    named["release_id"] = "rcpia-corpus-v5.0"
+
+    report = await ingest_release(
+        session,
+        directory=release(tmp_path, [document()], [chunk()], manifest=named),
+        embedder=FakeEmbedder(),
+    )
+
+    assert report.release_id == "rcpia-corpus-v5.0"
+    stored = await session.get(EvidenceDocument, "afu.prostate.2024-2026")
+    assert stored is not None and stored.release_id == "rcpia-corpus-v5.0"

@@ -29,6 +29,7 @@ from rcpia.evidence.rerank import Reranker
 from rcpia.evidence.retrieval import (
     Concepts,
     Filter,
+    filter_admits,
     reciprocal_rank_fusion,
     search,
     search_without_reranking,
@@ -1146,59 +1147,51 @@ async def test_only_the_therapy_line_is_ever_relaxed(session: AsyncSession) -> N
     assert once.agent_role == "urology_oncology"
 
 
-async def test_the_unfiltered_candidate_set_is_recorded_for_filter_loss(
+async def test_filter_loss_is_measured_by_predicate_not_by_rank(
     session: AsyncSession,
 ) -> None:
-    """Filter loss cannot be computed from a filtered trace.
+    """**Filter loss is a property of the predicate, not of a ranked list.**
 
-    Every `AttemptTrace` records what survived the filter, so a passage the filter refused
-    appears in none of them — indistinguishable from one the corpus does not contain.
-    `filter_retention` is recall over the admitted set divided by recall over the unfiltered
-    set, and without the denominator it is not a number.
+    The first attempt ran both legs with the routing clauses removed and recorded what came
+    back — but both legs cut at `CANDIDATE_LIMIT`, so "unfiltered" meant the top fifty of a
+    wider pool. A labelled passage could fall below fifty unfiltered while sitting inside the
+    filtered fifty, giving retention above 100% and conflating ranking with filtering.
+
+    The gold set names the passages, so the filter is asked about those directly.
     """
     await add_document(session, "doc")
-    await add_chunk(session, "wanted", text="protocole de suivi", clinical_purpose=("follow_up",))
-    await add_chunk(
-        session, "refused", text="protocole de suivi", clinical_purpose=("screening",)
-    )
-    # Ineligible passages stay out of the denominator: comparing the filter against a
-    # configuration nobody would ship would flatter it.
+    await add_chunk(session, "wanted", clinical_purpose=("follow_up",))
+    await add_chunk(session, "wrong-purpose", clinical_purpose=("screening",))
     await add_chunk(
         session,
         "ineligible",
-        text="protocole de suivi",
         clinical_purpose=("follow_up",),
         retrieval_eligible=False,
         retrieval_exclusion_reason="bibliography_entry",
     )
+    await add_chunk(session, "other-cancer", cancer_types=("bladder",))
 
-    report = await search_without_reranking(
+    decision = await filter_admits(
         session,
-        question="question de test",
-        concepts=Concepts(french=("protocole de suivi",)),
-        embedding=None,
-        embedding_model=MODEL,
         filter=Filter("prostate", clinical_purpose=("follow_up",)),
-        trace=True,
+        chunk_ids=["wanted", "wrong-purpose", "ineligible", "other-cancer"],
     )
 
-    assert report.unfiltered is not None
-    assert set(report.unfiltered.keyword_ids) == {"wanted", "refused"}
-    assert report.attempts[0].keyword_ids == ["wanted"]
+    # Routing loss: `wrong-purpose` is the only passage the router turned away.
+    assert decision.admitted == {"wanted"}
+    # The denominator excludes what the invariants refuse, so an ineligible bibliography entry
+    # and another cancer's guidance are not counted against the router.
+    assert decision.invariant == {"wanted", "wrong-purpose"}
 
 
-def test_the_filter_takes_only_the_cancer_type_positionally() -> None:
-    """Adding `clinical_purpose` shifted every later positional argument by one, and a call
-    passing the agent role fourth silently bound it to `clinical_purpose` — a `str` where a
-    tuple was declared, truthy and iterable, so it would have reached PostgreSQL as an
-    overlap against thirteen single characters. The next field added would do it again."""
-    with pytest.raises(TypeError):
-        Filter("prostate", "prostate_localized_low_risk")  # type: ignore[misc]
+async def test_asking_the_filter_about_nothing_costs_nothing(
+    session: AsyncSession,
+) -> None:
+    decision = await filter_admits(
+        session, filter=Filter("prostate"), chunk_ids=[]
+    )
+    assert (decision.admitted, decision.invariant) == (frozenset(), frozenset())
 
-
-# --------------------------------------------------------------------------------------
-# What the cross-encoder is given to read
-# --------------------------------------------------------------------------------------
 
 
 async def test_the_reranker_reads_the_contextualised_text(session: AsyncSession) -> None:

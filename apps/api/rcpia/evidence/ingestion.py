@@ -45,7 +45,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rcpia.evidence.embedding import BATCH_SIZE, Embedder
 from rcpia.evidence.local_blocks import LOCALLY_BLOCKED
 from rcpia.evidence.manifest import (
+    MANIFEST_FILENAME,
     Manifest,
+    ManifestError,
     load_manifest,
     verify_against_release,
     verify_checksums,
@@ -636,9 +638,27 @@ async def ingest_release(
     # The coverage proof, checked before anything is written. Every other guard in this module
     # asks whether what arrived is well-formed; this one asks whether everything that should
     # have arrived did. See `manifest.py` for what it cost to have no such check.
-    manifest = load_manifest(directory)
+    # The release's own `clinical_purpose` enum, so a declared position domain must name a
+    # purpose a chunk could actually carry.
+    manifest = load_manifest(directory, purposes=schema.enums.get("clinical_purpose"))
     verify_checksums(manifest, directory)
     report.manifest = manifest
+
+    # **The invariant lives here, not in the command that usually calls it.**
+    #
+    # It was enforced in `load.py`, so `ingest_release(..., release_id="wrong")` stored a name
+    # differing from the manifest whose coverage had just been validated — and a test did
+    # exactly that. Checking in the CLI is checking a convenient proxy: the CLI is one caller,
+    # and the property is about ingestion.
+    if manifest.release_id is not None:
+        if release_id is not None and release_id != manifest.release_id:
+            raise ManifestError(
+                f"the caller names this release {release_id!r} and {MANIFEST_FILENAME} names "
+                f"{manifest.release_id!r}. The manifest is the file whose coverage was "
+                "validated; storing the other name would record a release nobody proved."
+            )
+        release_id = manifest.release_id
+        report.release_id = release_id
 
     # ------------------------------------------------------------------ documents
     # Scope comes from what the release *declares*, never from what PostgreSQL happens to

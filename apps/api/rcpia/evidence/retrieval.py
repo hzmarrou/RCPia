@@ -31,6 +31,7 @@ this module uses.
 
 import re
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import KW_ONLY, dataclass, field, replace
 from typing import Any
 
@@ -292,27 +293,53 @@ class RetrievedChunk:
         return self.keyword_rank is not None and self.dense_rank is not None
 
 
-@dataclass
-class UnfilteredCandidates:
-    """What the legs return under the invariants alone, for one search.
+@dataclass(frozen=True)
+class FilterDecision:
+    """Which of a named set of passages the filter admits, and which the invariants alone do.
 
-    **Filter loss cannot be computed from a filtered trace.** Every `AttemptTrace` records what
-    survived `Filter.as_clauses()`, so a passage the filter refused appears in none of them —
-    indistinguishable from one the corpus does not contain. `filter_retention` is defined as
-    recall over the filter-admitted set divided by recall over the unfiltered set, and without
-    the denominator it is not a number at all.
+    **Filter loss is a property of the predicate, not of a ranked list.** The first attempt at
+    this ran both legs with the routing clauses removed and recorded what came back — but both
+    legs cut at `CANDIDATE_LIMIT`, so "unfiltered" meant *the top fifty of a wider pool*.
+    Candidate competition can push a labelled passage below fifty unfiltered while it sits
+    comfortably inside the filtered fifty, which produces retention above 100% and conflates
+    ranking with filtering. The number would have been not merely imprecise but incoherent.
 
-    "Unfiltered" keeps the invariants on: the cancer type, and `retrieval_eligible`. Those are
-    properties of the system rather than routing choices — 214 of 1,513 chunks are ineligible
-    bibliography, appendices and superseded guidance, and dragging them in would make the
-    filter look better than it is by comparing it against a configuration nobody would ship.
+    So the filter is asked about specific passages instead: the gold set names them, and both
+    predicates are applied directly. No limit, no ordering, nothing to compete over.
 
-    Costs one extra query per leg, and only when `trace=True`.
+    `admitted` is what the full filter allows. `invariant` is what survives the cancer type and
+    `retrieval_eligible` alone — the constraints that are properties of the system rather than
+    routing choices. `filter_retention` is `|gold ∩ admitted| / |gold ∩ invariant|`, which
+    measures routing loss and deliberately not eligibility loss: 214 of 1,513 chunks are
+    ineligible bibliography, appendices and superseded guidance, and counting those as losses
+    would blame the router for the corpus.
     """
 
-    keyword_ids: list[str] = field(default_factory=list)
-    dense_ids: list[str] = field(default_factory=list)
-    fused_ids: list[str] = field(default_factory=list)
+    admitted: frozenset[str]
+    invariant: frozenset[str]
+
+
+async def filter_admits(
+    session: AsyncSession, *, filter: Filter, chunk_ids: Sequence[str]
+) -> FilterDecision:
+    """Ask the filter about named passages, for the evaluation's filter-loss measurement."""
+    if not chunk_ids:
+        return FilterDecision(admitted=frozenset(), invariant=frozenset())
+
+    wanted = list(chunk_ids)
+
+    async def surviving(clauses: list[sa.ColumnElement[bool]]) -> frozenset[str]:
+        rows = await session.execute(
+            sa.select(EvidenceChunk.chunk_id).where(
+                EvidenceChunk.chunk_id.in_(wanted), *clauses
+            )
+        )
+        return frozenset(rows.scalars().all())
+
+    return FilterDecision(
+        admitted=await surviving(filter.as_clauses()),
+        invariant=await surviving(filter.invariants().as_clauses()),
+    )
 
 
 @dataclass
@@ -370,8 +397,6 @@ class RetrievalReport:
     chunks: list[RetrievedChunk] = field(default_factory=list)
     # Empty unless `trace=True`. Every attempt, in order, strict first.
     attempts: list[AttemptTrace] = field(default_factory=list)
-    # None unless `trace=True`. The denominator for filter loss.
-    unfiltered: UnfilteredCandidates | None = None
 
 
 def reciprocal_rank_fusion(rankings: list[list[str]], k: int = RRF_K) -> list[tuple[str, float]]:
@@ -549,38 +574,6 @@ async def _search(
     # reranking. Stays at zeros when no filter admitted anything at all, which is itself the
     # distinction a reader of an empty report is looking for.
     exhausted = (0, 0, 0)
-
-    if trace:
-        # The denominator for filter loss, computed once: the invariants do not change as the
-        # filter widens. Two extra queries, and only when tracing.
-        invariant = filter.invariants().as_clauses()
-        bare_keyword = (
-            []
-            if report.keyword_skipped
-            else await _keyword_leg(session, concepts=concepts, clauses=invariant)
-        )
-        bare_dense = (
-            []
-            if embedding is None
-            else await _dense_leg(
-                session,
-                embedding=embedding,
-                embedding_model=embedding_model,
-                clauses=invariant,
-            )
-        )
-        bare_keyword_ids = [row.chunk_id for row in bare_keyword]
-        bare_dense_ids = [row.chunk_id for row in bare_dense]
-        report.unfiltered = UnfilteredCandidates(
-            keyword_ids=bare_keyword_ids,
-            dense_ids=bare_dense_ids,
-            fused_ids=[
-                chunk_id
-                for chunk_id, _ in reciprocal_rank_fusion(
-                    [bare_keyword_ids, bare_dense_ids]
-                )
-            ],
-        )
 
     while current is not None:
         clauses = current.as_clauses()

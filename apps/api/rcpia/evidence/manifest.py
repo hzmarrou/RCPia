@@ -100,47 +100,40 @@ _GAP_FIELDS = frozenset({"gap_id", "note", "status", "topic"})
 # refused rather than read under the wrong rules.
 MANIFEST_SCHEMA_VERSION = "1.0"
 
-# **RCPia owns this table, and the release selects from it.**
+# **RCPia owns this vocabulary, and the release selects from it.**
 #
 # The first version read the mapping from the release, on the argument that a role we did not
 # recognise should be a question rather than a silent default. That is circular: a release
 # could invent `expert_opinion`, declare it position-bearing, and validate itself. The meaning
 # of a source_role is a decision about how the comparison step behaves, so it belongs here,
 # versioned with the code that acts on it.
-# **Domains, not a boolean.** `position_bearing: true|false` was the first shape and it was
-# already wrong for sources we hold. ESPEN does not hold a position on treatment choice, so
-# the boolean is false — but it holds positions on nutritional support, and if two nutrition
-# sources ever disagreed we would want them compared. A boolean says "holds no position",
-# which is not what we mean and not true.
+# **A role names a kind of source. It does not decide what that source may hold a position on.**
 #
-# A domain is a `clinical_purpose`, so the comparison step can ask a question it already knows
-# how to phrase: *for this purpose, which sources may hold a position?* An empty set means the
-# source holds none anywhere — a classification, a measurement convention, an instrument.
+# The first version mapped each role to a set of permitted domains — `treatment_guideline`
+# could cover therapy indication, modality selection and treatment delivery, and nothing else.
+# That mapping was invented here, by an engineer, and no clinician has seen it. It is also
+# wrong on its face: AFU, EAU and NCCN are comprehensive guidelines and hold positions on risk
+# stratification, follow-up, safety, diagnosis and staging as well.
 #
-# The values a role permits; a reference declares the subset it actually covers.
-SOURCE_ROLES: dict[str, frozenset[str]] = {
-    # AFU, EAU, NCCN, ESMO. The recommendation-producing purposes.
-    "treatment_guideline": frozenset(
-        {"therapy_indication", "modality_selection", "treatment_delivery"}
-    ),
-    # A joint position between two authorities. Same reach; see the note in
-    # `docs/reviews/corpus-v5-manifest-contract.md` about double-counting.
-    "treatment_consensus": frozenset(
-        {"therapy_indication", "modality_selection", "treatment_delivery"}
-    ),
-    # SIOG, ESPEN, renal, psycho-oncology: positions in their own domain, never on the
-    # treatment decision itself.
-    "specialist_guidance": frozenset(
-        {"supportive_care", "safety", "risk_stratification", "follow_up"}
-    ),
-    "classification_standard": frozenset(),  # WHO/IARC, PI-RADS, TNM
-    "measurement_standard": frozenset(),     # RECIST
-    "assessment_instrument": frozenset(),    # G8, MNA, IPSS, IIEF-5, ADL
-    "predictive_model": frozenset(),         # Briganti, MSKCC
-}
+# Using an unreviewed role as a *clinical* ceiling is the kind of quiet scope decision this
+# project exists not to make. So the ceiling is gone. A reference declares the domains it
+# covers, and the only check is that each one names a real `clinical_purpose` — a domain no
+# chunk can carry is meaningless whoever declared it.
+#
+# Whether roles should constrain domains at all is a question for the clinician, recorded in
+# `docs/reviews/` and deliberately unanswered here.
+SOURCE_ROLES: frozenset[str] = frozenset(
+    {
+        "treatment_guideline",      # AFU, EAU, NCCN, ESMO
+        "treatment_consensus",      # a joint position between two authorities
+        "specialist_guidance",      # SIOG, ESPEN, renal, psycho-oncology
+        "classification_standard",  # WHO/IARC, PI-RADS, TNM
+        "measurement_standard",     # RECIST
+        "assessment_instrument",    # G8, MNA, IPSS, IIEF-5, ADL
+        "predictive_model",         # Briganti, MSKCC
+    }
+)
 
-# Bumped when a role is added, removed, or its position-bearing meaning changes. A release
-# declaring a version we do not know is refused rather than interpreted under the wrong rules.
 SOURCE_ROLES_VERSION = "2.0"
 
 
@@ -208,8 +201,14 @@ def _require_list(value: Any, what: str) -> list[Any]:
     return value
 
 
-def load_manifest(directory: Path) -> Manifest:
-    """Read and self-check `manifest.json`, or refuse the release."""
+def load_manifest(
+    directory: Path, *, purposes: frozenset[str] | None = None
+) -> Manifest:
+    """Read and self-check `manifest.json`, or refuse the release.
+
+    `purposes` is the `clinical_purpose` vocabulary the release's own `chunk.schema.json`
+    declares, used to check that every `position_domains` entry names a purpose that exists.
+    """
     path = directory / MANIFEST_FILENAME
     if not path.exists():
         raise ManifestError(
@@ -249,8 +248,6 @@ def load_manifest(directory: Path) -> Manifest:
             "meaning validates itself. State source_roles_version and select from "
             f"{', '.join(sorted(SOURCE_ROLES))}."
         )
-    role_map = SOURCE_ROLES
-
     # After the two version checks, so a release built against a vocabulary or shape we do not
     # implement is told which, rather than being handed a list of fields it did not expect to
     # be wrong about.
@@ -288,7 +285,7 @@ def load_manifest(directory: Path) -> Manifest:
             raise ManifestError(f"{MANIFEST_FILENAME}: a references entry has no reference_id")
 
         _claim_files(entry, reference_id, seen_files)
-        _check_position_domains(entry, reference_id, role_map)
+        _check_position_domains(entry, reference_id, purposes)
         _require_source_metadata(entry, reference_id)
 
         for note in entry.get("concerns") or []:
@@ -433,20 +430,24 @@ def _require_source_metadata(entry: dict[str, Any], reference_id: str) -> None:
 
 
 def _check_position_domains(
-    entry: dict[str, Any], reference_id: str, role_map: dict[str, frozenset[str]]
+    entry: dict[str, Any], reference_id: str, purposes: frozenset[str] | None
 ) -> None:
-    """`source_role` sets the ceiling; `position_domains` says what this source actually covers.
+    """A reference declares what it holds positions on; we check the names are real.
 
-    **Load-bearing rather than descriptive.** A specialist reference compared as a peer of AFU,
-    EAU and NCCN makes the divergence step report a disagreement that does not exist — SIOG's
-    entire prostate footprint is `geriatric_frailty`, so it is not disagreeing about treatment,
-    it is answering a different question. A false conflict shown to a clinician is the failure
-    most likely to end their trust in the mechanism.
+    **The role does not constrain this.** A previous version had `treatment_guideline` permit
+    exactly three treatment domains — a mapping invented by an engineer that no clinician had
+    seen, and wrong on its face, since AFU, EAU and NCCN also hold positions on risk
+    stratification, follow-up, safety, diagnosis and staging. An unreviewed role acting as a
+    clinical ceiling is a scope decision made by omission.
 
-    A domain is a `clinical_purpose`, so the comparison step asks a question it already knows
-    how to phrase: for this purpose, which sources may hold a position? A role that permits
-    none — a classification, a measurement convention, an instrument — must declare an empty
-    list, which is a statement rather than an omission.
+    What remains is checkable without deciding anything clinical: every domain must name a
+    `clinical_purpose` the release itself declares, because a domain no chunk can carry is
+    meaningless whoever wrote it. The release's `chunk.schema.json` is the source of that
+    vocabulary — it already has to constrain `clinical_purpose` for chunks to be validated at
+    all, so it cannot be widened here without widening it there too.
+
+    An empty list is a statement: this source holds positions nowhere. Omitting the field
+    is an absence, and `_require_source_metadata` refuses it.
     """
     role = entry.get("source_role")
     domains = entry.get("position_domains")
@@ -457,10 +458,10 @@ def _check_position_domains(
             f"{MANIFEST_FILENAME}: reference {reference_id} declares position_domains "
             "without a source_role to justify them"
         )
-    if role not in role_map:
+    if role not in SOURCE_ROLES:
         raise ManifestError(
             f"{MANIFEST_FILENAME}: reference {reference_id} has source_role {role!r}, which "
-            f"this loader does not implement. Choose from {', '.join(sorted(role_map))}."
+            f"this loader does not implement. Choose from {', '.join(sorted(SOURCE_ROLES))}."
         )
     if domains is None:
         return
@@ -469,18 +470,24 @@ def _check_position_domains(
             f"{MANIFEST_FILENAME}: reference {reference_id} declares position_domains as "
             f"{type(domains).__name__}, expected a list"
         )
-    permitted = role_map[role]
-    beyond = sorted(set(domains) - permitted)
-    if beyond:
-        raise ManifestError(
-            f"{MANIFEST_FILENAME}: reference {reference_id} claims positions in "
-            f"{', '.join(beyond)}, which source_role {role!r} does not cover"
-            + (
-                f" (it covers {', '.join(sorted(permitted))})"
-                if permitted
-                else " (it covers none — this source holds no positions)"
+    for domain in domains:
+        if not isinstance(domain, str) or not domain.strip():
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: reference {reference_id} declares a position domain "
+                f"of {domain!r}; each must be a non-empty clinical purpose"
             )
+    if len(set(domains)) != len(domains):
+        raise ManifestError(
+            f"{MANIFEST_FILENAME}: reference {reference_id} repeats a position domain"
         )
+    if purposes is not None:
+        unknown = sorted(set(domains) - purposes)
+        if unknown:
+            raise ManifestError(
+                f"{MANIFEST_FILENAME}: reference {reference_id} claims positions in "
+                f"{', '.join(unknown)}, which the release's chunk schema does not list as a "
+                "clinical purpose. A domain no chunk can carry is not a claim about anything."
+            )
 
 
 def _read_disposition(
