@@ -748,3 +748,79 @@ def test_every_field_key_is_unique_and_indexed() -> None:
     keys = [field.key for field in FIELDS_BY_KEY.values()]
 
     assert len(keys) == len(set(keys))
+
+
+def test_a_scalar_value_stops_at_the_next_label_even_an_unrecognised_one() -> None:
+    """**Found by measuring the extractor against the 15 real dossiers.**
+
+    A biology value ran on until it met a label the catalogue recognised. Where the next
+    label was not in the catalogue it was swallowed whole:
+
+        egfr    = "28.2 Ionogramme :"
+        albumin = "30 Proteines : RAS"
+
+    `Ionogramme` is not a field at all, and `Protéines` is registered only as `prot`, so
+    neither stopped the read. The number survived and became uncomparable — nothing can test
+    `"28.2 Ionogramme :"` against a threshold, so renal function was present in the dossier
+    and unusable to every rule that needed it. Cisplatin eligibility turns on that number.
+    """
+    text = "\n".join(
+        [
+            "DFG : ",
+            "",
+            "28.2",
+            "",
+            "Ionogramme :",
+            "",
+            "Na : ",
+            "",
+            "134",
+        ]
+    )
+    facts = {c.key: c.value for c in extract_from_text(text)}
+
+    assert facts["egfr"] == "28.2"
+    assert facts["sodium"] == "134"
+
+
+def test_a_scalar_stops_before_a_label_the_catalogue_knows_by_another_name() -> None:
+    """`Protéines` is registered as `prot`, so it did not stop the albumin read."""
+    text = "\n".join(["Albumine : ", "", "30", "", "Proteines : RAS"])
+
+    assert extract_from_text(text)[0].value == "30"
+
+
+def test_a_narrative_report_still_runs_past_an_unrecognised_heading() -> None:
+    """The opposite trade, and it must not be lost. Stopping a radiology report at the first
+    unrecognised sub-heading kept the acquisition technique and discarded the tumour."""
+    text = "\n".join(
+        [
+            "TDM TAP :",
+            "Acquisition spiralée en coupes millimétriques.",
+            "",
+            "Technique :",
+            "Sans et après injection.",
+            "",
+            "A l'étage abdomino-pelvien :",
+            "Majoration de l'épaississement pariétal vésical, 43x41mm.",
+        ]
+    )
+    value = extract_from_text(text)[0].value or ""
+
+    assert "43x41mm" in value
+    assert "Technique" in value
+
+
+def test_two_numbers_under_one_scalar_label_are_not_silently_reduced_to_one() -> None:
+    """The scalar rule stops at the next label, not after the first line.
+
+    Stopping after one line is stricter and worse: a dossier listing two figures under one
+    label would quietly become the first of them, and nothing downstream could tell. Running
+    to the next label yields a value that will not parse as a number — visibly wrong rather
+    than plausibly wrong, which is the trade this project keeps choosing.
+    """
+    text = "\n".join(["Créatinine : ", "", "24.75", "173.3", "", "DFG : ", "", "28.2"])
+    facts = {c.key: c.value for c in extract_from_text(text)}
+
+    assert facts["creatinine"] == "24.75 173.3"
+    assert facts["egfr"] == "28.2"

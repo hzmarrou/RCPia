@@ -18,6 +18,7 @@ from rcpia.cases.fact_schema import (
     FIELDS,
     FIELDS_BY_KEY,
     REPORTED_ABSENT,
+    FactCategory,
     FactField,
     is_reported_absent,
 )
@@ -165,12 +166,15 @@ def extract_from_text(
         source_chunk = chunk_id
 
         if not value:
-            continuation, consumed = _read_continuation(lines, index + 1)
+            scalar = field_spec.category in _SCALAR_CATEGORIES
+            continuation, consumed = _read_continuation(lines, index + 1, scalar=scalar)
             if not continuation and following_text:
                 # The label ended this chunk; its report opens the next one. The value
                 # then lives in that chunk, so that is the chunk the fact must cite —
                 # an excerpt has to be findable in the text it points at.
-                continuation, consumed = _read_continuation(following_text.splitlines(), 0)
+                continuation, consumed = _read_continuation(
+                    following_text.splitlines(), 0, scalar=scalar
+                )
                 if continuation:
                     source_chunk = following_chunk_id
                     value = continuation
@@ -230,7 +234,16 @@ def _bare_scores(
     return found
 
 
-def _read_continuation(lines: list[str], start: int) -> tuple[str, list[str]]:
+# Categories whose value is a single scalar, never a report. A creatinine is one number;
+# there is no second paragraph of it.
+_SCALAR_CATEGORIES = frozenset(
+    {FactCategory.biology, FactCategory.performance, FactCategory.identity}
+)
+
+
+def _read_continuation(
+    lines: list[str], start: int, *, scalar: bool = False
+) -> tuple[str, list[str]]:
     """Collect the lines under a bare label, stopping at the next recognised label.
 
     **Blank lines do not end the report.** Radiology and pathology reports are written in
@@ -251,6 +264,21 @@ def _read_continuation(lines: list[str], start: int) -> tuple[str, list[str]]:
     chunk, capped by `MAX_VALUE_LENGTH`. That can absorb an unrecognised sub-heading —
     `Technique :`, `Résultat :` — which is the right trade: those belong to the report, and
     over-capturing costs a longer quotation while under-capturing loses the diagnosis.
+
+    **`scalar` reverses that trade, because for a number it is the wrong one.** A biology
+    value is one figure, so the first non-empty line is the whole of it and anything after
+    belongs to something else. Without this, a value ran on until it met a label the
+    catalogue recognised — and where the next label was not in the catalogue it was
+    swallowed:
+
+        DFG :                          egfr     = "28.2 Ionogramme :"
+        28.2                           albumin  = "30 Proteines : RAS"
+        Ionogramme :
+
+    `Ionogramme` is not a field at all, and `Protéines` is registered only as `prot`, so
+    neither stopped the read. The number survived and became uncomparable: nothing can test
+    `"28.2 Ionogramme :"` against a threshold, so renal function — which decides cisplatin
+    eligibility — was present in the dossier and unusable to every rule that needed it.
     """
     collected: list[str] = []
     truncated = False
@@ -261,8 +289,15 @@ def _read_continuation(lines: list[str], start: int) -> tuple[str, list[str]]:
         match = LABEL_LINE.match(line)
         if match is not None:
             label = match.group("label")
-            # A label the catalogue knows, or any label naming another imaging study.
-            if normalize_label(label) in LABEL_INDEX or starts_a_new_report(label):
+            # For a scalar, *any* label ends the value — recognised or not. For a report,
+            # only a label the catalogue knows, so an unrecognised sub-heading stays inside.
+            #
+            # This is the whole of the scalar rule. An earlier version also stopped after the
+            # first collected line, which is stricter and worse: two numbers under one label
+            # would be silently reduced to one. Running to the next label instead yields
+            # `"28.2 30.1"` — uncomparable, and visibly so. A malformed value someone can see
+            # beats a plausible one nobody can question.
+            if scalar or normalize_label(label) in LABEL_INDEX or starts_a_new_report(label):
                 break
         collected.append(stripped)
         if sum(len(item) for item in collected) > MAX_VALUE_LENGTH:
