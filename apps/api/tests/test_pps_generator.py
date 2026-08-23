@@ -45,6 +45,7 @@ from rcpia.core.models import (
     User,
     UserRole,
 )
+from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.jobs.models import JobType
 from rcpia.main import app
 from rcpia.pps import generator
@@ -1272,24 +1273,10 @@ async def test_a_ledger_version_is_required(
 # Agent labels — the document is French, and so must every role name in it
 # --------------------------------------------------------------------------------------
 
-# The routing vocabulary a corpus release declares in its `chunk.schema.json`, plus
-# `nutrition`. Written out here because nothing in this repository owns it yet: the release
-# schema is authored by the corpus build, and until `rcpia.corpus` exists there is no Python
-# constant to import. When it does, this tuple should be replaced by that import — which is
-# the point of writing it as a tuple rather than asserting label-by-label.
-CORPUS_AGENT_ROLES = (
-    "urology_oncology",
-    "medical_oncology",
-    "radiation_oncology",
-    "radiology",
-    "pathology",
-    "genetics_molecular",
-    "renal_safety",
-    "nuclear_medicine",
-    "geriatric_frailty",
-    "palliative_supportive",
-    "nutrition",
-)
+# The routing vocabulary, imported rather than restated. It lived here as a literal tuple for
+# exactly as long as nothing owned it; `rcpia.corpus.vocabulary` now does, so a role added there
+# is checked here without anyone remembering to update two places.
+CORPUS_AGENT_ROLES = tuple(sorted(AGENT_ROLES))
 
 
 def test_every_role_the_corpus_can_route_to_has_a_french_label() -> None:
