@@ -824,3 +824,88 @@ def test_two_numbers_under_one_scalar_label_are_not_silently_reduced_to_one() ->
 
     assert facts["creatinine"] == "24.75 173.3"
     assert facts["egfr"] == "28.2"
+
+
+# --------------------------------------------------------------------------------------
+# The RCP header and the stage, added after checking the architecture against the schema
+# --------------------------------------------------------------------------------------
+
+
+def test_where_the_disease_progressed_is_read_as_its_own_fact() -> None:
+    """`Phase actuelle` says *that* the disease progressed; this says *where*. Locale,
+    régionale and à distance are three different clinical questions, and until this field
+    existed the phase alone could not tell them apart.
+
+    The label is in the real dossiers — most of the fifteen carry it, usually as `RAS`.
+    """
+    candidates = {c.key: c.value for c in extract_from_text(
+        "**Phase actuelle** : Progression\n"
+        "**Si progression ou rechute** : Régionale\n"
+    )}
+
+    assert candidates["disease_phase"] == "Progression"
+    assert candidates["progression_site"] == "Régionale"
+
+
+def test_ras_under_progression_means_the_disease_has_not_progressed() -> None:
+    """Here `RAS` is a finding, not a gap: the clinician looked and there is no progression.
+    Most of the fifteen dossiers answer this way."""
+    candidates = extract_from_text("Si progression ou rechute : RAS")
+
+    assert [(c.key, c.value) for c in candidates] == [("progression_site", "RAS")]
+
+
+def test_the_clinical_stage_is_read_separately_from_the_pathological_one() -> None:
+    """A dossier can carry both, and they must not overwrite one another: the nomograms take
+    the clinical stage because they predict what surgery will find."""
+    candidates = {c.key: c.value for c in extract_from_text(
+        "cTNM : cT2a N0 M0\npTNM : p T3b\n"
+    )}
+
+    assert candidates["ctnm"] == "cT2a N0 M0"
+    assert candidates["ptnm"] == "p T3b"
+
+
+def test_the_rcp_header_fields_are_read() -> None:
+    candidates = {c.key: c.value for c in extract_from_text(
+        "**Date de la RCP** : 12/03/2026\n"
+        "**Motif de la RCP** : Discussion d'une prostatectomie radicale\n"
+    )}
+
+    assert candidates["rcp_date"] == "12/03/2026"
+    assert candidates["rcp_reason"] == "Discussion d'une prostatectomie radicale"
+
+
+@pytest.mark.parametrize("key", ["rcp_date", "rcp_reason", "ctnm", "progression_site"])
+def test_the_new_fields_are_not_required_of_any_cancer_type(key: str) -> None:
+    """No dossier records a meeting date or a motif, and only two of fifteen write a clinical
+    stage — and those write it in prose rather than under a label. Requiring any of them would
+    paint real dossiers red and bury the gaps that matter, which is the failure `fact_schema`
+    exists to avoid."""
+    assert FIELDS_BY_KEY[key].required_for == ()
+
+
+def test_a_stage_inside_the_examination_text_is_not_read_yet() -> None:
+    """**A known gap, pinned so it is not mistaken for absent data.**
+
+    Dossier 7 records `Toucher rectal : induration de la base gauche classé T2b` and dossier 3
+    records `Toucher rectal : T2a apex droit`. The stage is in the dossier; the label reader
+    walks past it, because it sits mid-sentence rather than after a label.
+
+    So `ctnm` reads empty for an extraction reason, not because the clinical stage was never
+    written down — and every nomogram refuses naming a fact the dossier already holds. When
+    span extraction lands, this test should fail and be replaced by one asserting the value.
+
+    **A constraint for whoever writes that extraction**, recorded here rather than as a test,
+    because a test for it would pass today for the wrong reason: five of the seven dossiers
+    with a rectal-examination line describe the finding and stop — "prostate ferme de 40g,
+    base de vessie peu mobilisable des deux cotés". Those must not be staged. Turning a
+    description into a cT is the judgment the examining urologist made and did not write down,
+    and inferring it would manufacture a nomogram input out of a physical finding.
+    """
+    candidates = {
+        c.key: c.value
+        for c in extract_from_text("Toucher rectal : induration de la base gauche classé T2b.")
+    }
+
+    assert "ctnm" not in candidates

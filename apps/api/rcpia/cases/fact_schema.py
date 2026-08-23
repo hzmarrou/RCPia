@@ -80,7 +80,14 @@ FIELDS: tuple[FactField, ...] = (
     # non-binary patients. Absent stays absent.
     FactField("sex", ("sexe",), FactCategory.identity),
     FactField("age", ("age", "âge"), FactCategory.identity, unit="ans", required_for=BOTH),
+    # The architecture calls this "Intitulé de la RCP", and in every real dossier it is
+    # written as `RCP Urologie : Prostate` — the organ *is* the title. Kept under one key
+    # rather than adding a second that would always duplicate it.
     FactField("rcp_organ", ("rcp urologie", "organe"), FactCategory.identity),
+    # The date of the meeting, which no dossier records: the forms are prepared before the
+    # RCP sits, so the date is known to the session rather than to the document. Not
+    # required — it will arrive from the application, not from extraction.
+    FactField("rcp_date", ("date de la rcp",), FactCategory.identity),
     # ---------------------------------------------------------------- social
     FactField("occupation", ("profession",), FactCategory.social),
     FactField("marital_status", ("statut marital",), FactCategory.social),
@@ -102,6 +109,17 @@ FIELDS: tuple[FactField, ...] = (
     FactField("toxic_habits", ("habitudes toxiques",), FactCategory.history),
     FactField("allergies", ("allergies",), FactCategory.history),
     # ---------------------------------------------------------------- presentation
+    # Why this patient is being brought to the meeting — "discussion d'une prostatectomie",
+    # "réévaluation après chimiothérapie". Distinct from `discovery`, which is how the
+    # cancer was found, and from `illness_history`, which is what has happened since.
+    #
+    # No dossier records it: the fifteen open straight at the identity block. It is in the
+    # architecture, so the field exists, but requiring it would paint every real dossier
+    # red for something the form has never asked.
+    # Only the full label. A bare `Motif` alias would also be a *terminator*: `LABEL_INDEX`
+    # decides where an imaging report ends, so a one-word alias could cut a radiology report
+    # at its own "Motif de l'examen" line. No dossier writes a bare `Motif` anyway.
+    FactField("rcp_reason", ("motif de la rcp",), FactCategory.presentation),
     FactField(
         "discovery", ("circonstances de découverte", "circonstances de decouverte"),
         FactCategory.presentation,
@@ -114,6 +132,18 @@ FIELDS: tuple[FactField, ...] = (
         FactCategory.decision,
     ),
     FactField("disease_phase", ("phase actuelle",), FactCategory.presentation),
+    # Where the disease came back, asked only when `disease_phase` is a progression or a
+    # relapse: locale, régionale, or à distance. Three different clinical questions, and
+    # without this field the phase alone cannot tell them apart.
+    #
+    # Real dossiers do carry the label — `Si progression ou rechute : RAS` appears in most
+    # of the fifteen, and dossier 4 records `Phase actuelle : Progression`. So `RAS` here
+    # is the clinician saying the disease has not progressed, not a field left blank.
+    FactField(
+        "progression_site",
+        ("si progression ou rechute", "progression ou rechute"),
+        FactCategory.presentation,
+    ),
     FactField("diagnosis_date", ("date de diagnostic",), FactCategory.presentation),
     # ---------------------------------------------------------------- performance
     FactField(
@@ -238,6 +268,38 @@ FIELDS: tuple[FactField, ...] = (
     # are characterised by Gleason, ISUP, PSA and PIRADS, and requiring a pTNM manufactured
     # a missing field on every one of them.
     FactField("ptnm", ("ptnm",), FactCategory.pathology, required_for=(BLADDER,)),
+    # **Clinical staging, and not the same fact as `ptnm`.** The `c` is *clinique*: staged
+    # before surgery from the digital rectal examination, the imaging and the biopsy. The
+    # `p` is *pathologique*: staged after surgery from the specimen.
+    #
+    # Every Briganti version and the MSKCC pre-prostatectomy nomograms take the clinical
+    # stage, because they predict what surgery will find. Feeding them `ptnm` would be
+    # circular — using the answer as an input — which is why they must not share a key.
+    #
+    # **No dossier records it under a label — but some record it in prose.** The stage is
+    # written where a urologist writes it, in the rectal-examination line:
+    #
+    #     dossier 7   Toucher rectal : induration de la base gauche classé T2b.
+    #     dossier 3   Toucher rectal : T2a apex droit
+    #
+    # Two of the seven dossiers carrying a `Toucher rectal` line state a stage. The other
+    # five describe the finding and stop — "prostate ferme de 40g, base de vessie peu
+    # mobilisable des deux cotés". **Those must not be staged by us.** Turning a description
+    # into a cT is the clinical judgment the examining urologist made and did not record;
+    # inferring it would manufacture an input for a nomogram out of a physical finding.
+    #
+    # So this field reads empty today for an extraction reason, not because the data is
+    # absent — the label reader walks past a stage that sits mid-sentence. Filling it needs
+    # span extraction from the examination text, which is the same instrument the mpMRI
+    # measurements need. Until that exists every nomogram refuses, naming `ctnm`, and the
+    # refusal points at a fact the dossier already holds.
+    #
+    # Not required: two dossiers in fifteen would leave the rest red for a field their form
+    # never asked for.
+    FactField(
+        "ctnm", ("ctnm", "stade clinique"),
+        FactCategory.pathology,
+    ),
     # Likewise `Grade`: prostate grades with Gleason and ISUP below, and 8/8 real prostate
     # dossiers reported their grade missing while the value sat in the text.
     FactField("grade", ("grade",), FactCategory.pathology, required_for=(BLADDER,)),

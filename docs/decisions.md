@@ -113,6 +113,41 @@ Wiki Thinking gives us a real traversal use case.
 
 The brief was not amended; this record is the authority.
 
+## 2026-08-22 — the clinical stage is a field, and four gaps against the architecture
+
+Checked `fact_schema` field by field against sections A–L of the architecture in
+`RCPia-FMPM.md`. The catalogue covers it almost completely — C through G, I through L are
+whole, and J and K carry more than the architecture asks. Four things were missing.
+
+Three are cosmetic and now exist: `rcp_date`, `rcp_reason`, and `progression_site`. Only
+the last is extractable today — `Si progression ou rechute` is a real label in most of the
+fifteen dossiers, usually answered `RAS`, and without it `disease_phase` could say the
+disease progressed but not whether locally, regionally, or at distance. No dossier records
+a meeting date or a motif; those fields will be filled by the application, not by
+extraction, and are therefore not required.
+
+The fourth was not cosmetic. **Every Briganti version and the MSKCC pre-prostatectomy
+nomogram require `ctnm`, and no such field existed.** The catalogue had `ptnm` — the
+*pathological* stage, read from the specimen after surgery. These models predict what
+surgery will find, so feeding them `ptnm` would use the answer as an input. The nomograms
+were therefore refusing on every dossier, naming a key the ledger could never hold, and
+`test_tools.py` did not notice because it supplies `ctnm` by hand.
+
+`test_every_required_fact_is_either_a_ledger_field_or_a_known_gap` now checks the
+calculators' required facts against `FIELDS_BY_KEY`, with the two genuine gaps —
+`mri_index_lesion_mm` and `targeted_cores_positive` — listed explicitly rather than allowed
+through a wildcard. Adding a field for either should fail that test and be removed from the
+list.
+
+`ctnm` is not required of any cancer type, and will read empty for now: searching the
+fifteen dossiers finds a clinical stage (`cT4a N1 M1a`) only inside PPS *outputs*. The
+stage is synthesised at the meeting from the imaging and the examination, not transcribed
+from the form. So the nomograms still refuse — but the refusal now names a field that can
+be filled, which is the difference between a gap and a dead end.
+
+One smaller thing this surfaced: a label in `LABEL_INDEX` also *terminates* an imaging
+report, so a broad alias is not free. A bare `Motif` alias was dropped for that reason.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated

@@ -9,13 +9,16 @@ that quietly falls back to a coarser version is doing the same thing one level d
 
 import pytest
 
+from rcpia.cases.fact_schema import FIELDS_BY_KEY
 from rcpia.tools.base import Refusal, refuse, select_version
 from rcpia.tools.briganti import (
     BRIGANTI,
+    PSMA_NEGATIVE,
     VERSIONS,
     index_lesion_diameter,
     selected_version,
 )
+from rcpia.tools.mskcc import VERSIONS as MSKCC_VERSIONS
 
 # A dossier carrying systematic-biopsy data only — no mpMRI measurements.
 SYSTEMATIC = {
@@ -236,3 +239,57 @@ def test_ties_on_pi_rads_are_broken_by_size() -> None:
 def test_no_reported_lesion_yields_nothing_rather_than_zero() -> None:
     """Zero millimetres is a measurement. No lesion reported is not."""
     assert index_lesion_diameter([]) is None
+
+
+# --------------------------------------------------------------------------------------
+# The calculators against the ledger they read from
+# --------------------------------------------------------------------------------------
+
+
+def test_every_required_fact_is_either_a_ledger_field_or_a_known_gap() -> None:
+    """**The bug this exists to catch.** Every version above names the facts it needs, and
+    the tests supply them by hand — so a version could require a key the ledger has no field
+    for and every test would still pass, while the nomogram refused on every real dossier for
+    a reason nobody could see.
+
+    `ctnm` was exactly that. `fact_schema` carried `ptnm` — the post-operative stage — and
+    nothing clinical. Feeding a nomogram `ptnm` would have been circular anyway, since these
+    models predict what surgery finds.
+
+    The three below are real gaps, deliberately listed rather than allowed through a wildcard:
+    they are mpMRI and PET measurements that live in free-text reports and need span
+    extraction, not a label match. Adding a field for one of them should fail this test and be
+    removed from the list, which is the point.
+    """
+    required = {
+        fact
+        for versions in (VERSIONS, MSKCC_VERSIONS)
+        for version in versions
+        for fact in version.required
+    }
+    not_yet_extractable = {
+        "mri_index_lesion_mm",
+        "targeted_cores_positive",
+    }
+
+    assert required - set(FIELDS_BY_KEY) == not_yet_extractable
+
+
+def test_a_precondition_reads_a_fact_the_ledger_can_hold() -> None:
+    """Preconditions are checked apart from inputs, so the test above does not cover them —
+    and a precondition naming a key no field can hold would fail silently and for ever, which
+    is the safe direction only by accident."""
+    assert PSMA_NEGATIVE.fact == "psma_pet_result"
+    assert PSMA_NEGATIVE.fact not in FIELDS_BY_KEY, (
+        "a field now exists for the PSMA result — drop this assertion and let the "
+        "precondition read it"
+    )
+
+
+def test_clinical_and_pathological_staging_are_separate_facts() -> None:
+    """The `c` is *clinique*, staged before surgery; the `p` is *pathologique*, staged from
+    the specimen after it. A nomogram predicting what surgery will find must not be handed the
+    surgical result, so the two must never collapse to one key."""
+    assert FIELDS_BY_KEY["ctnm"].key != FIELDS_BY_KEY["ptnm"].key
+    for version in (*VERSIONS, *MSKCC_VERSIONS):
+        assert "ptnm" not in version.required
