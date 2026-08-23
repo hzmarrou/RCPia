@@ -1,0 +1,525 @@
+# Phase 6 corpus build — architecture and plan
+
+Written 23 August 2026, after an audit of what Phase 6 actually contains.
+
+This document settles three things that had no settled answer: **what "finish Phase 6" means**,
+**why the corpus stalled at ten documents for five releases**, and **where corpus building
+lives from now on**.
+
+---
+
+## 1. Phase 6, as the plan defines it, is finished
+
+`RCPia-v1-implementation-plan.md` line 444 gives Phase 6 two tasks and two acceptance criteria.
+Both are met, and the second was verified live rather than from tests.
+
+| criterion | evidence |
+|---|---|
+| 6.1 — "Admin can ingest a guideline document with metadata" | 10 documents, 1,513 chunks, every one embedded |
+| 6.2 — "prostate-only for prostate tasks, bladder-only for bladder" | three live probes below |
+
+Three real clinical questions, against the corpus in PostgreSQL, with the Cohere reranker:
+
+| question | keyword / dense | widened | top relevance |
+|---|---|---|---|
+| Place du curage ganglionnaire étendu lors d'une PR | 50 / 50 | 0 | **0.954** — AFU, then EAU |
+| Indication de la BCG-thérapie dans une TVNIM à haut risque | 50 / 50 | 0 | **0.966** — AFU TVNIM |
+| Surveillance active pour un ISUP 1 | 50 / 50 | 0 | **0.962** — AFU, then EAU |
+
+Cross-language retrieval works: a French question reaches an English EAU passage through the
+neutral vocabulary in the keyword leg. No attempt needed widening. The relevance floor rejected
+four candidates on the first question and none on the others.
+
+**So the sense of being stuck is real but misplaced.** What stalled is not Phase 6. It is the
+corpus, and the corpus was never in Phase 6's acceptance criteria at all.
+
+### 1.1 What got built beyond the plan
+
+```
+ingestion 909 · retrieval 890 · manifest 885 · models 269 · audit 264 · rerank 253
+embedding 240 · local_blocks 128 · load 120 · domain_approvals 62 · release_files 12
+                                                          ≈ 4,000 lines
+tests: retrieval 1,461 · ingestion 1,375 · manifest 975 · audit 119   ≈ 3,900 lines
+```
+
+Plus a 675-line retrieval-evaluation design whose steps 1–8 are unbuilt, and a corpus v5
+contract spread across three review documents.
+
+Every piece of that is defensible. None of it is in the plan. That is the whole reason
+"finish Phase 6" has felt unbounded: **there has been no agreed definition of done since the
+plan's own definition was met.**
+
+This document supplies one. Phase 6 closes when a corpus release built by the pipeline below
+loads clean and passes its routing probes.
+
+---
+
+## 2. Why the corpus stalled — the actual diagnosis
+
+Not neglect, and not the corpus agent's competence. A structural fact nobody had written down.
+
+**The good routing is hand-written, per document, from that document's own table of contents.**
+
+```python
+# build_corpus_v2_slice.py — the routing that produced today's corpus
+if document_id == "afu.bladder-tvnim.2024-2026":
+    if "tres haut risque" in path:  return "bladder_nmibc_very_high_risk"
+    if "haut risque" in path:       return "bladder_nmibc_high_risk"
+    if "risque intermediaire" in path: return "bladder_nmibc_intermediate_risk"
+    ...
+```
+
+It matches the **section path** — the document's heading hierarchy — with a bespoke rule block
+written by someone who read that guideline's structure.
+
+Compare the automated path, in `build_unified_corpus_v1.py`, which produced a 38-document
+corpus that was never loaded:
+
+```python
+if any(term in joined for term in ("métast", "metast", "m1")):
+    settings.add("metastatic")
+else:
+    settings.add("localized")
+```
+
+That matches the **chunk body**. A passage reading *"there is no evidence of metastatic
+disease"* is tagged `metastatic`. A passage explaining when *not* to give BCG is tagged
+`bcg_treatment`.
+
+So there were two paths: one that scales and produces garbage, one that works and costs an hour
+per document. Four documents got the second. The slice became the corpus by default, across
+five releases, because **no expectation existed for a missing document to violate** — the
+finding that `manifest.py` now exists to prevent.
+
+### 2.1 What the stall cost, measured
+
+Of 1,513 chunks, **713 (47%) carry `disease_setting = not_specified`**:
+
+| reason | chunks |
+|---|---|
+| `not_determinable` | 394 |
+| `general_principle` | 265 |
+| `spans_settings` | 54 |
+
+`general_principle` and `spans_settings` are honest — the guidance really does span settings.
+`not_determinable` is 26% of the corpus admitting the rules could not place it. That is the
+routing debt in one number, and it is the number to move.
+
+### 2.2 A correction
+
+In the audit that preceded this document I reported that the v4.0 release source was gone and
+the corpus unreproducible. **That was wrong.** `rcpia-corpus-v4.0/` is in OneDrive with its
+build script, QA report and change report. The `%TEMP%` copies I found first were stale
+duplicates. The backup risk I raised does not exist.
+
+One observation from that audit does stand: `AZURE_RERANK_API_KEY` is absent from `.env`, so
+reranking is falling back to the OpenAI key. It works; confirm it is deliberate.
+
+---
+
+## 3. The decision: build here, not remotely
+
+**The failure was the loop, not the builder.**
+
+Five releases were built remotely, sent, and refused. The corpus agent cannot run our loader,
+our database, our retrieval, or our reranker. Every detail of the contract had to travel as
+prose, and five times it arrived wrong — `position_domains` replacing a boolean, the role
+vocabulary changing owner, identity fields becoming required, checksums appearing.
+
+Building in the repository collapses that loop from days to minutes, and buys one thing that
+matters more than speed: **routing can be validated only on this side.** A routing rule is
+correct if and only if a real clinical question reaches the right passage. The corpus agent can
+check that a release validates against a schema. It cannot check that the corpus answers
+anything. That is precisely how bad routing survived five releases.
+
+### 3.1 What is already done and must not be redone
+
+| stage | state |
+|---|---|
+| PDF → markdown | done — 169 files, 18.7 MB, 26 reference folders |
+| **Curation** | **done** — 91 documents assessed, 72 included, 19 excluded with reasons, duplicates resolved, SHA-256 recorded |
+| Chunking pipeline | done — `build_corpus_v2_slice.py`, `build_rcpia_corpus_v3/v4.py` |
+| **Per-document routing rules** | **done for 4 documents. Missing for the rest.** |
+
+`_prepared/poc_document_manifest.json` already carries `include_in_poc`,
+`duplicate_of_document_id`, `exclusion_reason`, `quality_issues`, `preparation_status`,
+`agent_roles`, `cancer_types` and checksums for all 91. It is most of a source manifest
+already. The last row is the entire bottleneck.
+
+---
+
+## 4. Architecture
+
+New package `apps/api/rcpia/corpus/`, inside the repository. Today's fifteen build scripts live
+in OneDrive, copy-pasted forward with no diff history — which is how five releases drifted
+without anyone seeing it. Sources stay in OneDrive, read-only. **Releases become build
+artefacts, not assets.**
+
+```
+OneDrive sources  +  poc_document_manifest.json   (curation — already done)
+   │
+   ▼
+[1] prepare    markdown → chunks: section_path, citation, page spans, hashes
+   │           deterministic. no clinical judgment. fails loudly on unrepaired PDF text.
+   ▼
+[2] route      routing/<document_id>.yaml → disease_setting, therapy_line,
+   │           clinical_purpose, agent_roles, not_specified_reason
+   │           ← the only stage carrying clinical judgment
+   ▼
+[3] emit       documents.jsonl · chunks.jsonl · chunk.schema.json · manifest.json
+   │           self-checked by importing rcpia.evidence.manifest's own validators
+   ▼
+[4] verify     ingest_release(dry_run=True)  +  routing probes
+               ← what could never be run remotely
+```
+
+Stage 3 importing the loader's validators is deliberate: the release then **fails at build time
+instead of load time**. Same authority, ten minutes earlier rather than a round-trip later.
+The builder imports the loader's *validators*, never its writers — conforming to the loader's
+behaviour would defeat the check.
+
+### 4.1 The central decision — routing rules become data
+
+Today routing is a Python function with a branch per document. At fifty documents that is a
+two-thousand-line `if` tree nobody can review.
+
+```yaml
+# corpus/routing/afu.bladder-tvnim.2024-2026.yaml
+document_id: afu.bladder-tvnim.2024-2026
+default:
+  setting: bladder_nmibc_unspecified_risk
+rules:
+  - match_section: "tres haut risque"        # BEFORE "haut risque" — order is correctness
+    setting: bladder_nmibc_very_high_risk
+  - match_section: "haut risque"
+    setting: bladder_nmibc_high_risk
+  - match_section: "cis isole"
+    setting: bladder_nmibc_cis
+```
+
+Three properties code does not give:
+
+- **A clinician can review it.** They cannot review an `if` tree, and routing is a clinical
+  judgment wearing an engineering costume.
+- **Rule order is visible.** `"haut risque"` matches inside `"tres haut risque"`. That is a
+  live bug class; in data it is on the page and can be asserted about.
+- **It diffs per document** when a guideline updates — which they do, annually.
+
+### 4.2 The safety property — no dead rules
+
+This is the guard the last five releases lacked, and it is this project's recurring failure
+applied to the corpus: *do not check that the rule file parses; check that it fires.*
+
+A document has roughly a hundred distinct section paths — measured: **1,031 across the current
+ten documents**, from 32 for SIOG prostate to 377 for EAU prostate. Stage 2 extracts them all
+and asserts:
+
+- **every rule matches at least one real section path.** A rule matching nothing is a heading
+  that was renamed when the guideline was revised, and nobody noticed.
+- **no rule is shadowed by an earlier, broader one.** Reported as an ordering error, with both
+  rules named.
+- **the fraction falling through to `default` is printed.** A high default rate means the rules
+  are not doing work, whatever the file's length suggests.
+
+The same discipline applies to absence: a rule returning `not_specified` must supply a
+`not_specified_reason`, so `not_determinable` becomes a stated choice rather than a shrug. The
+26% figure in §2.1 is the baseline this is measured against.
+
+### 4.3 A section path is not always unique, and not always enough
+
+Found by triaging ref-23, and it constrains the rule format directly.
+
+**Duplicate paths.** `FOCUS` occurs twice in one document with an identical path, and only the
+first occurrence is wanted. `⮱ BENZODIAZEPINES` occurs twice with *different* dosage tables
+beneath it. `Modalités de prescription` occurs twice. A rule matching on path alone silently
+takes both.
+
+§4.2's dead-rule check catches a rule that matches nothing. It does **not** catch a rule that
+matches two places. So a third assertion is required: **a rule whose path occurs more than once
+must name the occurrence, or be refused.** Ambiguity is an error, never a default to "all".
+
+**Boundaries that are not headings.** In one document the wanted labels — "Première
+recommandation" through "Huitième" — are bold paragraphs, not headings. In another the useful
+content cannot be selected by path at all. Several documents have malformed markdown, with H1s
+where H2s belong, so a subtree is not a subtree.
+
+The rule format must therefore be able to say *"this cannot be expressed as a path"* rather
+than forcing an approximation. Those cases get chunk-id ranges, resolved after stage 1 and
+recorded explicitly — visible as exceptions rather than hidden as bad rules.
+
+### 4.4 Numbers are executed, never embedded
+
+**An embedding cannot represent a threshold.** `PSA < 10` and `PSA > 20` are near-identical
+vectors: same words, same domain, opposite meaning. Cosine similarity returns the *nearest*
+passage, and for a numeric boundary nearest is not correct. Reranking does not rescue it — a
+cross-encoder scores relevance, it does not evaluate a condition.
+
+**Measured in the corpus today: 137 of 1,513 chunks are table-heavy**, and `unit_type` has nine
+values, all prose categories. Nothing marks a chunk as a decision table. One example, from AFU
+prostate, is a biopsy decision matrix flattened into pipes and embedded:
+
+```
+| PSAd (ng/mL/mL) | < 0.10 | 0,10–0,15 | 0,15–0,20 | > 0,20 |
+```
+
+Ask it about a patient at 0.18 and the vector cannot separate the bands. Note also the mixed
+decimal separators inside a single row.
+
+The dividing line: **if the answer is a number, a band, a cutoff, or a lookup, it is executed.**
+
+| kind | mechanism | example |
+|---|---|---|
+| computed probability | tool | Briganti, MSKCC |
+| fixed mapping | rules | Gleason↔ISUP, TNM groupings |
+| decision table | rules | D'Amico, PSAd × PI-RADS, NMIBC risk |
+| scoring arithmetic | tool | G8, IPSS, Pallia 10 |
+| what a score implies | corpus | SIOG on a low G8 |
+| indication, judgment | corpus | ePLND in high-risk disease |
+
+Scoring instruments split cleanly: **the score is computed, its meaning is retrieved.**
+
+Two consequences for the build. Stage 2 gains a **chunk-level disposition**: a table chunk gets
+a `unit_type` that identifies it, is excluded from the embedding leg, and is retrieved by
+keyword only — its numbers are exact tokens, which is what full-text search is good at and what
+a vector destroys. And where a table is a genuine algorithm, it is extracted into
+`rcpia/rules/` and executed rather than stored.
+
+Document-level disposition is not sufficient for this. The D'Amico and PSAd tables live inside
+EAU and AFU documents that are otherwise genuinely prose.
+
+**This is not hypothetical.** The earlier RCPia cited ref-04 and ref-05 — the MSKCC and
+Briganti calculator portals — as RAG sources for four of its nine agents. Those folders are
+`disposition: tool` here, and the calculator layer exists so a nomogram figure comes from the
+nomogram or does not appear.
+
+### 4.5 Currency is a build-time check
+
+Guidance that has been superseded looks exactly like guidance that has not.
+
+ref-23's triage found four documents with current successors, and nine carrying advice since
+reversed — haloperidol first-line for delirium, hydroxyzine dosing without the 2015 cardiac
+limits, pre-DSM-5-TR grief criteria, French end-of-life law. None of that is visible in the
+text; it is only visible by asking.
+
+So the manifest carries a **publication or revision date per document**, and the build reports
+anything beyond a threshold rather than refusing it — the decision is clinical. Where a
+document is knowingly superseded and still wanted, it loads with
+`retrieval_exclusion_reason: historical_treatment_guidance_superseded`, which the schema
+already provides and nothing has yet used.
+
+**This check applies to the whole corpus, not to new tranches.** `siog.prostate.2010` has been
+loaded since v3.1 and has never been examined the way ref-23 just was. The follow-up triage
+report is the template for doing so.
+
+### 4.6 Routing probes are not the retrieval evaluation
+
+```yaml
+# corpus/probes.yaml
+- question: "BCG dans une TVNIM à haut risque"
+  filter: {cancer_type: bladder, disease_setting: bladder_nmibc_high_risk}
+  must_reach: [afu.bladder-tvnim.2024-2026]
+  must_not_reach: {disease_setting: [bladder_metastatic]}
+```
+
+A dozen of these. They ask **"did the routing route?"** — a build gate, deterministic, seconds,
+no clinician.
+
+`phase-6-retrieval-evaluation.md` asks **"how good is retrieval?"** — a gold set, recall@k, a
+clinician labelling sessions, held-out splits. Different instrument, different cost.
+
+**The evaluation stays deferred, and building the corpus is the reason.** Its own §6.6 says
+gold labels are invalidated by corpus drift, and §5 says every number is an upper bound until a
+query builder exists — nothing yet builds `Concepts` from a ledger. Measuring now would spend
+weeks scoring a corpus we are about to replace, using hand-written inputs, to produce a number
+we could not act on. It runs after v5 lands, against the corpus we keep.
+
+---
+
+## 5. Integration with what already exists
+
+| existing | how it is used | changes? |
+|---|---|---|
+| `_prepared/poc_document_manifest.json` | input to stage 1 | no |
+| `build_corpus_v2_slice.py` chunking | ported into stage 1 | rewritten in place |
+| `rcpia.evidence.manifest` validators | imported by stage 3 | **no** |
+| `ingest_release(dry_run=True)` | stage 4 | **no** |
+| `rcpia.evidence.load` CLI | still the only path into the database | **no** |
+| retrieval + reranker | stage 4 probes | **no** |
+
+**Nothing in `rcpia/evidence/` changes.** The builder is a new producer for a contract that
+already exists and is already enforced. That is the point of having spent three review rounds
+on the contract: it is now strong enough that a second producer can be written against it
+without touching it.
+
+### 5.1 CI versus local
+
+CI cannot reach OneDrive, so it tests what it can reach:
+
+- the **rule engine** — matching, precedence, defaults, reason-pairing. Pure functions.
+- the **rule files** against a checked-in fixture of section paths per document.
+
+That fixture is why the 1,031 measurement mattered: roughly a hundred paths per document, as
+plain text, is around 400 KB for fifty documents. Small enough to commit. **CI then catches a
+dead rule without the source PDFs**, on every pull request.
+
+The full build runs locally, on demand, with the Azure keys. It is an operator action with a
+person behind it — the same reasoning that made `load` a command rather than an HTTP route.
+
+### 5.2 Artefact layout
+
+```
+apps/api/rcpia/corpus/                 builder                      ← repo
+apps/api/rcpia/corpus/routing/*.yaml   rules, clinician-reviewable  ← repo
+apps/api/rcpia/corpus/sections/*.txt   section-path fixture for CI  ← repo
+apps/api/rcpia/corpus/probes.yaml      routing gate                 ← repo
+data/corpus-releases/<release_id>/     emitted release              ← gitignored
+```
+
+What changes: `rcpia-corpus-v4.0` is in the database because somebody built it by hand. After
+this, `uv run python -m rcpia.corpus.build --release v5.0` reproduces it from the repository
+plus the sources. **The corpus stops being an artefact we receive and becomes one we build.**
+
+---
+
+## 6. Scope of v5
+
+72 of 91 curated documents are marked for inclusion. Four tranches:
+
+| tranche | documents | rationale |
+|---|---|---|
+| **Core urology** — EAU, AUA, AFU, NCCN, ESMO, WHO classification, TNM/AJCC, RECIST | ~32 | what the RCP decides on |
+| **Instruments** — G8, IPSS, IIEF-5, MNA, Katz ADL, Mini-GDS, Pallia 10 | ~11 | `fact_schema` already extracts every one and nothing interprets them |
+| **SIOG** — ref-27 | 4 | already loaded; **absent from the curation manifest** |
+| **Psycho-oncology** — ref-21/22/23 | 18 of 29 | triaged; see §6.2 |
+| **Nutrition** — ASPEN (ref-16), ESPEN (ref-17) | ~4 | see §6.3 |
+
+Roughly **69 documents**, against v4's 10.
+
+### 6.1 SIOG is missing from the curation
+
+`poc_document_manifest.json` covers ref-01 to ref-25. **ref-27 is not in it**, and ref-27 is
+SIOG — four documents that are live in the database today, added later in the v3.1 release.
+
+The coverage proof would therefore pass while silently omitting documents currently in use.
+Same failure shape as the one this whole document exists to fix: something real exists, is not
+declared, and nothing notices. Add ref-27 to the curation before v5 builds.
+
+### 6.2 Psycho-oncology stays in, minus what has been superseded
+
+Triaged in `docs/reviews/ref-23-triage-prompt.md` and its two reports: 5 IN, 15 PARTIAL, 8 OUT,
+about 132 chunks. Excluded material is workforce (clinician burnout, training), service
+organisation (how French hospitals arrange psychological care), and psychometric methodology.
+
+**Dropping the tranche was proposed and rejected.** The argument was that it dates from
+2009–2019 — but `siog.prostate.2010` is already in the corpus and nobody raised currency for
+it. Age is not the discriminator, and deferring the tranche would have repeated exactly the
+"its own release later" move that produced the four-document slice.
+
+What is real is that specific sections give advice since reversed. Those are excluded by
+section path, which the triage supplied:
+
+| document | excluded because |
+|---|---|
+| **Anxiété** — dropped whole | admitted only for hydroxyzine dosing, which predates the 2015 QT restrictions |
+| **Dépression** — dropped whole | admitted only for an antidepressant choice resting on Cipriani 2009, superseded 2018 |
+| Confusion Mentale | keep screening and causes; **exclude the haloperidol-first-line section** — Agar 2017 found antipsychotics worse than placebo on delirium symptoms |
+| Deuil | exclude the pre-DSM-5-TR complicated-grief criteria; keep the referral criteria |
+| Refus de Soins, Souffrance Réfractaire, Transmission, Sédation | keep the ethical core; exclude the French end-of-life legal annexes |
+
+Four documents have current successors that should be fetched rather than the old editions
+ingested: NCCN Distress (V.1.2010 → V.2.2026), Pan-Canadian distress (2009 → v2 2015), CAPO
+survivorship (2011 → 2025), AFSOS orientation (2013 → 2018).
+
+### 6.3 Nutrition — a tranche nobody had counted
+
+The earlier RCPia (`backend/rag/preprocessing/agent.py`) ran **nine specialist agents**,
+including a nutritionist whose evidence base was ref-12, ref-16 and ref-17. On our side there
+was no nutrition agent, no `nutrition` role, and nothing in the corpus — while `fact_schema`
+already extracts `mna`, `albumin` and `protein`.
+
+ref-16 is **ASPEN** and ref-17 is **ESPEN Clinical Nutrition in Cancer** — the two major
+society guidelines.
+
+**ref-16 was mis-curated.** It is marked `portal_or_metadata_only` because its top-level
+markdown is a conference call-for-papers; the actual guidance sits in subfolders
+(`ASPEN_Malnutrition_Intervention_Oncology`, `ASPEN_Oncology_Nutrition_Screening`), about 44 KB
+of converted markdown. Every folder marked `portal_or_metadata_only` needs re-checking for the
+same pattern before v5 builds.
+
+`nutrition` is added to `AGENT_LABELS` in `rcpia/pps/generator.py`. It must also enter the
+release's `agent_roles` enum when the builder owns that vocabulary.
+
+### 6.4 The role vocabulary has two gaps
+
+The earlier implementation's nine agents map onto our ten roles with residue:
+
+- **`safety_reviewer`** is an agent directory and is used by `poc_document_manifest.json`, but
+  is not in the chunk `agent_roles` enum. That agent cannot filter for its own material.
+- **`rcp_synthesis`** is an agent directory and not a role. Probably correct — synthesis reads
+  the other agents' outputs rather than the corpus — but confirm rather than assume.
+- **Psychology** exists only as `palliative_supportive`. The earlier system had a distinct
+  psychologist agent. Whether these are one role or two is a clinician question.
+
+Five roles were also rendering through the English fallback in a French clinical document —
+`geriatric_frailty` printed as "Geriatric frailty". Fixed, and pinned by
+`test_no_label_is_the_english_fallback`.
+
+---
+
+## 7. Order of work
+
+| step | deliverable | blocked on |
+|---|---|---|
+| 1 | `corpus/` package skeleton; rule schema; rule engine + tests | nothing |
+| 2 | Section-path extraction; fixture generator; dead-rule check | 1 |
+| 3 | Port chunking from `build_corpus_v2_slice.py` into stage 1 | nothing |
+| 4 | Re-express the 4 existing documents' rules as YAML; **byte-identical routing to v4.0** | 1, 2 |
+| 5 | Manifest emission, self-checked against `rcpia.evidence.manifest` | 3 |
+| 6 | `probes.yaml` + the stage-4 verifier | 4, 5 |
+| 7 | Rules for the instruments tranche (~11 documents) | 6 |
+| 8 | Rules for core urology (~32 documents) | 6 |
+| 9 | Psycho-oncology (18 documents), per §6.2 | 6 |
+| 10 | Nutrition — ASPEN, ESPEN (~4 documents), per §6.3 | 6 |
+| 11 | Build, load, run probes → **v5.0** | 7, 8, 9, 10 |
+| 12 | CI job for rule-file validation | 2 |
+
+Three corrections to the source inventory must land before step 5, because each is an omission
+the coverage proof would otherwise pass over: **add ref-27 (SIOG) to the curation** (§6.1),
+**re-check every folder marked `portal_or_metadata_only`** for the ref-16 pattern (§6.3), and
+**resolve `safety_reviewer`** in the role vocabulary (§6.4).
+
+**Step 4 is the one that proves the design.** Re-expressing the four hand-tuned documents as
+YAML must reproduce v4.0's routing exactly. If the data format cannot express what the Python
+already does, that is the moment to find out — before fifty documents are written in it, not
+after.
+
+Steps 7 and 8 are the long grind, and they will not finish in one sitting.
+
+---
+
+## 8. What this does not do
+
+- **It does not improve retrieval quality on the ten documents already loaded.** Those are
+  routed well. It makes the other forty routable.
+- **It does not measure retrieval.** Probes are a gate, not a score. See
+  `phase-6-retrieval-evaluation.md`, which runs after this.
+- **It does not settle clinical status.** Every document loads `unreviewed`, and
+  `domain_approvals.APPROVALS` is deliberately empty. Clinician approval is a separate act with
+  a name attached to it, and no corpus build may forge one.
+- **It does not build the query builder.** Nothing constructs `Concepts` from a case ledger,
+  and until it does, every end-to-end number is an upper bound.
+
+## 9. Open questions
+
+- **Psycho-oncology scope** — pending the ref-23 triage.
+- **`ctnm` is an extraction problem, not a corpus one.** Corrected after this document was
+  first written: the clinical stage *is* in the dossiers, in the rectal-examination line —
+  `Toucher rectal : induration de la base gauche classé T2b` (dossier 7),
+  `Toucher rectal : T2a apex droit` (dossier 3). Two of the seven dossiers with such a line
+  state a stage; the other five describe the finding without staging it, and we must not stage
+  it for them. So the field reads empty because the label reader walks past prose, not because
+  the data is absent. It needs span extraction, not a corpus document and not a form change.
+  See `fact_schema.py`.
+- **Guideline disagreement.** When AFU, EAU and NCCN differ, the corpus retrieves all three.
+  What a provisional document should then say is a clinician question that predates this work
+  and is still open.
