@@ -50,12 +50,28 @@ NOT_RECORDED = "Non renseigné dans le dossier"
 # downloaded copy and a fresh render of the same runs cannot be told apart.
 GENERATOR_VERSION = "1.0"
 
+# Every role the corpus can route to, in the language the document is written in.
+#
+# **All of them, not the ones we happen to run today.** `agent_label` falls back to
+# `role.replace("_", " ").capitalize()`, so a role missing here renders as "Geriatric
+# frailty" inside a French clinical document — which is what five of these did until the
+# corpus vocabulary was checked against this map.
+#
+# `nutrition` is new: the reference collection carries ASPEN (ref-16) and ESPEN (ref-17),
+# the ledger already extracts MNA, albumin and protein, and the earlier RCPia had a
+# dedicated nutritionist agent. It had no role here and nothing in the corpus.
 AGENT_LABELS = {
     "urology_oncology": "Oncologie urologique",
     "medical_oncology": "Oncologie médicale",
     "radiation_oncology": "Radiothérapie",
     "pathology": "Anatomopathologie",
     "radiology": "Radiologie",
+    "genetics_molecular": "Oncogénétique et biologie moléculaire",
+    "renal_safety": "Sécurité rénale",
+    "nuclear_medicine": "Médecine nucléaire",
+    "geriatric_frailty": "Oncogériatrie",
+    "palliative_supportive": "Soins de support et palliatifs",
+    "nutrition": "Nutrition clinique",
 }
 
 

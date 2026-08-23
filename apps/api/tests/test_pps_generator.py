@@ -48,6 +48,7 @@ from rcpia.core.models import (
 from rcpia.jobs.models import JobType
 from rcpia.main import app
 from rcpia.pps import generator
+from rcpia.pps.generator import AGENT_LABELS, agent_label
 from rcpia.pps.render import render_markdown
 from rcpia.pps.schemas import (
     FORBIDDEN_IN_GENERATED_OUTPUT,
@@ -1265,3 +1266,49 @@ async def test_a_ledger_version_is_required(
             sa.select(CaseLedgerVersion).where(CaseLedgerVersion.case_id == case.id)
         )
         assert versions.scalars().first() is not None, "extraction wrote one"
+
+
+# --------------------------------------------------------------------------------------
+# Agent labels — the document is French, and so must every role name in it
+# --------------------------------------------------------------------------------------
+
+# The routing vocabulary a corpus release declares in its `chunk.schema.json`, plus
+# `nutrition`. Written out here because nothing in this repository owns it yet: the release
+# schema is authored by the corpus build, and until `rcpia.corpus` exists there is no Python
+# constant to import. When it does, this tuple should be replaced by that import — which is
+# the point of writing it as a tuple rather than asserting label-by-label.
+CORPUS_AGENT_ROLES = (
+    "urology_oncology",
+    "medical_oncology",
+    "radiation_oncology",
+    "radiology",
+    "pathology",
+    "genetics_molecular",
+    "renal_safety",
+    "nuclear_medicine",
+    "geriatric_frailty",
+    "palliative_supportive",
+    "nutrition",
+)
+
+
+def test_every_role_the_corpus_can_route_to_has_a_french_label() -> None:
+    """**A missing label does not fail — it prints English.**
+
+    `agent_label` falls back to `role.replace("_", " ").capitalize()`, so a role absent from
+    `AGENT_LABELS` renders as "Geriatric frailty" or "Palliative supportive" inside a French
+    clinical document handed to a clinician. Five of the ten roles did exactly that until the
+    map was checked against the corpus vocabulary, and nothing anywhere failed.
+    """
+    missing = [role for role in CORPUS_AGENT_ROLES if role not in AGENT_LABELS]
+
+    assert missing == [], f"roles rendering in English: {missing}"
+
+
+def test_no_label_is_the_english_fallback() -> None:
+    """The fallback is legible, which is why its output survives review. Catching it needs a
+    test that compares against the fallback rather than merely checking a key exists."""
+    for role in CORPUS_AGENT_ROLES:
+        assert agent_label(role) != role.replace("_", " ").capitalize(), (
+            f"{role} is rendering through the English fallback"
+        )
