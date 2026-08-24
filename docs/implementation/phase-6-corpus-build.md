@@ -611,11 +611,29 @@ as an oversight — and so the question is not reopened in six months.
 | 5 | ~~Manifest emission, self-checked against `rcpia.evidence.manifest`~~ — **done 24 August** | 3 |
 | 6 | ~~`probes.json` + the stage-4 verifier~~ — **done 24 August**: 12 probes, green against v4.0 | 4, 5 |
 | 7 | ~~Rules for the instruments tranche (~11 documents)~~ — **done 24 August**: one document routed, eight removed, per §6.6 | 6 |
-| 8 | Rules for core urology (~32 documents) | 6 |
-| ~~9~~ | ~~Psycho-oncology (18 documents)~~ — **dropped from v5**, per §6.2 | — |
+| 8 | ~~Rules for core urology (~32 documents)~~ — **done 24 August**: AUA 6 of 16, ESMO 4, NCCN 2, classification 4; the rest excluded with a stated reason each | 6 |
+| ~~9~~ | ~~Psycho-oncology (**29** documents, not 18)~~ — **dropped from v5**, per §6.2; deferred in the curation 24 August so the count is provable | — |
 | 10 | Nutrition — ASPEN, ESPEN, ESMO cachexia (6 documents), per §6.3 | 6 |
 | 10b | **SIOG (5 documents), per §6.5** — added 24 August; this tranche had no step | 6 |
 | 10c | **French geriatric urology — AFU 2019 (3 chapters)** — **acquired 24 August**; needs conversion, a licence attestation and rules | 6 |
+**Before step 11, the curation was made to say what is true.** Two decisions had been taken and
+never recorded, and both would have reached the build as silence rather than as an error. The
+psycho-oncology tranche was excluded by the clinician on 24 August, but its 29 records still
+claimed `include_in_poc: true` with no rule file behind them — a build reading that field would
+have included 29 unrouted documents, which reads exactly like success. And eight documents
+loaded in corpus v4.0 carried auto-generated ids (`ref-01.ref.01.eau.2026.prostate.cancer`)
+while their rule files used the clean id (`eau.prostate.2026`), so every coverage count that
+joined on `document_id` was wrong.
+
+Both fixed, and the result is the number step 11 needs to be able to prove:
+
+| | |
+|---|---|
+| included in v5 | **37** |
+| rule files | **37** |
+| included but unrouted | **0** |
+| rule files with no curation record | **0** |
+
 | 11 | Build, load, run probes → **v5.0** | 7, 8, 10, 10b; 10c if acquired in time |
 | 12 | CI job for rule-file validation | 2 |
 | 13 | ~~Stage 0: PDF conversion as a pipeline step~~ — **done 24 August**: `rcpia.corpus.convert`, reusing the dossier LlamaParse client; verifies its own output against stage 1 and caches on the source digest | 3 |

@@ -545,6 +545,36 @@ two would file every nmCRPC recommendation under metastatic disease, and both va
 so the audit would pass and the baseline would simply record the wrong answer. The rule file
 says this in its own note.
 
+## 2026-08-24 — The curation is made to say what was already decided
+
+Two decisions had been taken and never written into the data, and both would have reached the
+v5 build as silence rather than as an error.
+
+**Psycho-oncology was excluded by the clinician, and the records did not know.** 29 of them —
+one GGPO, one background, 27 SFFPO — still carried `include_in_poc: true` with no rule file
+behind them. Step 11 builds from that field. It would have pulled in 29 unrouted documents and
+produced a release that loaded, validated and answered nothing about them, which is the exact
+failure shape this project keeps designing against.
+
+They are deferred rather than discarded, which is what the clinician asked for: the documents
+stay curated, converted and checksummed, and `preparation_status` stays `ready_for_chunking`
+because that is true of them. What changed is the scope of the release, not their readiness.
+
+The plan said 18 documents. The curation holds 29. The plan was stale, and now says so.
+
+**Eight documents carried two identities.** Everything loaded in corpus v4.0 has an
+auto-generated id that repeats its ref folder — `ref-01.ref.01.eau.2026.prostate.cancer` —
+while its rule file uses `eau.prostate.2026`. Any count joining the two sides on `document_id`
+reported them as unrouted. That is what made an earlier count say 64 unrouted when the number
+was 56, and it would have made the release manifest's coverage claim wrong in the same way.
+
+Renamed by source file rather than by the id being replaced, because the filename is
+unambiguous and the id is the thing in question.
+
+**The result is a one-to-one correspondence, which is what makes coverage provable:** 37
+documents included, 37 rule files, no included document unrouted, no rule file without a
+curation record. Step 11 can now assert that rather than hope it.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated
