@@ -524,6 +524,21 @@ Settled 24 August by a literature search; report at
 | Loh 2024, ESMO/SIOG, *ESMO Open* 9(8):103657 | **added** as a joint working-group position paper, **not** as a new edition of 2014/2015 |
 | AFU 2019, *Onco-urologie du patient âgé* — 3 chapters | **in scope, not held** |
 
+**This tranche had no step in the order of work**, found on 24 August while asking what happens
+to the two documents just added. Steps 7, 8 and 10 cover the instruments, core urology and
+nutrition; SIOG appeared in §6 as a tranche and nowhere in §7 — while four SIOG documents sit in
+the database today. The same shape as ref-27 missing from the curation: something real exists, is
+not declared, and nothing notices. It is now step 10b.
+
+**Being loaded already is not protection.** The SIOG documents in the corpus were routed by the
+body-matching method this rebuild replaces, so a rebuild loses their routing unless rules are
+written — exactly the EAU situation, and easy to miss because these documents already work today.
+
+Sizing, from how they are routed now: the two geriatric-assessment papers are **114 of 114 and 81
+of 81 passages `general_principle`**, because assessment methodology genuinely applies at every
+stage. Those need a default and almost no rules, and the 2024 ESMO/SIOG paper is the same kind of
+document. `siog.bladder.2020` carries real settings and needs real rules; so will Boyle 2019.
+
 Three things this constrains in the builder:
 
 - **`publisher` must be the publisher, not the society.** All four held SIOG documents record
@@ -557,8 +572,10 @@ two facts explain the identical 12,578-byte error pages in `ref-27/_invalid_down
 | 7 | Rules for the instruments tranche (~11 documents) | 6 |
 | 8 | Rules for core urology (~32 documents) | 6 |
 | ~~9~~ | ~~Psycho-oncology (18 documents)~~ — **dropped from v5**, per §6.2 | — |
-| 10 | Nutrition — ASPEN, ESPEN (~4 documents), per §6.3 | 6 |
-| 11 | Build, load, run probes → **v5.0** | 7, 8, 10 |
+| 10 | Nutrition — ASPEN, ESPEN, ESMO cachexia (6 documents), per §6.3 | 6 |
+| 10b | **SIOG (5 documents), per §6.5** — added 24 August; this tranche had no step | 6 |
+| 10c | **French geriatric urology — AFU 2019 (3 chapters)** — added 24 August, same omission | 6, **and acquiring it** |
+| 11 | Build, load, run probes → **v5.0** | 7, 8, 10, 10b; 10c if acquired in time |
 | 12 | CI job for rule-file validation | 2 |
 
 ~~Three corrections to the source inventory must land before step 5~~ — **all three done,
@@ -578,6 +595,8 @@ after. It did find two such things, and one document that was never hand-tuned a
 §7.1.
 
 Steps 7 and 8 are the long grind, and they will not finish in one sitting.
+
+**The step numbers are not renumbered when one is added or dropped.** They are referenced from commit messages, from `decisions.md` and from §7.1, and a number that means one thing in the plan and another in the history is worse than an untidy sequence. Hence `10b`, and hence `9` staying struck through rather than being reused.
 
 ---
 
