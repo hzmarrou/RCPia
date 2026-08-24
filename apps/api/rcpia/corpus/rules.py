@@ -60,7 +60,7 @@ _RULE_FIELDS = frozenset(
     {
         "match_section", "setting", "reason", "therapy_line",
         "purposes", "roles", "occurrence", "note",
-        "exclude", "exclusion_reason", "every_occurrence",
+        "exclude", "exclusion_reason", "every_occurrence", "match_leaf",
     }
 )
 _FILE_FIELDS = frozenset({"document_id", "default", "rules", "note"})
@@ -117,6 +117,18 @@ class Rule:
     # them is a bibliography. Declared rather than inferred, so "I mean all of these" cannot be
     # confused with "I did not notice there were several".
     every_occurrence: bool = False
+    # Match the last element of the path rather than anywhere in it.
+    #
+    # **The case that forced it nearly cost 159 passages.** NCCN prostate puts its whole
+    # discussion under a root called `Table of Contents` -- 234 passages of `Doublet Therapies
+    # for mCSPC`, `Abiraterone Acetate in mCRPC`, `NCCN Risk Groups`. A rule excluding that
+    # heading claimed every one of them, because a rule matches anywhere in the path. Nothing
+    # caught it: the rules parsed, the audit was clean, and two thirds of the document would
+    # have become unretrievable. It was found by reading the counts.
+    #
+    # So a rule that means the heading itself, and not everything filed beneath it, has to be
+    # able to say so.
+    match_leaf: bool = False
     note: str = ""
 
     @property
@@ -124,6 +136,8 @@ class Rule:
         return normalise(self.match_section)
 
     def matches(self, flat_path: str) -> bool:
+        if self.match_leaf:
+            return self.needle in flat_path.rsplit(PATH_SEPARATOR, 1)[-1]
         return self.needle in flat_path
 
 
@@ -272,6 +286,10 @@ def _parse_rule(record: Any, *, where: str, require_match: bool) -> Rule:
             "false about it."
         )
 
+    match_leaf = document.get("match_leaf", False)
+    if not isinstance(match_leaf, bool):
+        raise RuleError(f"{where} has match_leaf {match_leaf!r}; it must be true or false")
+
     every_occurrence = document.get("every_occurrence", False)
     if not isinstance(every_occurrence, bool):
         raise RuleError(
@@ -301,6 +319,7 @@ def _parse_rule(record: Any, *, where: str, require_match: bool) -> Rule:
         ),
         occurrence=occurrence,
         every_occurrence=every_occurrence,
+        match_leaf=match_leaf,
         exclude=exclude,
         exclusion_reason=exclusion_reason,
         note=document.get("note") or "",

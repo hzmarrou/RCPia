@@ -706,3 +706,56 @@ def test_a_rule_cannot_mean_one_occurrence_and_all_of_them() -> None:
                 ],
             }
         )
+
+
+def test_a_rule_can_match_a_heading_as_the_leaf_of_a_path() -> None:
+    # NCCN files its whole discussion under a root called `Table of Contents`. A rule excluding
+    # that heading the ordinary way claimed all 234 passages beneath it, including `Doublet
+    # Therapies for mCSPC` and `Abiraterone Acetate in mCRPC`. Nothing caught it: the rules
+    # parsed and the audit was clean.
+    rules = parse_rules(
+        {
+            "document_id": "test.doc",
+            "default": {"setting": "not_specified", "reason": "not_determinable"},
+            "rules": [
+                {
+                    "match_section": "Table of Contents",
+                    "setting": "not_specified",
+                    "reason": "not_determinable",
+                    "exclude": True,
+                    "exclusion_reason": "appendix_content",
+                    "match_leaf": True,
+                    "every_occurrence": True,
+                }
+            ],
+        }
+    )
+    rule = rules.rules[0]
+    assert rule.matches(flatten(["Table of Contents"]))
+    # The clinical content filed beneath it survives.
+    assert not rule.matches(flatten(["Table of Contents", "Doublet Therapies for mCSPC"]))
+
+
+def test_without_the_declaration_a_rule_still_claims_the_whole_subtree() -> None:
+    # The default, and the right default: a rule naming a chapter means the chapter.
+    rules = parse_rules(
+        {
+            "document_id": "test.doc",
+            "default": {"setting": "not_specified", "reason": "not_determinable"},
+            "rules": [{"match_section": "6.4 Recurrence", "setting": "prostate_biochemical_recurrence"}],
+        }
+    )
+    assert rules.rules[0].matches(flatten(["6.4 Recurrence", "6.4.1 Imaging"]))
+
+
+def test_match_leaf_must_be_a_boolean() -> None:
+    with pytest.raises(RuleError, match="match_leaf"):
+        parse_rules(
+            {
+                "document_id": "test.doc",
+                "default": {"setting": "not_specified", "reason": "not_determinable"},
+                "rules": [
+                    {"match_section": "x", "setting": "no_known_cancer", "match_leaf": "yes"}
+                ],
+            }
+        )
