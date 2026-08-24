@@ -58,6 +58,33 @@ NOT_SPECIFIED_REASONS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Which cancers this build covers. Not a list of cancers that exist -- a passage tagged with a
+# cancer nothing filters for is unreachable, so adding one is a decision about scope.
+CANCER_TYPES: Final[frozenset[str]] = frozenset({"prostate", "bladder"})
+
+# Guidelines arrive in both, and a French question reaching an English passage through the
+# keyword leg is a property the retrieval depends on. The value selects the text-search
+# configuration, so a third language is a database change as well as a vocabulary one.
+LANGUAGES: Final[frozenset[str]] = frozenset({"en", "fr"})
+
+# Whether a clinician has reviewed the passage. Every passage in every release so far is
+# `poc_unreviewed`; `domain_approvals` is deliberately empty, and no build may forge approval.
+CLINICAL_STATUSES: Final[frozenset[str]] = frozenset({"poc_unreviewed", "poc_reviewed"})
+
+# What kind of thing a passage is. `decision_table` is the one that earns its place: a table of
+# bands and cutoffs is retrieved by keyword, where its numbers are exact tokens, and kept out of
+# the embedding leg, which cannot tell `PSA < 10` from `PSA > 20`.
+UNIT_TYPES: Final[frozenset[str]] = frozenset(
+    {
+        "recommendation",
+        "general_principle",
+        "evidence_summary",
+        "decision_table",
+        "reference_list",
+        "definition",
+    }
+)
+
 THERAPY_LINES: Final[frozenset[str]] = frozenset(
     {
         "not_applicable",
@@ -117,5 +144,3 @@ AGENT_ROLES: Final[frozenset[str]] = frozenset(
         "nutrition",
     }
 )
-
-CANCER_TYPES: Final[frozenset[str]] = frozenset({"prostate", "bladder"})
