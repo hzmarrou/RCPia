@@ -742,7 +742,12 @@ def test_without_the_declaration_a_rule_still_claims_the_whole_subtree() -> None
         {
             "document_id": "test.doc",
             "default": {"setting": "not_specified", "reason": "not_determinable"},
-            "rules": [{"match_section": "6.4 Recurrence", "setting": "prostate_biochemical_recurrence"}],
+            "rules": [
+                {
+                    "match_section": "6.4 Recurrence",
+                    "setting": "prostate_biochemical_recurrence",
+                }
+            ],
         }
     )
     assert rules.rules[0].matches(flatten(["6.4 Recurrence", "6.4.1 Imaging"]))
