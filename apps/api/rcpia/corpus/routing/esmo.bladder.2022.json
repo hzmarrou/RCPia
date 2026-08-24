@@ -1,0 +1,151 @@
+{
+  "document_id": "esmo.bladder.2022",
+  "note": "ESMO Clinical Practice Guideline: bladder cancer, diagnosis, treatment and follow-up. Every rule in this file is leaf-matched, and that is not a stylistic choice. The conversion promoted running text to headings, so the ancestors are false: a bolded caption, `**Management of metastatic disease**`, became the parent of the NMIBC and MIBC treatment sections, and `**UTUC**` became the parent of the whole follow-up chapter. A rule that named an ancestor would claim the wrong passages with complete confidence. The leaf headings, by contrast, are the guideline's own section titles and say exactly what each passage is about.\n\n**The guideline also covers upper-tract urothelial carcinoma, which is not bladder cancer.** `CANCER_TYPES` is prostate and bladder; UTUC has no setting and a UTUC recommendation reaching a bladder question would be wrong in the way that matters. Those leaves are excluded with `out_of_scope_disease` -- the reason added for exactly this shape, when NCCN's bladder guideline turned out to document UTUC, urothelial carcinoma of the prostate and primary carcinoma of the urethra alongside bladder.\n\nNote what leaf matching buys here: the sections *beneath* `**UTUC**` about advanced or metastatic urothelial carcinoma are general to the disease, not upper-tract specific, and they stay in the corpus as metastatic bladder passages. An ancestor rule would have thrown them out with the parent.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "spans_settings",
+    "note": "The guideline runs from non-muscle-invasive disease to metastatic disease, and its front matter -- incidence, diagnosis, pathology, staging -- applies across that range rather than to one point in it."
+  },
+  "rules": [
+    {
+      "match_section": "REFERENCES",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry"
+    },
+    {
+      "match_section": "DISCLOSURE",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "METHODOLOGY",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "ACKNOWLEDGEMENTS",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "FUNDING",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "UTUC",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "out_of_scope_disease",
+      "note": "Claims `**UTUC**` and `**Treatment of UTUC**`. Leaf-matched, so the advanced-disease sections the conversion filed beneath `**UTUC**` are untouched -- they are about urothelial carcinoma generally and belong to metastatic bladder disease."
+    },
+    {
+      "match_section": "Staging of NMIBC",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Treatment of NMIBC",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Treatment after failure of BCG therapy",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "BCG failure is a non-muscle-invasive problem: BCG is the NMIBC treatment whose failure this section addresses."
+    },
+    {
+      "match_section": "Treatment of MIBC",
+      "setting": "bladder_mibc_non_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Neoadjuvant and adjuvant therapy",
+      "setting": "bladder_mibc_non_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Cisplatin-based chemotherapy around radical treatment of MIBC."
+    },
+    {
+      "match_section": "advanced or metastatic UC",
+      "setting": "bladder_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Covers both the fit-for-cisplatin and cisplatin-ineligible sections, and their recommendation blocks, under one substring."
+    },
+    {
+      "match_section": "relapsed advanced/metastatic UC",
+      "setting": "bladder_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "relapsed after first-line immunotherapy",
+      "setting": "bladder_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "immunotherapy-relapsed disease",
+      "setting": "bladder_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Management of metastatic disease",
+      "setting": "bladder_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "The caption the conversion promoted. Its own passages really are about metastatic disease; what it must not do is lend that meaning to the NMIBC and MIBC sections filed beneath it, which leaf matching prevents."
+    },
+    {
+      "match_section": "Advanced/metastatic disease",
+      "setting": "bladder_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "The follow-up section for metastatic disease."
+    },
+    {
+      "match_section": "NMIBC",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "The follow-up section. Stated after the more specific NMIBC rules above so it only reaches leaves they did not claim."
+    },
+    {
+      "match_section": "MIBC",
+      "setting": "bladder_mibc_non_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "The follow-up section, as above."
+    }
+  ]
+}
