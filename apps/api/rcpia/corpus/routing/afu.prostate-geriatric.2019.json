@@ -1,0 +1,75 @@
+{
+  "document_id": "afu.prostate-geriatric.2019",
+  "note": "AFU 2019, geriatric specificities of prostate cancer. **Superseded for treatment decisions by AFU 2024-2026**, which is already in the corpus; what this chapter carries that the newer recommendations do not is the geriatric adaptation -- how age and frailty change the assessment and what each treatment costs an older patient.\n\nThat framing decides the routing. Where the chapter names a disease stage it is routed to it; where it discusses advanced disease across castration states it is left spanning them, because the authoritative statement about which drug for which patient comes from the 2024-2026 recommendations rather than from here.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Geriatric assessment, method and diagnosis in the older man apply across the disease course. This is the same shape the SIOG geriatric papers already carry in the corpus."
+  },
+  "rules": [
+    {
+      "match_section": "ScienceDirect",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "note": "Publisher page furniture picked up by the conversion, not part of the article."
+    },
+    {
+      "match_section": "Références",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Déclaration de liens d'intérêts",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Remerciements",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Formes métastatiques",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "note": "The advanced-disease chapter, and deliberately not routed to one setting. Its subsections cover hormone-sensitive disease, non-metastatic castration-resistant disease and metastatic castration-resistant disease, but the conversion flattened three levels into two: `Enzalutamide` appears three times with an identical path, once under each. Which castration state a drug section belongs to cannot be recovered from the path, and guessing would put a nmCRPC recommendation in front of a metastatic question. `spans_settings` admits the chapter for any advanced-disease question and claims nothing false about which. Claims every subsection of the chapter, declared explicitly.",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Formes localisées",
+      "setting": "prostate_nonmetastatic_unspecified_risk"
+    },
+    {
+      "match_section": "Prostatectomie élargie",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "note": "Curative surgery, so localised disease. The risk group is not narrowed: the chapter discusses what the operation costs an older patient rather than who should have it."
+    },
+    {
+      "match_section": "Radiothérapie externe",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "occurrence": 1,
+      "note": "This heading appears twice -- once as a curative modality for localised disease, once inside the advanced-disease chapter. Pinned to the first, because the second is already claimed by the `Formes métastatiques` rule above and means something different."
+    },
+    {
+      "match_section": "Autres modalités",
+      "setting": "prostate_nonmetastatic_unspecified_risk"
+    },
+    {
+      "match_section": "Traitement > Surveillance",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "note": "Surveillance rather than treatment, offered across low and favourable-intermediate risk without separating them."
+    }
+  ]
+}

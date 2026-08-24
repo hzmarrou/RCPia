@@ -49,6 +49,10 @@ REVIEWED_NOT_REPRODUCED = {
     # there has never been anything to reproduce. Their baselines are the first agreed routing.
     "eau.bladder-nmibc.2026",
     "eau.bladder-mibc.2026",
+    # AFU 2019, obtained on 24 August and in no release before that.
+    "afu.prostate-geriatric.2019",
+    "afu.bladder-geriatric-epidemiology.2019",
+    "afu.bladder-geriatric-management.2019",
 }
 
 # Documents whose rule file is deliberately nothing but a default. Nothing in them is about a

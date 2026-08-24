@@ -1,0 +1,44 @@
+{
+  "document_id": "afu.bladder-geriatric-epidemiology.2019",
+  "note": "AFU 2019, epidemiology, pathology and prognosis of bladder cancer in older patients. Descriptive rather than prescriptive -- it says what is different about the disease in an older patient, not what to do about it. The doing is chapter three, and the current treatment position is AFU 2024-2026.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "How ageing changes the biology, the diagnosis and the outlook. True at any stage, which is what `general_principle` means."
+  },
+  "rules": [
+    {
+      "match_section": "ScienceDirect",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Références",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Déclaration de liens d'intérêts",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Tumeur de vessie n'infiltrant pas le muscle",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "note": "Prognosis in NMIBC specifically. MUST precede the muscle-invasive rule: once normalised, the invasive heading is a substring of this one."
+    },
+    {
+      "match_section": "Tumeur de vessie infiltrant le muscle",
+      "setting": "bladder_mibc_non_metastatic"
+    }
+  ]
+}
