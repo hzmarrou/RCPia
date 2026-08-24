@@ -45,6 +45,10 @@ REVIEWED_NOT_REPRODUCED = {
     # depended on that -- which is how a paragraph about diabetes and metformin came to be
     # locally advanced disease. Reproducing it would mean reproducing the bug.
     "eau.prostate.2026",
+    # Both EAU bladder guidelines were parsed before corpus v2.0 and loaded in no release, so
+    # there has never been anything to reproduce. Their baselines are the first agreed routing.
+    "eau.bladder-nmibc.2026",
+    "eau.bladder-mibc.2026",
 }
 
 # Documents whose rule file is deliberately nothing but a default. Nothing in them is about a

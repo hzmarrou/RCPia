@@ -1,0 +1,61 @@
+{
+  "document_id": "eau.bladder-nmibc.2026",
+  "note": "EAU non-muscle-invasive bladder, 2026. Parsed since before corpus v2.0 and never loaded in any release -- it sat in the same folder as the EAU prostate file that was, with the same publisher and the same edition. That omission is what the release manifest now exists to catch.\n\nUnlike AFU TVNIM, this guideline is not organised by risk group. Its treatment chapter is organised by modality -- intravesical chemotherapy, BCG, cystectomy -- and the risk groups appear inside the recommendations rather than as headings. So the honest rule set is short: the document is about NMIBC throughout, and only carcinoma in situ has chapters of its own.",
+  "default": {
+    "setting": "bladder_nmibc_unspecified_risk",
+    "note": "The whole document is NMIBC guidance. A passage no rule claims is still NMIBC -- resection technique, instillation schedules, follow-up intervals -- and applies at any risk. Absent here means 'risk not narrowed', not 'unknown disease'."
+  },
+  "rules": [
+    {
+      "match_section": "11. REFERENCES",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry"
+    },
+    {
+      "match_section": "12. CONFLICT OF INTEREST",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "13. CITATION INFORMATION",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "14. COPYRIGHT AND TERMS OF USE",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "TABLE OF CONTENTS",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "4.6 Carcinoma in situ",
+      "setting": "bladder_nmibc_cis",
+      "note": "How CIS is classified and recognised."
+    },
+    {
+      "match_section": "6.2 Primary carcinoma",
+      "setting": "bladder_nmibc_cis",
+      "note": "Recurrence and progression risk in primary CIS specifically."
+    },
+    {
+      "match_section": "7.7.2 Treatment of carcinoma in situ",
+      "setting": "bladder_nmibc_cis",
+      "note": "The treatment chapter for CIS, including the prostatic urethra and upper tract. The one place in this guideline where a disease type has its own treatment section rather than appearing inside a recommendation table."
+    },
+    {
+      "match_section": "9. PATIENT REPORTED OUTCOME MEASURES",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "note": "Outcome and quality measures are reported across risk groups."
+    }
+  ]
+}

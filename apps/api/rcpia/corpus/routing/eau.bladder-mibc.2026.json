@@ -1,0 +1,56 @@
+{
+  "document_id": "eau.bladder-mibc.2026",
+  "note": "EAU muscle-invasive and metastatic bladder, 2026. Parsed and never loaded, like its NMIBC companion.\n\nThis one carries the material dossier 2 turns on: chapters 6.2 to 6.4 are health status, comorbidity, frailty and geriatric assessment before cystectomy, for exactly the 85-year-old the corpus could not previously answer for.",
+  "default": {
+    "setting": "bladder_mibc_non_metastatic",
+    "note": "The document's centre of gravity is muscle-invasive disease that has not spread: staging it, assessing fitness for cystectomy, and delivering the treatment. Metastatic disease has its own chapter and its own rule; everything else defaults here rather than to `not_specified`, because a passage about cystectomy technique is genuinely about non-metastatic MIBC."
+  },
+  "rules": [
+    {
+      "match_section": "11. REFERENCES",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry"
+    },
+    {
+      "match_section": "12. CONFLICT OF INTEREST",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "13. CITATION INFORMATION",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "14. COPYRIGHT AND TERMS OF USE",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "TABLE OF CONTENTS",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "8.5 Distant recurrence",
+      "setting": "bladder_metastatic",
+      "note": "Recurrence at distance is metastatic disease. MUST precede nothing in particular, but it sits inside chapter 8, which otherwise defaults to non-metastatic -- so it needs its own rule to escape it."
+    },
+    {
+      "match_section": "9. METASTATIC DISEASE",
+      "setting": "bladder_metastatic",
+      "note": "First-line and later-line systemic therapy, oligometastatic disease, bone metastases. This is the chapter a patient with M1 disease needs, and the one AFU covers in a single short section."
+    },
+    {
+      "match_section": "10. QUALITY OF LIFE AND PALLIATIVE CARE",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "note": "Quality of life is reported for neoadjuvant therapy, cystectomy, trimodality therapy and metastatic disease alike, and supportive care applies throughout. `spans_settings` rather than the default, so it is admitted for a metastatic question as well as a non-metastatic one."
+    }
+  ]
+}
