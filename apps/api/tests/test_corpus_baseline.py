@@ -30,6 +30,27 @@ BASELINES = CORPUS / "baselines"
 
 RULE_FILES = sorted(ROUTING.glob("*.json"))
 
+# A baseline means two different things, and conflating them would let the weaker one pass for
+# the stronger. For a document corpus v4.0 carried, it is a *reproduction*: these rules produce
+# what the hand-written builder produced, checked passage by passage. For a document v4.0 never
+# had, there is nothing to reproduce, so it is a *frozen review*: what the rules do today, agreed
+# once, so that a later change has to be looked at rather than absorbed.
+#
+# Listing the second kind explicitly is what keeps it from becoming the default. A document
+# arriving here silently would get the weaker guarantee without anyone choosing it.
+REVIEWED_NOT_REPRODUCED = {
+    "sfap.pallia10",
+}
+
+# Documents whose rule file is deliberately nothing but a default. Nothing in them is about a
+# disease stage -- palliative referral criteria read the same at every point in a trajectory --
+# so there is no rule to write, and writing one would be inventing a distinction the guideline
+# does not make. Declared rather than inferred: a file whose rules all miss looks identical to
+# one that never had any, and that is the failure the routing audit exists to catch.
+DEFAULT_ONLY = {
+    "sfap.pallia10",
+}
+
 
 def test_there_is_at_least_one_rule_file() -> None:
     # Every test below is parametrised over the rule files, so an empty directory would make
@@ -74,10 +95,27 @@ def test_no_rule_is_dead_shadowed_or_ambiguous(rule_file: Path) -> None:
 def test_the_rules_actually_route_something(rule_file: Path) -> None:
     # A file whose rules all miss would pass every check above: no rule is dead if there are no
     # rules, and everything reproduces if the baseline is all default. The document then routes
-    # nothing while looking finished.
+    # nothing while looking finished. A document that is *meant* to be all default says so in
+    # DEFAULT_ONLY, which is a decision someone made rather than a silence nobody noticed.
     rules = load_rules(rule_file)
+    if rules.document_id in DEFAULT_ONLY:
+        assert not rules.rules, (
+            f"{rules.document_id} is listed as default-only but carries "
+            f"{len(rules.rules)} rules; remove it from DEFAULT_ONLY or remove the rules"
+        )
+        return
     report = check(rules, sections=SECTIONS)
     assert report.routed > 0, f"{rules.document_id}: no heading is claimed by any rule"
+
+
+def test_every_default_only_document_still_has_a_rule_file() -> None:
+    # Keeps the two lists from drifting apart: a name left in DEFAULT_ONLY after its file was
+    # deleted would silently excuse nothing.
+    named = {load_rules(f).document_id for f in RULE_FILES}
+    assert DEFAULT_ONLY <= named, f"declared default-only but no rule file: {DEFAULT_ONLY - named}"
+    assert REVIEWED_NOT_REPRODUCED <= named, (
+        f"declared as a frozen review but no rule file: {REVIEWED_NOT_REPRODUCED - named}"
+    )
 
 
 def test_a_baseline_shorter_than_the_headings_is_refused(tmp_path: Path) -> None:

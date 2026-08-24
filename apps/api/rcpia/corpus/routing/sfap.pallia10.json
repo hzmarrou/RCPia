@@ -1,0 +1,10 @@
+{
+  "document_id": "sfap.pallia10",
+  "note": "SFAP's Pallia 10 -- what palliative care is, who it is for, and the ten questions that decide whether to call the team. The only document of the instruments tranche that is narrative guidance from a named authority rather than a scoring form or a band lookup. Undated: its content stops at 2010 and its legal section predates the 2016 Claeys-Leonetti law, so the edition is stated here rather than guessed at in the identifier.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Nothing in this document is about a disease stage. Whether to involve a palliative team is decided from the patient's trajectory and symptom burden, and the criteria read the same for a newly diagnosed metastatic patient and for one at the end of third-line treatment. Absent here is a statement, not a failure to route -- the same shape the SIOG geriatric-assessment papers already carry, at 114 of 114 and 81 of 81 passages."
+  },
+  "rules": []
+}
