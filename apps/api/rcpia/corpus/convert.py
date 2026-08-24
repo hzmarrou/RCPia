@@ -25,12 +25,17 @@ document, when the document is acquired.
 import asyncio
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from rcpia.corpus.prepare import PrepareError, find_pdf_artefacts, outline
-from rcpia.parsing.base import MarkdownParser, ParseRequest, ParserNotConfigured
+from rcpia.parsing.base import (
+    MarkdownParser,
+    ParseRequest,
+    ParserError,
+    ParserNotConfigured,
+)
 
 SIDECAR_SUFFIX = ".conversion.json"
 PDF_CONTENT_TYPE = "application/pdf"
@@ -292,15 +297,47 @@ async def convert_all(
     parser: MarkdownParser | None,
     force: bool = False,
     language: str = "en",
-) -> list[Conversion]:
-    """Convert documents one at a time.
+) -> tuple[list[Conversion], list[tuple[Path, Exception]]]:
+    """Convert documents one at a time, returning what succeeded and what did not.
 
     Sequential on purpose. LlamaParse rate-limits, and a failure halfway through a parallel
     batch leaves a mix of converted and unconverted files with no obvious resume point.
+
+    **A failure stops that document, not the batch.** The provider ran out of credit partway
+    through the ESMO folder and the whole command died with a stack trace, so what had already
+    converted was only discoverable by listing the directory afterwards. Failures are collected
+    and reported instead; the conversions that succeeded are already on disk with their
+    sidecars, so re-running resumes rather than repeating.
+
+    **The same file under two names is converted once.** That folder held one guideline twice,
+    under different filenames and byte-identical -- and `--force` paid for both. Dedup is by
+    digest rather than by path, so a second copy reuses the first copy's markdown.
     """
-    return [
-        await convert(pdf, parser=parser, force=force, language=language) for pdf in pdfs
-    ]
+    done: list[Conversion] = []
+    failures: list[tuple[Path, Exception]] = []
+    by_digest: dict[str, Conversion] = {}
+
+    for pdf in pdfs:
+        try:
+            seen = by_digest.get(digest(pdf))
+            if seen is not None:
+                markdown_path = markdown_path_for(pdf)
+                if not is_current(pdf, markdown_path):
+                    markdown_path.write_text(
+                        seen.markdown_path.read_text(encoding="utf-8"), encoding="utf-8"
+                    )
+                    adopt(pdf, provider=seen.provider)
+                done.append(replace(seen, source=pdf, markdown_path=markdown_path, reused=True))
+                continue
+
+            conversion = await convert(pdf, parser=parser, force=force, language=language)
+        except (ConversionError, ParserError) as exc:
+            failures.append((pdf, exc))
+            continue
+        done.append(conversion)
+        by_digest[conversion.source_sha256] = conversion
+
+    return done, failures
 
 
 def build_markdown_parser() -> MarkdownParser:
@@ -375,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{len(pending)} of {len(pdfs)} documents need converting, and: {exc}")
             return 1
 
-    conversions = asyncio.run(
+    conversions, failures = asyncio.run(
         convert_all(pdfs, parser=parser, force=args.force, language=args.language)
     )
 
@@ -383,8 +420,18 @@ def main(argv: list[str] | None = None) -> int:
     for conversion in conversions:
         print(f"{conversion.source.name}\n    {conversion.summary}")
         unusable += not conversion.usable
-    print(f"\n{len(conversions)} documents, {unusable} unusable")
-    return 1 if unusable else 0
+    for pdf, failure in failures:
+        print(f"{pdf.name}\n    FAILED: {failure}")
+
+    converted = sum(not c.reused for c in conversions)
+    print(
+        f"\n{len(pdfs)} documents, {converted} converted, {unusable} unusable, "
+        f"{len(failures)} failed"
+    )
+    if failures:
+        # Everything that succeeded is on disk with a sidecar, so a re-run resumes.
+        print("Re-run to retry only what failed; conversions already done are reused.")
+    return 1 if (unusable or failures) else 0
 
 
 if __name__ == "__main__":

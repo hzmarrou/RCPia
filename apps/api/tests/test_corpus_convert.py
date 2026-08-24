@@ -172,10 +172,70 @@ async def test_a_batch_converts_every_document(tmp_path) -> None:
     pdfs = [write_pdf(tmp_path, f"g{n}.pdf", f"%PDF {n}".encode()) for n in range(3)]
     parser = FakeParser()
 
-    results = await convert_all(pdfs, parser=parser)
+    results, failures = await convert_all(pdfs, parser=parser)
 
-    assert len(results) == 3
+    assert len(results) == 3 and failures == []
     assert parser.calls == ["g0.pdf", "g1.pdf", "g2.pdf"]
+
+
+class FailingParser:
+    """Fails on one named document, converts the rest."""
+
+    name = "flaky"
+
+    def __init__(self, fail_on: str) -> None:
+        self.fail_on = fail_on
+        self.calls: list[str] = []
+
+    async def parse_markdown(self, request: ParseRequest) -> ParsedMarkdown:
+        self.calls.append(request.filename)
+        if request.filename == self.fail_on:
+            raise ParserFailed("LlamaParse a refuse le document (HTTP 402).")
+        return ParsedMarkdown(provider=self.name, markdown=GOOD, job_id="job-1")
+
+
+@pytest.mark.asyncio
+async def test_one_failure_does_not_abandon_the_rest_of_the_batch(tmp_path) -> None:
+    # The provider ran out of credit partway through a folder and the whole command died with
+    # a stack trace; what had already converted was only discoverable by listing the directory.
+    pdfs = [write_pdf(tmp_path, f"g{n}.pdf", f"%PDF {n}".encode()) for n in range(3)]
+    parser = FailingParser(fail_on="g1.pdf")
+
+    done, failures = await convert_all(pdfs, parser=parser)
+
+    assert [c.source.name for c in done] == ["g0.pdf", "g2.pdf"]
+    assert [p.name for p, _ in failures] == ["g1.pdf"]
+    assert "402" in str(failures[0][1])
+
+
+@pytest.mark.asyncio
+async def test_a_batch_resumes_rather_than_repeating(tmp_path) -> None:
+    pdfs = [write_pdf(tmp_path, f"g{n}.pdf", f"%PDF {n}".encode()) for n in range(3)]
+    await convert_all(pdfs, parser=FailingParser(fail_on="g1.pdf"))
+
+    second = FakeParser()
+    done, failures = await convert_all(pdfs, parser=second)
+
+    # Only the one that failed is sent again.
+    assert second.calls == ["g1.pdf"]
+    assert len(done) == 3 and failures == []
+
+
+@pytest.mark.asyncio
+async def test_the_same_pdf_under_two_names_is_converted_once(tmp_path) -> None:
+    # A folder held one ESMO guideline twice under different filenames, byte-identical, and
+    # --force paid for both. Dedup is by digest, not by path.
+    same = b"%PDF-1.4 identical bytes"
+    first = write_pdf(tmp_path, "Guideline.pdf", same)
+    second = write_pdf(tmp_path, "Guideline-copy.pdf", same)
+    parser = FakeParser()
+
+    done, failures = await convert_all([first, second], parser=parser, force=True)
+
+    assert parser.calls == ["Guideline.pdf"]
+    assert len(done) == 2 and failures == []
+    assert markdown_path_for(second).read_text(encoding="utf-8") == GOOD
+    assert done[1].reused is True
 
 
 def test_a_markdown_without_a_sidecar_is_not_current(tmp_path) -> None:
