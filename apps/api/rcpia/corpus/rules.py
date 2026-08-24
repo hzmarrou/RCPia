@@ -60,7 +60,7 @@ _RULE_FIELDS = frozenset(
     {
         "match_section", "setting", "reason", "therapy_line",
         "purposes", "roles", "occurrence", "note",
-        "exclude", "exclusion_reason",
+        "exclude", "exclusion_reason", "every_occurrence",
     }
 )
 _FILE_FIELDS = frozenset({"document_id", "default", "rules", "note"})
@@ -110,6 +110,13 @@ class Rule:
     # ordering and the audit already apply to it.
     exclude: bool = False
     exclusion_reason: str | None = None
+    # Says the rule means every place its heading appears, not one of them. The audit refuses an
+    # ambiguous rule by default, because a rule taking two places when one was meant is silent and
+    # wrong. But some headings genuinely repeat and are genuinely all wanted: NCCN prints
+    # `REFERENCES` and `FOOTNOTES` at the end of each of its principles chapters, and every one of
+    # them is a bibliography. Declared rather than inferred, so "I mean all of these" cannot be
+    # confused with "I did not notice there were several".
+    every_occurrence: bool = False
     note: str = ""
 
     @property
@@ -265,7 +272,18 @@ def _parse_rule(record: Any, *, where: str, require_match: bool) -> Rule:
             "false about it."
         )
 
+    every_occurrence = document.get("every_occurrence", False)
+    if not isinstance(every_occurrence, bool):
+        raise RuleError(
+            f"{where} has every_occurrence {every_occurrence!r}; it must be true or false"
+        )
+
     occurrence = document.get("occurrence")
+    if occurrence is not None and every_occurrence:
+        raise RuleError(
+            f"{where} sets both occurrence and every_occurrence. One says which place is meant "
+            "and the other says all of them; a rule cannot mean both."
+        )
     if occurrence is not None:
         if not isinstance(occurrence, int) or isinstance(occurrence, bool) or occurrence < 1:
             raise RuleError(f"{where} has occurrence {occurrence!r}; it must be a 1-based integer")
@@ -282,6 +300,7 @@ def _parse_rule(record: Any, *, where: str, require_match: bool) -> Rule:
             document.get("roles"), field_name=f"{where}.roles", allowed=AGENT_ROLES
         ),
         occurrence=occurrence,
+        every_occurrence=every_occurrence,
         exclude=exclude,
         exclusion_reason=exclusion_reason,
         note=document.get("note") or "",
@@ -427,7 +446,7 @@ def audit(rules: RoutingRules, section_paths: list[list[str]]) -> Audit:
         # passages — that is the ordering working, not an ambiguity. Judging on candidates
         # would flag every correctly ordered pair of rules in the file.
         claimed = {flats[position] for position in fired[rule_index]}
-        if rule.occurrence is None and (
+        if rule.occurrence is None and not rule.every_occurrence and (
             _spans_unrelated_branches(claimed, rule.needle) or claimed & recurring
         ):
             report.ambiguous.append(rule)

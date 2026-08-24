@@ -644,3 +644,65 @@ def test_a_reason_without_an_exclusion_is_refused() -> None:
                 ],
             }
         )
+
+
+def test_a_rule_may_declare_that_it_means_every_occurrence() -> None:
+    # NCCN prints REFERENCES at the end of each of its principles chapters, and every one of them
+    # is a bibliography. Without this the audit refuses the rule as ambiguous, correctly, because
+    # taking two places when one was meant is silent and wrong.
+    rules = parse_rules(
+        {
+            "document_id": "test.doc",
+            "default": {"setting": "not_specified", "reason": "not_determinable"},
+            "rules": [
+                {
+                    "match_section": "REFERENCES",
+                    "setting": "not_specified",
+                    "reason": "not_determinable",
+                    "exclude": True,
+                    "exclusion_reason": "bibliography_entry",
+                    "every_occurrence": True,
+                }
+            ],
+        }
+    )
+    assert rules.rules[0].every_occurrence
+
+    paths = [
+        ["PRINCIPLES OF IMAGING", "REFERENCES"],
+        ["PRINCIPLES OF RADIATION THERAPY", "REFERENCES"],
+    ]
+    assert not audit(rules, paths).problems
+
+
+def test_the_ambiguity_check_still_fires_without_the_declaration() -> None:
+    rules = parse_rules(
+        {
+            "document_id": "test.doc",
+            "default": {"setting": "not_specified", "reason": "not_determinable"},
+            "rules": [{"match_section": "REFERENCES", "setting": "no_known_cancer"}],
+        }
+    )
+    paths = [
+        ["PRINCIPLES OF IMAGING", "REFERENCES"],
+        ["PRINCIPLES OF RADIATION THERAPY", "REFERENCES"],
+    ]
+    assert audit(rules, paths).problems
+
+
+def test_a_rule_cannot_mean_one_occurrence_and_all_of_them() -> None:
+    with pytest.raises(RuleError, match="cannot mean both"):
+        parse_rules(
+            {
+                "document_id": "test.doc",
+                "default": {"setting": "not_specified", "reason": "not_determinable"},
+                "rules": [
+                    {
+                        "match_section": "x",
+                        "setting": "no_known_cancer",
+                        "occurrence": 1,
+                        "every_occurrence": True,
+                    }
+                ],
+            }
+        )

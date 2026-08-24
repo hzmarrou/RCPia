@@ -31,6 +31,7 @@ to its default -- which reads exactly like success.
 """
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -83,6 +84,21 @@ class Section:
     line_end: int
 
 
+# Above this many repetitions a heading cannot be identifying anything, so it is dropped from
+# the path rather than allowed to shape it.
+#
+# **Measured, and the gap is wide.** Repetition counts for the most-repeated heading in each
+# document: NCCN prostate 176, 175, 44 then 12; NCCN bladder 122, 107, 16 then 6; ESPEN surgery
+# 23 then 1; EAU and SIOG 1 throughout. Nothing observed sits between 12 and 16.
+#
+# It catches two different things, both correctly. NCCN's are page furniture -- `NCCN Guidelines
+# Version 6.2026` printed on every page and promoted to a heading, 175 times, each one resetting
+# the hierarchy under it. ESPEN's is `Commentary`, a real sub-heading that says nothing about
+# which passage it introduces. Neither can identify a section, which is the only thing a path
+# element is for.
+RECURRING_HEADING_LIMIT = 15
+
+
 @dataclass(frozen=True)
 class Outline:
     """A document's sections, and how they were derived."""
@@ -91,6 +107,9 @@ class Outline:
     sections: tuple[Section, ...]
     headings_seen: int
     numbered_headings: int
+    # Reported rather than silently dropped: a heading this stage discarded is a heading a rule
+    # can never match, and an author who wrote one deserves to be told why it is dead.
+    ignored_headings: tuple[str, ...] = ()
 
     @property
     def numbered_share(self) -> float:
@@ -227,6 +246,22 @@ def outline(
             "nothing."
         )
 
+    seen_before = len(headings)
+    repetitions = Counter(heading.label for heading in headings)
+    ignored = sorted(
+        label for label, count in repetitions.items() if count > RECURRING_HEADING_LIMIT
+    )
+    if ignored:
+        # Dropped entirely rather than kept as leaves. Their text is not lost: it belongs to the
+        # section that was open when the page turned, which is where a reader would look for it.
+        headings = [heading for heading in headings if heading.label not in set(ignored)]
+        if not headings:
+            raise PrepareError(
+                f"{source}: every heading repeats more than {RECURRING_HEADING_LIMIT} times, so "
+                "none of them identifies a section. That is a conversion that produced page "
+                "furniture and no structure, not a document with an unusual layout."
+            )
+
     numbered = sum(1 for heading in headings if heading.number is not None)
     strategy = (
         HeadingStrategy.numbered
@@ -251,8 +286,9 @@ def outline(
     return Outline(
         strategy=strategy,
         sections=tuple(sections),
-        headings_seen=len(headings),
+        headings_seen=seen_before,
         numbered_headings=numbered,
+        ignored_headings=tuple(ignored),
     )
 
 

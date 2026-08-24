@@ -170,3 +170,44 @@ def test_an_incoherent_path_is_detected() -> None:
     # parent it actually sits under missing.
     assert path_is_coherent(("3. EPIDEMIOLOGY", "3.2 Aetiology", "3.2.1 Hereditary"))
     assert not path_is_coherent(("6.4 Recurrence", "6.2 Modalities"))
+
+
+REPEATED = "\n".join(
+    line
+    for n in range(20)
+    for line in ("# NCCN Guidelines Version 6.2026", f"## Real section {n}", f"Body {n}.")
+)
+
+
+def test_a_heading_that_repeats_too_often_cannot_identify_anything() -> None:
+    # NCCN prints its version banner on every page and the converter promotes it to a heading:
+    # 175 times in the prostate guideline, each one resetting the hierarchy beneath it.
+    report = outline(REPEATED)
+    assert "NCCN Guidelines Version 6.2026" in report.ignored_headings
+    # The real sections survive, and none of them sits under the banner.
+    assert all(len(s.section_path) == 1 for s in report.sections)
+    assert len(report.sections) == 20
+
+
+def test_the_text_under_an_ignored_heading_is_not_lost() -> None:
+    markdown = "\n".join(
+        ["# Real chapter", "Chapter body."]
+        + ["# BANNER\nBanner-adjacent text." for _ in range(20)]
+    )
+    report = outline(markdown)
+    assert "BANNER" in report.ignored_headings
+    kept = "\n".join(s.text for s in report.sections)
+    assert "Banner-adjacent text." in kept
+
+
+def test_a_heading_repeated_a_few_times_is_kept() -> None:
+    # Real headings do repeat: NCCN's own PRINCIPLES OF RADIATION THERAPY appears 12 times, and
+    # the threshold sits above that in a measured gap.
+    markdown = "\n".join(["# FOLLOW-UP", "Body."] * 6)
+    report = outline(markdown)
+    assert report.ignored_headings == ()
+
+
+def test_a_document_that_is_all_furniture_is_refused() -> None:
+    with pytest.raises(PrepareError, match="page furniture and no structure"):
+        outline("\n".join(["# BANNER", "Body."] * 20))
