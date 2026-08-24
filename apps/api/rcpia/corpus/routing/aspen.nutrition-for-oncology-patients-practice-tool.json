@@ -1,0 +1,20 @@
+{
+  "document_id": "aspen.nutrition-for-oncology-patients-practice-tool",
+  "note": "ASPEN practice tool: choosing between oral diet, oral nutrition supplements and enteral nutrition for the oncology patient. Its Table 1 maps a treatment-related symptom -- mucositis, nausea, dysphagia, early satiety -- to the feeding route that survives it.\n\nThat table is the operational half of the nutrition tranche: ESPEN says a malnourished patient facing major surgery needs support, and this says by which route given what the patient can actually swallow.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Feeding route follows the symptom and the gut, not the tumour setting."
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true
+    }
+  ]
+}

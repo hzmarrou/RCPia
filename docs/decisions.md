@@ -431,6 +431,39 @@ remaining 103 mean nobody has looked, which is deliberately not the same as perm
 `unknown` in the corpus as it stands; v5 replaces it. Same treatment as the SIOG publisher
 corrections.
 
+## 2026-08-24 — The MNA cut-point is arithmetic, not a corpus fact
+
+The nutrition tranche was challenged directly: *"Nutrition still don't help any guidelines?"* The
+challenge was right about the document I had over-claimed. ESPEN's 2021 practical guideline on
+cancer is authoritative on management and says nothing usable about screening — its screening
+section is two sentences, names no tool, and mentions MNA zero times.
+
+Three ASPEN practice tools were re-converted and routed to close that gap, and they close half of
+it. The screening tool names the six instruments validated for ambulatory cancer patients — MST,
+MUST, MNA, NRS-2002, NUTRISCORE, PG-SGA SF — and says which studies validated them. It still
+does not give a cut-point: its own recommendation says the tools were validated "with various
+cut-points" and its characteristics table has two columns, tool and description.
+
+**That is the correct place for the corpus to stop.** The chain from the ledger field `MNA : 7`
+to a proposal has two links, and they belong in different layers:
+
+1. `MNA : 7` → *malnourished*. A threshold. It lives in `rcpia/rules/support.py` as
+   `MNA_MALNOURISHED = 17.0` and fires deterministically. Retrieval cannot improve on arithmetic,
+   and a passage saying "below 17" would be a worse version of a constant.
+2. *malnourished, facing radical cystectomy* → what to do about it. A clinical judgement, which
+   is exactly what a citable passage is for. ESPEN surgery supplies it; the ASPEN practice tool
+   supplies the feeding route given the symptom.
+
+Link 2 was the hole, and it is now filled. Link 1 was never the corpus's job. The earlier framing
+— that the corpus needed to carry the cut-point — was wrong about the architecture, not just
+about which document to load.
+
+**Why the ASPEN documents needed re-conversion at all.** All three are two-column PDFs, and the
+original conversion read straight across the columns: sentences interleaved between columns, and
+not one markdown heading in any of the three. Stage 1 refused them, correctly. The LlamaParse
+conversions carry real headings, restore reading order, and contain *more* words than the files
+they replace — the 30-50% drop in bytes was column padding.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated
