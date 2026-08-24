@@ -131,6 +131,41 @@ def find_pdf_artefacts(text: str) -> list[str]:
     return sorted(set(_PDF_ARTEFACT.findall(text)))
 
 
+# A repository deposit — HAL, and the like — puts its own cover page in front of the paper: the
+# archive's logo, a citation block, the deposit id, the licence, and a link to the version of
+# record. Chunked, that becomes several passages of archive boilerplate carrying the paper's
+# title, which is precisely the kind of passage that retrieves well and answers nothing.
+_COVER_TRIGGER = re.compile(r"^#{0,6}\s*HAL Id:\s*\S", re.MULTILINE)
+# Where the cover stops. Both markers are deposit artefacts, appear once, and sit on the last
+# line of the cover.
+_COVER_END = re.compile(r"^\s*(?:Version of Record:|Manuscript_[0-9a-f]{8,})", re.IGNORECASE)
+# A cover is one page. Beyond this the terminator found is something else and cutting to it would
+# take real content with it, so the document is refused instead.
+COVER_SEARCH_LINES = 80
+
+
+def strip_repository_cover(markdown: str, *, source: str = "document") -> str:
+    """Remove an archive's cover page, or say why it cannot be removed safely.
+
+    Does nothing to a document that has no cover, so it is safe to call on everything.
+    """
+    if not _COVER_TRIGGER.search(markdown):
+        return markdown
+
+    lines = markdown.splitlines()
+    end = None
+    for index, line in enumerate(lines[:COVER_SEARCH_LINES]):
+        if _COVER_END.match(line):
+            end = index
+    if end is None:
+        raise PrepareError(
+            f"{source} carries a repository cover page but none of the markers that end one "
+            f"appears in its first {COVER_SEARCH_LINES} lines. Cutting to a guess would take the "
+            "start of the paper with it, so the document is refused rather than trimmed."
+        )
+    return "\n".join(lines[end + 1 :]).lstrip("\n")
+
+
 def _paths_by_number(headings: list[Heading]) -> list[tuple[str, ...]]:
     paths: list[tuple[str, ...]] = []
     stack: list[Heading] = []
@@ -160,11 +195,29 @@ def _paths_by_level(headings: list[Heading]) -> list[tuple[str, ...]]:
     return paths
 
 
-def outline(markdown: str, *, source: str = "document") -> Outline:
+def outline(
+    markdown: str, *, source: str = "document", allow_artefacts: bool = False
+) -> Outline:
     """Every section of a document, with the path each one sits at.
 
     `source` names the document in errors; it is never read as content.
+
+    A document carrying converter glyph codes is refused. Corpus v4.0 repaired 27 of them by
+    hand, in the release rather than in the source, so a rebuild brings every one back — and
+    `eGFR /H11021 30` reads as ordinary prose while matching nothing a clinician would search
+    for. Repairing them here was considered and rejected: choosing which character was meant is a
+    guess, and a wrong guess inside a threshold is worse than a refusal. `allow_artefacts` exists
+    so their extent can be measured before deciding what to do about them.
     """
+    artefacts = find_pdf_artefacts(markdown)
+    if artefacts and not allow_artefacts:
+        raise PrepareError(
+            f"{source} still contains converter glyph codes: {', '.join(artefacts)}. These read "
+            "as text and retrieve for nothing. Repair them in the source markdown, or re-convert "
+            "the PDF, rather than loading a passage whose numbers are unreadable."
+        )
+
+    markdown = strip_repository_cover(markdown, source=source)
     headings = read_headings(markdown)
     if not headings:
         raise PrepareError(
