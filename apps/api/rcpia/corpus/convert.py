@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from rcpia.corpus.prepare import PrepareError, find_pdf_artefacts, outline
-from rcpia.parsing.base import MarkdownParser, ParseRequest
+from rcpia.parsing.base import MarkdownParser, ParseRequest, ParserNotConfigured
 
 SIDECAR_SUFFIX = ".conversion.json"
 PDF_CONTENT_TYPE = "application/pdf"
@@ -136,7 +136,7 @@ def inspect(
 async def convert(
     pdf: Path,
     *,
-    parser: MarkdownParser,
+    parser: MarkdownParser | None,
     destination: Path | None = None,
     force: bool = False,
     language: str = "en",
@@ -164,6 +164,12 @@ async def convert(
             heading_count=headings,
             sections=sections,
             artefacts=artefacts,
+        )
+
+    if parser is None:
+        raise ConversionError(
+            f"{pdf.name} needs converting and no parser was supplied. "
+            "Set LLAMAPARSE_API_KEY, or pass a parser."
         )
 
     parsed = await parser.parse_markdown(
@@ -219,10 +225,71 @@ async def convert(
     )
 
 
+def adopt(
+    pdf: Path, *, provider: str = "llamaparse", destination: Path | None = None
+) -> Conversion:
+    """Record provenance for a markdown file that was converted by hand.
+
+    Twenty-odd documents were converted before this module existed. They have no sidecar, so
+    `is_current` cannot tell they are done, and the first run of the converter over the corpus
+    would re-parse every one of them and bill for it.
+
+    Adoption asserts something weaker than a conversion does, and the sidecar says so: the
+    markdown is *claimed* to have come from this PDF, on the operator's word, rather than
+    observed to. That is why it records no job id -- there is nothing to look up -- and why it
+    is a separate verb rather than a flag on `convert`.
+    """
+    markdown_path = destination or markdown_path_for(pdf)
+    if not markdown_path.exists():
+        raise ConversionError(f"{markdown_path.name} does not exist; nothing to adopt")
+
+    markdown = markdown_path.read_text(encoding="utf-8")
+    usable, refusal, headings, sections, artefacts = inspect(markdown, source=pdf.name)
+    source_sha256 = digest(pdf)
+
+    sidecar_path_for(markdown_path).write_text(
+        json.dumps(
+            {
+                "source_path": str(pdf),
+                "source_sha256": source_sha256,
+                "provider": provider,
+                "provider_version": None,
+                "job_id": None,
+                "converted_at": None,
+                "adopted_at": datetime.now(UTC).isoformat(),
+                "adopted": True,
+                "usable": usable,
+                "refusal": refusal,
+                "heading_count": headings,
+                "sections": sections,
+                "artefacts": list(artefacts),
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    return Conversion(
+        source=pdf,
+        markdown_path=markdown_path,
+        source_sha256=source_sha256,
+        markdown_bytes=markdown_path.stat().st_size,
+        provider=provider,
+        reused=True,
+        usable=usable,
+        refusal=refusal,
+        heading_count=headings,
+        sections=sections,
+        artefacts=artefacts,
+    )
+
+
 async def convert_all(
     pdfs: list[Path],
     *,
-    parser: MarkdownParser,
+    parser: MarkdownParser | None,
     force: bool = False,
     language: str = "en",
 ) -> list[Conversion]:
@@ -263,6 +330,12 @@ def main(argv: list[str] | None = None) -> int:
     cli.add_argument("paths", nargs="+", type=Path, help="PDF files, or folders to search")
     cli.add_argument("--force", action="store_true", help="re-convert even if unchanged")
     cli.add_argument("--language", default="en", help="language hint for the provider")
+    cli.add_argument(
+        "--adopt",
+        action="store_true",
+        help="record provenance for markdown that already exists, without calling the "
+        "provider; use once for documents converted by hand",
+    )
     args = cli.parse_args(argv)
 
     pdfs: list[Path] = []
@@ -272,7 +345,36 @@ def main(argv: list[str] | None = None) -> int:
         print("no PDFs found")
         return 1
 
-    parser = build_markdown_parser()
+    if args.adopt:
+        adopted, skipped = [], 0
+        for pdf in pdfs:
+            if not markdown_path_for(pdf).exists():
+                skipped += 1
+                continue
+            adopted.append(adopt(pdf))
+        for conversion in adopted:
+            print(f"{conversion.source.name}\n    adopted: {conversion.summary}")
+        unusable = sum(not c.usable for c in adopted)
+        print(
+            f"\n{len(adopted)} adopted, {skipped} without markdown, {unusable} unusable"
+        )
+        return 1 if unusable else 0
+
+    # Decide what actually needs the provider before asking for one. Re-running this over a
+    # folder that is already converted is the common case; it should not need an API key, and
+    # a missing key should not hide the report of what is already there.
+    pending = [
+        pdf for pdf in pdfs if args.force or not is_current(pdf, markdown_path_for(pdf))
+    ]
+
+    parser: MarkdownParser | None = None
+    if pending:
+        try:
+            parser = build_markdown_parser()
+        except (ConversionError, ParserNotConfigured) as exc:
+            print(f"{len(pending)} of {len(pdfs)} documents need converting, and: {exc}")
+            return 1
+
     conversions = asyncio.run(
         convert_all(pdfs, parser=parser, force=args.force, language=args.language)
     )

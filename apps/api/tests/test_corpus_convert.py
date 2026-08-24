@@ -13,6 +13,7 @@ import pytest
 
 from rcpia.corpus.convert import (
     ConversionError,
+    adopt,
     convert,
     convert_all,
     digest,
@@ -193,6 +194,71 @@ def test_a_corrupt_sidecar_is_not_current(tmp_path) -> None:
     sidecar_path_for(markdown).write_text("{not json", encoding="utf-8")
 
     assert is_current(pdf, markdown) is False
+
+
+@pytest.mark.asyncio
+async def test_an_already_converted_pdf_needs_no_parser_at_all(tmp_path) -> None:
+    # Re-running the converter over a folder that is already done is the common case, and it
+    # must not require an API key. The CLI builds a parser only if something is pending; this
+    # is the library half of that promise.
+    pdf = write_pdf(tmp_path)
+    await convert(pdf, parser=FakeParser())
+
+    again = await convert(pdf, parser=None)
+
+    assert again.reused is True and again.usable is True
+
+
+@pytest.mark.asyncio
+async def test_a_pdf_that_needs_converting_without_a_parser_says_so(tmp_path) -> None:
+    pdf = write_pdf(tmp_path)
+    with pytest.raises(ConversionError, match="needs converting"):
+        await convert(pdf, parser=None)
+
+
+@pytest.mark.asyncio
+async def test_adopting_a_hand_conversion_stops_it_being_re_parsed(tmp_path) -> None:
+    # Twenty-odd documents were converted by hand before this module existed. Without
+    # provenance the first run over the corpus would re-parse every one of them and bill for
+    # it, which is the mistake adoption exists to prevent.
+    pdf = write_pdf(tmp_path)
+    markdown_path_for(pdf).write_text(GOOD, encoding="utf-8")
+
+    adopted = adopt(pdf)
+
+    assert adopted.usable and adopted.sections == 2
+    assert is_current(pdf, markdown_path_for(pdf)) is True
+    # And now no parser is needed.
+    again = await convert(pdf, parser=None)
+    assert again.reused is True
+
+
+def test_adoption_says_it_is_a_claim_not_an_observation(tmp_path) -> None:
+    # There is no job to look up, and the sidecar must not imply there is.
+    pdf = write_pdf(tmp_path)
+    markdown_path_for(pdf).write_text(GOOD, encoding="utf-8")
+    adopt(pdf)
+
+    sidecar = read_sidecar(markdown_path_for(pdf))
+    assert sidecar is not None
+    assert sidecar["adopted"] is True
+    assert sidecar["job_id"] is None and sidecar["converted_at"] is None
+
+
+def test_adopting_a_headingless_conversion_reports_it(tmp_path) -> None:
+    # Adoption is not a way to bless a broken conversion; it checks the same way.
+    pdf = write_pdf(tmp_path)
+    markdown_path_for(pdf).write_text(HEADINGLESS, encoding="utf-8")
+
+    adopted = adopt(pdf)
+
+    assert adopted.usable is False
+
+
+def test_adopting_without_markdown_is_refused(tmp_path) -> None:
+    pdf = write_pdf(tmp_path)
+    with pytest.raises(ConversionError, match="nothing to adopt"):
+        adopt(pdf)
 
 
 def test_inspect_counts_headings_and_sections() -> None:
