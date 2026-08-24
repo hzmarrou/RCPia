@@ -59,6 +59,20 @@ RETRIEVAL_EXCLUSION_REASONS: Final[frozenset[str]] = frozenset(
         "historical_treatment_guidance_superseded",
         "local_not_guidance",
         "local_setting_mislabelled",
+        # The one value here that corpus v4.0 does not already use, added 24 August because a
+        # real case needed it and none of the others fit.
+        #
+        # A guideline can cover more than one disease. NCCN's bladder guideline also documents
+        # upper tract urothelial carcinoma, urothelial carcinoma of the prostate, and primary
+        # carcinoma of the urethra -- and those sections arrive tagged `bladder`, so they pass
+        # every bladder filter that can be written. A patient with a bladder tumour could be
+        # shown nephron-preserving criteria for a tumour of the renal pelvis.
+        #
+        # The loader already refuses them by heading as defence in depth, and its own comment
+        # asks for the exclusion to happen at source, "where the document structure is still
+        # available". This is that. The loader stays as the backstop it was meant to be rather
+        # than the only thing standing in the way.
+        "out_of_scope_disease",
     }
 )
 
