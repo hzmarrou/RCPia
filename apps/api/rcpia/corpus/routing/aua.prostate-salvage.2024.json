@@ -1,0 +1,122 @@
+{
+  "document_id": "aua.prostate-salvage.2024",
+  "note": "AUA/ASTRO/SUO: salvage therapy for prostate cancer, 2024. The document is about recurrence after primary treatment, and every chapter of it is non-metastatic recurrence -- after prostatectomy, after radiation, after focal therapy, and regional recurrence.\n\n**The chapter on molecular-imaging metastatic recurrence stays on the default, deliberately.** Its statements read `in patients with BCR who have non-regional disease seen on PET/CT but no visible disease on conventional imaging`. A negative conventional scan is exactly what separates these patients from metastatic disease, and the guideline is still answering a recurrence question about them. Routing it to a metastatic setting would move an oligorecurrence recommendation in front of a patient with established metastases.\n\n**`METHODOLOGY` must not be excluded as a chapter here.** The conversion filed `GUIDELINE STATEMENTS` beneath it, and with it twelve passages on treatment decision-making at biochemical recurrence -- the single largest clinical block in the document. The methodology subsections are therefore named individually, and `METHODOLOGY` itself is leaf-matched so it claims the chapter's own paragraph and none of its descendants. This is the mistake that cost NCCN two attempts, caught here by reading the tree before writing the rule.",
+  "default": {
+    "setting": "prostate_biochemical_recurrence",
+    "note": "Recurrence after primary local treatment, which is what every chapter addresses."
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "PANEL, CONSULTANTS, AND STAFF",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Guideline Panel",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Staff and Consultants",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Abbreviations",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "METHODOLOGY",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "note": "Leaf-matched on purpose. `GUIDELINE STATEMENTS` and twelve passages of clinical content sit beneath this heading because of a conversion error; a chapter-wide exclusion would delete them. Also claims `SUMMARY > Methodology`."
+    },
+    {
+      "match_section": "Panel Formation",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Searches and Article Selection",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Data Abstraction",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Risk of Bias Assessment",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Data Synthesis",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Determination of Evidence Strength",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "AUA Nomenclature",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Peer Review and Document Approval",
+      "setting": "prostate_biochemical_recurrence",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    }
+  ]
+}
