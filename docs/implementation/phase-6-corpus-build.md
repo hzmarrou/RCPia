@@ -400,9 +400,9 @@ plus the sources. **The corpus stops being an artefact we receive and becomes on
 | **SIOG** — ref-27 | **5** | 2014, 2015 and the 2020 bladder paper stay; **2010 excluded**, **Boyle 2019 and ESMO/SIOG 2024 added** (24 Aug); still **absent from the curation manifest** |
 | ~~**Psycho-oncology** — ref-21/22/23~~ | **0** | **excluded from v5 by the clinician, 24 August 2026** — see §6.2 |
 | **Nutrition** — ASPEN (ref-16), ESPEN (ref-17), ESMO cachexia (ref-25) | **6** | see §6.3; ESPEN surgery and ESMO cachexia added 24 Aug, ESPEN permission attested |
-| **French geriatric urology** — AFU 2019 *Onco-urologie du patient âgé* | 3 | in scope 24 Aug; **not held — must be obtained**, see §6.5 |
+| **French geriatric urology** — AFU 2019 *Onco-urologie du patient âgé* | 3 | **obtained 24 Aug** from urofrance.org, verified; awaiting conversion and a licence attestation |
 
-Roughly **48 documents**, against v4's 10 — of which **3 are not yet held**. It was ~68 before
+Roughly **48 documents**, against v4's 10. All of them are now held. It was ~68 before
 psycho-oncology was excluded (§6.2) and ~56 before the instruments were triaged (§6.6). AUA
 curation may take it lower again.
 
@@ -615,7 +615,7 @@ as an oversight — and so the question is not reopened in six months.
 | ~~9~~ | ~~Psycho-oncology (18 documents)~~ — **dropped from v5**, per §6.2 | — |
 | 10 | Nutrition — ASPEN, ESPEN, ESMO cachexia (6 documents), per §6.3 | 6 |
 | 10b | **SIOG (5 documents), per §6.5** — added 24 August; this tranche had no step | 6 |
-| 10c | **French geriatric urology — AFU 2019 (3 chapters)** — added 24 August, same omission | 6, **and acquiring it** |
+| 10c | **French geriatric urology — AFU 2019 (3 chapters)** — **acquired 24 August**; needs conversion, a licence attestation and rules | 6 |
 | 11 | Build, load, run probes → **v5.0** | 7, 8, 10, 10b; 10c if acquired in time |
 | 12 | CI job for rule-file validation | 2 |
 

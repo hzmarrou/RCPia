@@ -378,6 +378,36 @@ this gap.
 
 v5 drops from roughly 56 documents to roughly 48.
 
+## 2026-08-24 — AFU 2019 obtained, and the AFU licence has never been settled
+
+The three chapters of AFU's 2019 report *Onco-urologie du patient âgé* are held, from
+**urofrance.org**, the AFU's own site, as the Elsevier PDFs paginated exactly as published. This
+is the French geriatric source `corpus-v5-change-request.md` §4.5 asked whether one existed.
+Verified independently of the search report: checksums and page counts match, 12, 9 and 16 pages.
+
+| chapter | pages | document_id |
+|---|---|---|
+| Spécificités gériatriques du cancer de la prostate (828-839) | 12 | `afu.prostate-geriatric.2019` |
+| Spécificités épidémiologiques… du cancer de la vessie (840-848) | 9 | `afu.bladder-geriatric-epidemiology.2019` |
+| Optimisation de la prise en charge… (849-864) | 16 | `afu.bladder-geriatric-management.2019` |
+
+**No newer edition exists.** The CFU's later annual reports cover other subjects — urethral
+stricture in 2024, lasers in 2025 — so the 2019 report remains the AFU's only monograph on this.
+
+**But it is superseded for treatment decisions, and that is recorded on each record.** The AFU's
+organ-by-organ recommendations were updated for 2024-2026 and are already in the corpus. The 2019
+report is the geriatric context those recommendations do not carry; it is not a competing
+statement about how to treat, and it must not be cited against them.
+
+**The licence question is larger than these three documents.** Each PDF carries *"© 2019 Elsevier
+Masson SAS. Tous droits réservés."* while being free to read from the AFU's own site without
+authentication — the same position as the two ESPEN guidelines. `licence_status` is therefore
+left unset, with the copyright line recorded as evidence.
+
+Checking that turned up the wider fact: **the three AFU 2024-2026 guidelines already loaded
+record `licence_status: unknown`.** So this is one attestation covering six documents, three of
+them already in the database, and it is one of the four `unknown` licences flagged this morning.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated
