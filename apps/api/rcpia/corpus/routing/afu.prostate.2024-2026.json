@@ -1,0 +1,49 @@
+{
+  "document_id": "afu.prostate.2024-2026",
+  "note": "AFU prostate. 'Indications therapeutiques' states one risk group per numbered recommendation, so those headings carry the routing and everything beneath them inherits it.",
+  "default": {
+    "setting": "prostate_nonmetastatic_unspecified_risk",
+    "note": "The document is overwhelmingly about non-metastatic prostate cancer, so an unclaimed passage is that -- with the risk group not narrowed. 116 of 144 passages land here, which is high; narrowing it is corpus work, not a format problem."
+  },
+  "rules": [
+    {
+      "match_section": "depistage",
+      "setting": "no_known_cancer",
+      "note": "Screening and early detection address men who do not yet have a diagnosis. Routing them as prostate cancer guidance would return screening advice for a patient already staged."
+    },
+    {
+      "match_section": "detection precoce",
+      "setting": "no_known_cancer"
+    },
+    {
+      "match_section": "localise de faible risque",
+      "setting": "prostate_localized_low_risk"
+    },
+    {
+      "match_section": "localise de risque intermediaire",
+      "setting": "prostate_localized_intermediate_risk"
+    },
+    {
+      "match_section": "localise a haut risque",
+      "setting": "prostate_localized_high_risk"
+    },
+    {
+      "match_section": "cn1",
+      "setting": "prostate_node_positive_non_metastatic",
+      "note": "The Python used a word-boundary regex. Verified against the fixture: 'cn1' occurs in one heading and in no longer word, so a substring match is equivalent here."
+    },
+    {
+      "match_section": "stadification > metastatique",
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "note": "Named as a path fragment, not a word. A bare 'metastatique' also reached 'Genetique des formes metastatiques' in a different chapter -- both are metastatic guidance and both were wanted, but one rule spanning two chapters cannot survive a heading being moved. Each chapter names itself."
+    },
+    {
+      "match_section": "genetique des formes metastatiques",
+      "setting": "prostate_metastatic_hormone_sensitive"
+    },
+    {
+      "match_section": "metastases",
+      "setting": "prostate_metastatic_hormone_sensitive"
+    }
+  ]
+}

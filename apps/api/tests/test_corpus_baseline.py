@@ -1,0 +1,108 @@
+"""Every rule file in the repository is a proven one.
+
+The invariant these tests defend is not "the rule files parse". It is that a rule file which
+ships reproduces routing that already existed, exactly, and that the reproduction can be checked
+without OneDrive, without a database and without the source PDFs — because CI has none of them.
+
+A rule file with no baseline beside it is the failure this catches. It looks identical to a
+working one in review, and nothing else would notice.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from rcpia.corpus.baseline import (
+    BaselineError,
+    baseline_path,
+    compare,
+    read_baseline,
+    routed_settings,
+    write_baseline,
+)
+from rcpia.corpus.rules import load_rules
+from rcpia.corpus.sections import check, fixture_path
+
+CORPUS = Path(__file__).resolve().parents[1] / "rcpia" / "corpus"
+ROUTING = CORPUS / "routing"
+SECTIONS = CORPUS / "sections"
+BASELINES = CORPUS / "baselines"
+
+RULE_FILES = sorted(ROUTING.glob("*.json"))
+
+
+def test_there_is_at_least_one_rule_file() -> None:
+    # Every test below is parametrised over the rule files, so an empty directory would make
+    # the whole module pass while proving nothing.
+    assert RULE_FILES, f"no rule files found in {ROUTING}"
+
+
+@pytest.mark.parametrize("rule_file", RULE_FILES, ids=lambda p: p.stem)
+def test_a_rule_file_has_the_headings_and_the_baseline_it_is_checked_against(
+    rule_file: Path,
+) -> None:
+    rules = load_rules(rule_file)
+    assert fixture_path(SECTIONS, rules.document_id).exists(), (
+        f"{rules.document_id} has rules but no committed headings, so its rules are checked "
+        "for being well-formed and not for being right"
+    )
+    assert baseline_path(BASELINES, rules.document_id).exists(), (
+        f"{rules.document_id} has rules but no recorded routing to reproduce. A rule file "
+        "without a baseline asserts nothing about the corpus it will build."
+    )
+
+
+@pytest.mark.parametrize("rule_file", RULE_FILES, ids=lambda p: p.stem)
+def test_the_rules_reproduce_the_recorded_routing_exactly(rule_file: Path) -> None:
+    rules = load_rules(rule_file)
+    differences = compare(rules, sections=SECTIONS, baselines=BASELINES)
+    assert not differences, "\n".join(
+        f"  position {position}: {' > '.join(path)}\n"
+        f"      recorded {want}, rules give {got}"
+        for position, path, want, got in differences[:20]
+    )
+
+
+@pytest.mark.parametrize("rule_file", RULE_FILES, ids=lambda p: p.stem)
+def test_no_rule_is_dead_shadowed_or_ambiguous(rule_file: Path) -> None:
+    rules = load_rules(rule_file)
+    report = check(rules, sections=SECTIONS)
+    assert not report.problems, "\n".join(f"  {problem}" for problem in report.problems)
+
+
+@pytest.mark.parametrize("rule_file", RULE_FILES, ids=lambda p: p.stem)
+def test_the_rules_actually_route_something(rule_file: Path) -> None:
+    # A file whose rules all miss would pass every check above: no rule is dead if there are no
+    # rules, and everything reproduces if the baseline is all default. The document then routes
+    # nothing while looking finished.
+    rules = load_rules(rule_file)
+    report = check(rules, sections=SECTIONS)
+    assert report.routed > 0, f"{rules.document_id}: no heading is claimed by any rule"
+
+
+def test_a_baseline_shorter_than_the_headings_is_refused(tmp_path: Path) -> None:
+    # The one failure position-alignment can produce: one file regenerated without the other.
+    document_id = "afu.bladder-tvim.2024-2026"
+    rules = load_rules(ROUTING / f"{document_id}.json")
+    truncated = read_baseline(baseline_path(BASELINES, document_id))[:-1]
+    write_baseline(truncated, baseline_path(tmp_path, document_id))
+
+    with pytest.raises(BaselineError, match="recorded settings"):
+        compare(rules, sections=SECTIONS, baselines=tmp_path)
+
+
+def test_a_reason_is_recorded_only_where_the_setting_is_absent() -> None:
+    # Releases have carried `not_applicable` next to a real setting. Recording that would make
+    # every rule file disagree with its own baseline for a difference that means nothing.
+    recorded = routed_settings(
+        [
+            {"disease_setting": "bladder_metastatic", "not_specified_reason": "not_applicable"},
+            {"disease_setting": "not_specified", "not_specified_reason": "spans_settings"},
+        ]
+    )
+    assert recorded == [("bladder_metastatic", None), ("not_specified", "spans_settings")]
+
+
+def test_a_chunk_with_no_setting_cannot_be_recorded() -> None:
+    with pytest.raises(BaselineError, match="no disease_setting"):
+        routed_settings([{"section_path": ["anything"]}])

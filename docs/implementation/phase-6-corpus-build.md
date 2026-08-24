@@ -162,7 +162,7 @@ OneDrive sources  +  poc_document_manifest.json   (curation — already done)
 [1] prepare    markdown → chunks: section_path, citation, page spans, hashes
    │           deterministic. no clinical judgment. fails loudly on unrepaired PDF text.
    ▼
-[2] route      routing/<document_id>.yaml → disease_setting, therapy_line,
+[2] route      routing/<document_id>.json → disease_setting, therapy_line,
    │           clinical_purpose, agent_roles, not_specified_reason
    │           ← the only stage carrying clinical judgment
    ▼
@@ -183,19 +183,24 @@ behaviour would defeat the check.
 Today routing is a Python function with a branch per document. At fifty documents that is a
 two-thousand-line `if` tree nobody can review.
 
-```yaml
-# corpus/routing/afu.bladder-tvnim.2024-2026.yaml
-document_id: afu.bladder-tvnim.2024-2026
-default:
-  setting: bladder_nmibc_unspecified_risk
-rules:
-  - match_section: "tres haut risque"        # BEFORE "haut risque" — order is correctness
-    setting: bladder_nmibc_very_high_risk
-  - match_section: "haut risque"
-    setting: bladder_nmibc_high_risk
-  - match_section: "cis isole"
-    setting: bladder_nmibc_cis
+```json
+// corpus/routing/afu.bladder-tvnim.2024-2026.json
+{
+  "document_id": "afu.bladder-tvnim.2024-2026",
+  "default": {"setting": "bladder_nmibc_unspecified_risk"},
+  "rules": [
+    {"match_section": "tres haut risque", "setting": "bladder_nmibc_very_high_risk",
+     "note": "BEFORE 'haut risque' — order is correctness"},
+    {"match_section": "haut risque", "setting": "bladder_nmibc_high_risk"},
+    {"match_section": "cis isole", "setting": "bladder_nmibc_cis"}
+  ]
+}
 ```
+
+**JSON rather than YAML**, decided when the engine was built and recorded here so the two agree:
+every other corpus artefact is JSON, PyYAML is only a transitive dependency, and a per-rule
+`note` carries what a YAML comment would have — with the advantage that it survives
+round-tripping and can be shown to a reviewer.
 
 Three properties code does not give:
 
@@ -313,12 +318,14 @@ report is the template for doing so.
 
 ### 4.6 Routing probes are not the retrieval evaluation
 
-```yaml
-# corpus/probes.yaml
-- question: "BCG dans une TVNIM à haut risque"
-  filter: {cancer_type: bladder, disease_setting: bladder_nmibc_high_risk}
-  must_reach: [afu.bladder-tvnim.2024-2026]
-  must_not_reach: {disease_setting: [bladder_metastatic]}
+```json
+// corpus/probes.json
+[
+  {"question": "BCG dans une TVNIM a haut risque",
+   "filter": {"cancer_type": "bladder", "disease_setting": "bladder_nmibc_high_risk"},
+   "must_reach": ["afu.bladder-tvnim.2024-2026"],
+   "must_not_reach": {"disease_setting": ["bladder_metastatic"]}}
+]
 ```
 
 A dozen of these. They ask **"did the routing route?"** — a build gate, deterministic, seconds,
@@ -368,11 +375,12 @@ person behind it — the same reasoning that made `load` a command rather than a
 ### 5.2 Artefact layout
 
 ```
-apps/api/rcpia/corpus/                 builder                      ← repo
-apps/api/rcpia/corpus/routing/*.yaml   rules, clinician-reviewable  ← repo
-apps/api/rcpia/corpus/sections/*.txt   section-path fixture for CI  ← repo
-apps/api/rcpia/corpus/probes.yaml      routing gate                 ← repo
-data/corpus-releases/<release_id>/     emitted release              ← gitignored
+apps/api/rcpia/corpus/                        builder                       ← repo
+apps/api/rcpia/corpus/routing/*.json          rules, clinician-reviewable   ← repo
+apps/api/rcpia/corpus/sections/*.jsonl        section-path fixture for CI   ← repo
+apps/api/rcpia/corpus/baselines/*.jsonl       routing this reproduces       ← repo
+apps/api/rcpia/corpus/probes.json             routing gate                  ← repo
+data/corpus-releases/<release_id>/            emitted release               ← gitignored
 ```
 
 What changes: `rcpia-corpus-v4.0` is in the database because somebody built it by hand. After
@@ -389,11 +397,14 @@ plus the sources. **The corpus stops being an artefact we receive and becomes on
 |---|---|---|
 | **Core urology** — EAU, AUA, AFU, NCCN, ESMO, WHO classification, TNM/AJCC, RECIST | ~32 | what the RCP decides on |
 | **Instruments** — G8, IPSS, IIEF-5, MNA, Katz ADL, Mini-GDS, Pallia 10 | ~11 | `fact_schema` already extracts every one and nothing interprets them |
-| **SIOG** — ref-27 | 4 | already loaded; **absent from the curation manifest** |
-| **Psycho-oncology** — ref-21/22/23 | 18 of 29 | triaged; see §6.2 |
+| **SIOG** — ref-27 | **5** | 2014, 2015 and the 2020 bladder paper stay; **2010 excluded**, **Boyle 2019 and ESMO/SIOG 2024 added** (24 Aug); still **absent from the curation manifest** |
+| ~~**Psycho-oncology** — ref-21/22/23~~ | **0** | **excluded from v5 by the clinician, 24 August 2026** — see §6.2 |
 | **Nutrition** — ASPEN (ref-16), ESPEN (ref-17) | ~4 | see §6.3 |
+| **French geriatric urology** — AFU 2019 *Onco-urologie du patient âgé* | 3 | in scope 24 Aug; **not held — must be obtained**, see §6.5 |
 
-Roughly **69 documents**, against v4's 10.
+Roughly **54 documents**, against v4's 10 — of which **3 are not yet held**. It was ~68 until
+the psycho-oncology tranche was excluded (§6.2); the SIOG and AFU changes of 24 August added
+back four; and AUA curation may take it lower again.
 
 ### 6.1 SIOG is missing from the curation
 
@@ -404,16 +415,49 @@ The coverage proof would therefore pass while silently omitting documents curren
 Same failure shape as the one this whole document exists to fix: something real exists, is not
 declared, and nothing notices. Add ref-27 to the curation before v5 builds.
 
-### 6.2 Psycho-oncology stays in, minus what has been superseded
+### 6.2 Psycho-oncology is out of v5 — decided by the clinician, and the material stays
+
+**The clinician has answered the question this section was waiting on.** There is no
+psycho-oncologist on the panel for this version, so no agent role exists that could retrieve this
+material, and it does not enter v5. The decision explicitly leaves the door open: the agent may
+be added later.
+
+**The material is kept, not discarded.** ref-21, ref-22 and ref-23 stay in the reference library
+untouched, the triage below stays as the record of what would be loaded, and every one of the 29
+documents is carried in the release manifest as:
+
+```json
+{"disposition": "excluded",
+ "reason": "no_psycho_oncology_agent_in_v1",
+ "note": "Clinical scope decision, 24 August 2026. Triaged and ready; see phase-6-corpus-build.md 6.2."}
+```
+
+That wording matters. `"pending clinical scope decision"` was the placeholder while nobody had
+decided; a decided exclusion that still reads as pending would invite the same question again in
+six months. And an exclusion recorded with a reason is the whole point of the coverage proof —
+29 documents that vanish silently and 29 documents that are deliberately out must not look the
+same.
+
+**Loading it anyway was considered and rejected.** Passages no role can filter for are passages
+no agent can retrieve: embedding cost paid for material that is unreachable by construction, and
+a corpus whose document count overstates what it can answer. Routing it to
+`palliative_supportive` instead — the nearest existing role — was also rejected, because that
+puts psycho-oncology guidance in front of the palliative agent, which is precisely the scope
+decision the clinician has just declined to make.
+
+Everything below is the triage, retained for whenever the agent is added.
+
+---
 
 Triaged in `docs/reviews/ref-23-triage-prompt.md` and its two reports: 5 IN, 15 PARTIAL, 8 OUT,
 about 132 chunks. Excluded material is workforce (clinician burnout, training), service
 organisation (how French hospitals arrange psychological care), and psychometric methodology.
 
-**Dropping the tranche was proposed and rejected.** The argument was that it dates from
-2009–2019 — but `siog.prostate.2010` is already in the corpus and nobody raised currency for
-it. Age is not the discriminator, and deferring the tranche would have repeated exactly the
-"its own release later" move that produced the four-document slice.
+**Dropping the tranche had earlier been proposed and rejected**, on the grounds that its age
+(2009–2019) was not a discriminator — `siog.prostate.2010` is in the corpus and nobody raised
+currency for it — and that deferring a tranche is how the four-document slice happened. That
+reasoning stands for a deferral made on engineering grounds. It does not apply here: this is a
+clinical scope decision about who sits on the panel, and it is not ours.
 
 What is real is that specific sections give advice since reversed. Those are excluded by
 section path, which the triage supplied:
@@ -466,6 +510,40 @@ Five roles were also rendering through the English fallback in a French clinical
 
 ---
 
+### 6.5 Geriatric oncology — the editions were wrong, and a French source exists
+
+Settled 24 August by a literature search; report at
+`ref-27/_current-editions/search-report-2026-08-24.md`, decision recorded in `decisions.md`.
+
+| document | v5 |
+|---|---|
+| `siog.prostate.2010` | **excluded** — superseded twice over |
+| Boyle 2019, *Eur J Cancer* 116:116-136 | **added** — the current dedicated SIOG prostate document |
+| Wildiers 2014, Decoster 2015 | kept — still SIOG's own listed CGA and screening references |
+| Mottet 2020 bladder | kept — current and unsuperseded |
+| Loh 2024, ESMO/SIOG, *ESMO Open* 9(8):103657 | **added** as a joint working-group position paper, **not** as a new edition of 2014/2015 |
+| AFU 2019, *Onco-urologie du patient âgé* — 3 chapters | **in scope, not held** |
+
+Three things this constrains in the builder:
+
+- **`publisher` must be the publisher, not the society.** All four held SIOG documents record
+  "International Society of Geriatric Oncology"; the publishers are Wiley, Elsevier, ASCO and
+  Oxford. Same error as the `SFFPO_` prefix in ref-23.
+- **`licence_status` must be evidenced.** All four say `open_access_copy`; only the 2010 paper is
+  confirmed so. The 2020 bladder paper is paywalled at the publisher and its `source_url` is a
+  bare DOI pointing at that paywall. New files are CC BY-NC 4.0 and CC BY-NC-ND 4.0 — the **ND**
+  on the 2024 paper permits reproducing the unmodified work and producing but not sharing adapted
+  material.
+- **Citations must carry journal pagination, not PDF pagination.** The 2019 file is a 43-page
+  accepted manuscript with a HAL cover; the article is 21 pages at 116-136. A page span read off
+  the PDF would not resolve for a clinician holding the journal.
+
+**The "2017 SIOG update" does not exist** and should not be searched for again. It is absent from
+Europe PMC and Crossref. The 2014 update is real but paywalled with no lawful free copy. Those
+two facts explain the identical 12,578-byte error pages in `ref-27/_invalid_downloads/`.
+
+---
+
 ## 7. Order of work
 
 | step | deliverable | blocked on |
@@ -473,14 +551,14 @@ Five roles were also rendering through the English fallback in a French clinical
 | 1 | `corpus/` package skeleton; rule schema; rule engine + tests | nothing |
 | 2 | Section-path extraction; fixture generator; dead-rule check | 1 |
 | 3 | Port chunking from `build_corpus_v2_slice.py` into stage 1 | nothing |
-| 4 | Re-express the 4 existing documents' rules as YAML; **byte-identical routing to v4.0** | 1, 2 |
+| 4 | Re-express the hand-tuned documents' rules as data; **byte-identical routing to v4.0** | 1, 2 |
 | 5 | Manifest emission, self-checked against `rcpia.evidence.manifest` | 3 |
-| 6 | `probes.yaml` + the stage-4 verifier | 4, 5 |
+| 6 | `probes.json` + the stage-4 verifier | 4, 5 |
 | 7 | Rules for the instruments tranche (~11 documents) | 6 |
 | 8 | Rules for core urology (~32 documents) | 6 |
-| 9 | Psycho-oncology (18 documents), per §6.2 | 6 |
+| ~~9~~ | ~~Psycho-oncology (18 documents)~~ — **dropped from v5**, per §6.2 | — |
 | 10 | Nutrition — ASPEN, ESPEN (~4 documents), per §6.3 | 6 |
-| 11 | Build, load, run probes → **v5.0** | 7, 8, 9, 10 |
+| 11 | Build, load, run probes → **v5.0** | 7, 8, 10 |
 | 12 | CI job for rule-file validation | 2 |
 
 Three corrections to the source inventory must land before step 5, because each is an omission
@@ -488,14 +566,56 @@ the coverage proof would otherwise pass over: **add ref-27 (SIOG) to the curatio
 **re-check every folder marked `portal_or_metadata_only`** for the ref-16 pattern (§6.3), and
 **resolve `safety_reviewer`** in the role vocabulary (§6.4).
 
-**Step 4 is the one that proves the design.** Re-expressing the four hand-tuned documents as
-YAML must reproduce v4.0's routing exactly. If the data format cannot express what the Python
+**Step 4 is the one that proves the design.** Re-expressing the hand-tuned documents as rule
+data must reproduce v4.0's routing exactly. If the data format cannot express what the Python
 already does, that is the moment to find out — before fifty documents are written in it, not
-after.
+after. It did find two such things, and one document that was never hand-tuned at all: see
+§7.1.
 
 Steps 7 and 8 are the long grind, and they will not finish in one sitting.
 
 ---
+
+### 7.1 Step 4, as it actually went — and why EAU moved
+
+Done for three documents. `afu.prostate.2024-2026`, `afu.bladder-tvim.2024-2026` and
+`afu.bladder-tvnim.2024-2026` route **233 of 233 passages identically to v4.0**, with a clean
+audit. The rules are in `corpus/routing/`, the routing they reproduce is recorded in
+`corpus/baselines/`, and `tests/test_corpus_baseline.py` re-proves it with no OneDrive, no
+database and no PDFs — so the guarantee survives in CI instead of in a commit message.
+
+**The format held, and cost two workarounds worth knowing about.** The Python matched `suivi`
+with `startswith` and `cn1` with a word-boundary regex; the rule format has neither, so both are
+substring rules verified against the fixture to claim exactly the same passages, with the
+reasoning in the rule's `note`. Separately, two rules were each claiming two different chapters —
+`preservation vesicale` reached both the bladder-preservation chapter and the unfit-patient one,
+`metastatique` reached both staging and genetics. The audit refused them, correctly: both wanted
+all their matches, but one rule spanning two chapters cannot survive either chapter being
+renamed. Each was split into two rules naming one chapter apiece.
+
+**`eau.prostate.2026` is not a hand-tuned document, and step 4 cannot include it.** Its v4
+setting was derived in v3 from the section path *plus the first 900 characters of the passage* —
+the body matching this document rejects in §2. Measured: **84 of 443 passages depend on that
+text**, and the results include a passage about diabetes and metformin routed to locally advanced
+disease, section 6.3.3.a routed to intermediate risk from inside a chapter titled *high-risk
+localised disease*, and section 6.7.15 — *non-metastatic castrate-resistant* — routed to
+metastatic hormone-sensitive. Reproducing v4.0 here means reproducing the bug.
+
+Writing honest path rules for it instead does not work yet, for two reasons that are stage-1
+problems and not rule-format ones:
+
+- **Substring matching is unsafe against EAU's numbering.** `"5.1"` matches 18 headings, 12 of
+  them wrongly — `5.5.1`, `6.5.1`. A trailing space does not save it: `"5.1 "` still matches
+  `5.5.1 Systematic biopsy strategy`. Anchoring a rule to the start of a path is not expressible
+  today, and would be the change to make if EAU needs it.
+- **The heading hierarchy is broken.** **343 of 443 passages have a first path element that is
+  already a numbered subsection** — `6.4.5.b.3.b.2 Morbidity` arrives with no parent above it. A
+  rule naming a chapter cannot reach children that do not record their chapter, so no
+  chapter-level rule can work until the paths are rebuilt.
+
+Both are fixed by stage 1. **EAU therefore moves from step 4 to after step 3**, and no rule file
+for it is committed: a rule file in this repository is one that reproduces a baseline, and the
+tests enforce that rather than trusting it.
 
 ## 8. What this does not do
 
@@ -511,7 +631,8 @@ Steps 7 and 8 are the long grind, and they will not finish in one sitting.
 
 ## 9. Open questions
 
-- **Psycho-oncology scope** — pending the ref-23 triage.
+- ~~**Psycho-oncology scope**~~ — **answered 24 August 2026**: no psycho-oncologist on the
+  panel for this version, material retained and excluded with a reason. See §6.2.
 - **`ctnm` is an extraction problem, not a corpus one.** Corrected after this document was
   first written: the clinical stage *is* in the dossiers, in the rectal-examination line —
   `Toucher rectal : induration de la base gauche classé T2b` (dossier 7),

@@ -1,0 +1,42 @@
+{
+  "document_id": "afu.bladder-tvim.2024-2026",
+  "note": "AFU muscle-invasive bladder. The treatment chapters name their setting; the diagnostic and staging chapters deliberately do not, and are left absent rather than guessed at.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "not_determinable",
+    "note": "Staging, pathology and biomarker sections apply across settings, but the rules cannot say which -- so this is the honest 'could not place it', and it is the number step 4 exists to move down."
+  },
+  "rules": [
+    {
+      "match_section": "traitements des tvim metastatiques",
+      "setting": "bladder_metastatic",
+      "note": "Plural 'Traitements'. 'Traitement des TVIM non metastatiques' is the other chapter and does not contain this needle, which is why the two never cross."
+    },
+    {
+      "match_section": "traitement des tvim non metastatiques",
+      "setting": "bladder_mibc_non_metastatic"
+    },
+    {
+      "match_section": "strategies possibles de preservation vesicale",
+      "setting": "bladder_mibc_non_metastatic"
+    },
+    {
+      "match_section": "ne pouvant pas recevoir un traitement optimal",
+      "setting": "bladder_mibc_non_metastatic",
+      "note": "The heading for the unfit patient ends '...par chirurgie ou preservation vesicale', so a rule naming 'preservation vesicale' claimed this chapter as well as the bladder-preservation one. Both belong here, but a single rule spanning two chapters is the ambiguity the audit refuses -- and refusing it is right, because the next edition could move one of them. Two rules, each naming one chapter."
+    },
+    {
+      "match_section": "traitement adjuvant",
+      "setting": "bladder_mibc_non_metastatic"
+    },
+    {
+      "match_section": "suivi",
+      "setting": "bladder_mibc_non_metastatic",
+      "note": "The Python matched this with startswith, which the rule format has no way to express. Verified against the fixture: 'suivi' occurs in exactly one heading of this document, so a substring match takes the same chunks. If a later edition adds a second 'suivi' anywhere, the audit's ambiguity check fires before the corpus is built."
+    },
+    {
+      "match_section": "traitement symptomatique",
+      "setting": "bladder_locally_advanced_non_metastatic"
+    }
+  ]
+}

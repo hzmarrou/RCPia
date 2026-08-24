@@ -148,6 +148,95 @@ be filled, which is the difference between a gap and a dead end.
 One smaller thing this surfaced: a label in `LABEL_INDEX` also *terminates* an imaging
 report, so a broad alias is not free. A bare `Motif` alias was dropped for that reason.
 
+## 2026-08-24 — No psycho-oncology agent in v1, and the material is kept
+
+The treating clinician was asked whether psycho-oncology enters scope, because loading
+`ref-21`, `ref-22` and `ref-23` means adding an agent role, which means adding a panel member,
+which is a decision about what an RCP fiche should cover. **The answer is no for this version,
+with the agent possibly added later.**
+
+Consequences, all of them recorded rather than assumed:
+
+- **29 documents leave the v5 scope**, taking it from roughly 68 to roughly 50.
+- **Nothing is deleted.** The three reference folders stay as they are, and the ref-23 triage —
+  5 IN, 15 PARTIAL, 8 OUT, with the superseded sections named — stays in
+  `phase-6-corpus-build.md` §6.2 as the record of what would be loaded on the day the agent
+  exists.
+- **Every one of the 29 is carried in the release manifest** as `disposition: excluded`,
+  `reason: no_psycho_oncology_agent_in_v1`. Not `pending clinical scope decision`, which was the
+  placeholder while nobody had decided and would invite the same question again. An exclusion
+  with a reason is the difference between a decision and an omission, which is what the manifest
+  exists to make visible.
+- **The four current editions fetched on 23 August** — NCCN Distress V.2.2026, Pan-Canadian
+  Distress v2 2015, CAPO Survivorship 2025, AFSOS Orientation 2018 — stay in
+  `ref-23/_current-editions/` unconverted. They were fetched for a tranche that is no longer in
+  this release, and re-fetching later would repeat work already done.
+
+Loading the material without an agent role was rejected: a passage no role can filter for cannot
+be retrieved by anything, so it would be embedding cost spent on material unreachable by
+construction, and a document count that overstates what the corpus can answer. Routing it to
+`palliative_supportive` — the nearest existing role — was rejected for the stronger reason that
+it would put psycho-oncology guidance in front of the palliative agent, making by default the
+scope decision the clinician has just made deliberately.
+
+`AGENT_ROLES` in `rcpia/corpus/vocabulary.py` needs no change: no psycho-oncology role was ever
+added, so there is nothing to remove and nothing orphaned.
+
+**What does not change:** `rules/support.py` already emits *"Soutien psychologique — consultation
+de psycho-oncologie proposée dès l'annonce, au patient et à son entourage"* as a **standing**
+support item, meaning it applies to any patient entering an oncology pathway. That is unaffected
+by this decision and stays in every PPS. What the decision means is that the recommendation
+remains uncited, like the other standing items — there is no retrievable passage behind it, and
+under this scope there will not be one in v1.
+
+## 2026-08-24 — SIOG editions corrected, and French geriatric urology enters scope
+
+A literature search settled the three questions left open in `corpus-v5-change-request.md` §4.5.
+Its report is kept at `ref-27/_current-editions/search-report-2026-08-24.md`, beside the two
+files it retrieved.
+
+**What the search established.** The dedicated SIOG prostate lineage is 2010 → 2014 → **2019
+(Boyle et al., Eur J Cancer 116:116-136)**, and 2019 is current. The 2020 bladder position paper
+is current and unsuperseded. For geriatric assessment, SIOG still lists Wildiers 2014 and
+Decoster 2015 as its formal references. **The "2017 SIOG prostate update" does not exist** —
+absent from Europe PMC and Crossref — and the 2014 update is real but paywalled with no lawful
+free copy, which together explain the two 12,578-byte error pages in `ref-27/_invalid_downloads/`.
+**SoFOG publishes no guideline of its own**, so the SIOG-versus-SoFOG question was never a real
+choice.
+
+**Decided:**
+
+- **`siog.prostate.2010` is excluded from v5.** It has a genuine successor now. 17 of its 42
+  passages were already blocked as `historical_treatment_guidance_superseded` precisely because
+  nothing replaced them, and 21 more are bibliography — loading it beside the 2019 document would
+  put two editions of the same recommendations in front of the same query.
+- **Boyle 2019 and the 2024 ESMO/SIOG position paper enter v5.** The 2024 paper is loaded as a
+  *joint working-group position paper*, not as a new edition of Wildiers 2014 or Decoster 2015,
+  which stay. Neither the paper nor SIOG declares supersession, and recording one would be our
+  invention.
+- **AFU 2019, *Onco-urologie du patient âgé*, enters scope** — chapters on prostate
+  (Mongiat-Artus, pp. 828-839) and bladder (Neuzillet, pp. 840-848 and 849-864). Not currently
+  held; `ref-03` carries only the 2024-2026 AFU guideline pages. This is the French-language
+  geriatric source the change request asked whether one existed, from a body already in the
+  corpus. **It must be obtained before it can be scoped properly**, and it is Elsevier
+  (Progrès en Urologie), so access is not assumed.
+
+**Three metadata corrections this exposed, to be applied by the v5 builder rather than patched
+into the database:**
+
+1. **`publisher` is wrong on all four SIOG documents.** Every one records "International Society
+   of Geriatric Oncology" — the society that convened the task force, not the publisher (Wiley,
+   Elsevier, ASCO, Oxford). The same error the `ref-23` README flagged about the `SFFPO_` prefix.
+   A citation shown to a clinician has to resolve.
+2. **`licence_status` is overstated.** All four say `open_access_copy`; that is confirmed only for
+   the 2010 paper (CC BY-NC 2.5 via PMC). The 2020 bladder paper's publisher version is
+   **paywalled**, and its `source_url` is a bare DOI resolving to that paywall — the record
+   asserts open access while pointing at something that is not. The new files are CC BY-NC 4.0
+   (2019 accepted manuscript) and CC BY-NC-ND 4.0 (2024, note the **ND**).
+3. **The 2019 PDF is the accepted manuscript**, 43 pages with a HAL cover, against 21 journal
+   pages. Page spans taken from the PDF will not resolve against the published article, so the
+   citation must carry the journal pagination.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated

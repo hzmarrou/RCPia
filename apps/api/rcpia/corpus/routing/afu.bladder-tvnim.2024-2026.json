@@ -1,0 +1,41 @@
+{
+  "document_id": "afu.bladder-tvnim.2024-2026",
+  "note": "AFU non-muscle-invasive bladder. The guideline states its risk groups as headings under 'Classification pronostique', so routing follows the authors' own stratification rather than anything inferred from the passages.",
+  "default": {
+    "setting": "bladder_nmibc_unspecified_risk",
+    "note": "The whole document is about NMIBC, so a passage no rule claims is still NMIBC guidance -- diagnosis, resection technique, instillation practice -- and applies at any risk. Absent here means 'risk not narrowed', not 'unknown disease'."
+  },
+  "rules": [
+    {
+      "match_section": "tres haut risque",
+      "setting": "bladder_nmibc_very_high_risk",
+      "note": "MUST precede 'haut risque', which is a substring of it. Reversing these two lines silently routes every very-high-risk passage to high risk."
+    },
+    {
+      "match_section": "hauts risques",
+      "setting": "bladder_nmibc_high_risk",
+      "note": "'Nouvelles therapies pour les hauts risques' -- plural, so 'haut risque' does not reach it. Kept as its own rule rather than loosened, because a needle matching both singular and plural would also start matching 'tres haut risque'."
+    },
+    {
+      "match_section": "haut risque",
+      "setting": "bladder_nmibc_high_risk"
+    },
+    {
+      "match_section": "risque intermediaire",
+      "setting": "bladder_nmibc_intermediate_risk"
+    },
+    {
+      "match_section": "faible risque",
+      "setting": "bladder_nmibc_low_risk"
+    },
+    {
+      "match_section": "bas grade",
+      "setting": "bladder_nmibc_low_risk",
+      "note": "'Recidive sous forme d'une tumeur de bas grade multi-recidivante' -- the guideline treats recurrent low-grade disease as low risk without repeating the risk label."
+    },
+    {
+      "match_section": "cis isole",
+      "setting": "bladder_nmibc_cis"
+    }
+  ]
+}
