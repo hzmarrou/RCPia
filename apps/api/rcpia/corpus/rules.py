@@ -63,7 +63,9 @@ _RULE_FIELDS = frozenset(
         "exclude", "exclusion_reason", "every_occurrence", "match_leaf",
     }
 )
-_FILE_FIELDS = frozenset({"document_id", "default", "rules", "note"})
+_FILE_FIELDS = frozenset(
+    {"document_id", "default", "rules", "note", "furniture_ends_section"}
+)
 
 
 class RuleError(Exception):
@@ -149,6 +151,13 @@ class RoutingRules:
     default: Rule
     rules: tuple[Rule, ...]
     note: str = ""
+    # Whether a heading dropped as page furniture also ends the section it interrupts. A
+    # property of the document's layout rather than of its routing, but it lives here because
+    # this file is already the per-document declaration that someone reviews, and because a
+    # rule file written against the wrong reading of a document is exactly what it would
+    # produce. `rcpia.corpus.prepare.outline` explains the two layouts and why neither can be
+    # inferred from the markdown.
+    furniture_ends_section: bool = False
 
 
 @dataclass(frozen=True)
@@ -372,8 +381,19 @@ def parse_rules(document: Any, *, source: str = "rules") -> RoutingRules:
             "fire, and which one was meant cannot be recovered from the file."
         )
 
+    ends_section = body.get("furniture_ends_section", False)
+    if not isinstance(ends_section, bool):
+        raise RuleError(
+            f"{document_id} sets `furniture_ends_section` to {ends_section!r}; it is a "
+            "declaration about the document's layout and must be true or false"
+        )
+
     return RoutingRules(
-        document_id=document_id, default=default, rules=rules, note=body.get("note") or ""
+        document_id=document_id,
+        default=default,
+        rules=rules,
+        note=body.get("note") or "",
+        furniture_ends_section=ends_section,
     )
 
 

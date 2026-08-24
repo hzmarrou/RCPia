@@ -1,0 +1,103 @@
+{
+  "document_id": "nccn.prostate.6.2026",
+  "furniture_ends_section": true,
+  "note": "NCCN Clinical Practice Guidelines in Oncology: prostate cancer, version 6.2026. **`furniture_ends_section` is true for this document, and it is the reason it could be routed at all.** NCCN prints a version banner at `#` on every page while every real chapter is `##`. Dropping the banner as page furniture -- which it plainly is -- left each chapter attached to the last `#` that survived. Here that was `# Table of Contents`, holding 234 of the document's 394 passages. Declaring that the banner ends the section it interrupts puts the chapters back at the root, where a rule can name them.\n\nThe document is organised by treatment modality rather than by disease setting -- `PRINCIPLES OF RADIATION THERAPY` covers every stage at which radiation is offered -- so most of it spans settings honestly and stays on the default. What is routed is the discussion sections whose own titles name a disease state, which NCCN writes in its own abbreviations: mCSPC for metastatic castration-sensitive, mCRPC for metastatic castration-resistant, M0/M1 for the presence of metastases.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "spans_settings",
+    "note": "The treatment-principles chapters and the algorithm pages, which are written per modality and cross the disease states."
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "note": "75 passages, by far the largest block. One rule covers both spellings: the engine normalises `References` and `REFERENCES` to the same needle, and stating both is a repeat it refuses."
+    },
+    {
+      "match_section": "FOOTNOTES",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "ABBREVIATIONS",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "Table of Contents",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "Updates in Version",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "note": "What changed between editions. A fact about the document, not about a patient."
+    },
+    {
+      "match_section": "NCCN Clinical Practice Guidelines in Oncology",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "note": "The title block and its licence text."
+    },
+    {
+      "match_section": "M0 and M1 CRPC",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "note": "Stated before both CRPC rules below. Enzalutamide is discussed across the castration-resistant states in one section, and NCCN says so in the heading. Routing it to either state would hide it from the other half of the patients it is written about."
+    },
+    {
+      "match_section": "mCSPC",
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "every_occurrence": true,
+      "note": "NCCN's metastatic castration-sensitive: doublet therapies, capivasertib plus abiraterone in PTEN-deficient disease, metastasis-directed therapy for oligometastatic CSPC."
+    },
+    {
+      "match_section": "M1 Castration-Sensitive",
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "every_occurrence": true,
+      "note": "The same disease state written out rather than abbreviated."
+    },
+    {
+      "match_section": "mCRPC",
+      "setting": "prostate_metastatic_castration_resistant",
+      "every_occurrence": true,
+      "note": "Abiraterone, chemotherapy and immunotherapy, radiopharmaceuticals, radium-223."
+    },
+    {
+      "match_section": "M1 CRPC",
+      "setting": "prostate_metastatic_castration_resistant",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Biochemical Recurrence",
+      "setting": "prostate_biochemical_recurrence",
+      "every_occurrence": true,
+      "note": "Covers both the first recurrence after radical prostatectomy and the section on a second biochemical recurrence."
+    }
+  ]
+}
