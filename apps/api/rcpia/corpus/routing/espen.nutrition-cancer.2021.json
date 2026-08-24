@@ -1,0 +1,30 @@
+{
+  "document_id": "espen.nutrition-cancer.2021",
+  "note": "ESPEN practical guideline: Clinical Nutrition in cancer, 2021. The corpus's principal nutrition authority, and the anchor of a tranche that had no source at all before today -- `nutrition` was a role with nothing behind it while `fact_schema` extracted MNA, albumin and protein from every dossier.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Screening, requirements, oral and enteral and parenteral support, and the interventions that go with surgery, radiotherapy and systemic treatment. None of it is about a disease stage, and all of it is about a patient at any stage."
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Leaf-matched and every occurrence: the conversion files the reference list under whichever chapter happens to be last, so its path is not predictable but its own heading is."
+    },
+    {
+      "match_section": "ACKNOWLEDGEMENTS",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    }
+  ]
+}

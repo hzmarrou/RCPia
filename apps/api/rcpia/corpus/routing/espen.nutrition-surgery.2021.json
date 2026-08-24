@@ -1,0 +1,30 @@
+{
+  "document_id": "espen.nutrition-surgery.2021",
+  "note": "ESPEN practical guideline: Clinical nutrition in surgery, 2021. What dossier 2 needed and the corpus could not answer: pre-operative optimisation, fasting, early feeding and parenteral indications for an 85-year-old facing radical cystectomy.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Perioperative nutritional care, which applies to the operation rather than to the tumour stage."
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Leaf-matched and every occurrence: the conversion files the reference list under whichever chapter happens to be last, so its path is not predictable but its own heading is."
+    },
+    {
+      "match_section": "ARTICLE INFO",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    }
+  ]
+}

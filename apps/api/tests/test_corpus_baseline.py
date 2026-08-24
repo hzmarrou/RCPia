@@ -61,6 +61,11 @@ REVIEWED_NOT_REPRODUCED = {
     "siog.prostate.2019",
     "esmo-siog.geriatric-assessment.2024",
     "siog.geriatric-assessment.2014",
+    # Nutrition. ESPEN cancer is in corpus v4.0 in name only -- it was curated and never
+    # loaded; the other two arrived on 24 August.
+    "espen.nutrition-cancer.2021",
+    "espen.nutrition-surgery.2021",
+    "esmo.cancer-cachexia.2021",
 }
 
 # Documents whose rule file is deliberately nothing but a default. Nothing in them is about a
