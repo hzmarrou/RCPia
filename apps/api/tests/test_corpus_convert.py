@@ -416,3 +416,39 @@ def test_the_sidecar_is_json_and_readable(tmp_path) -> None:
     )
 
     assert is_current(pdf, markdown) is True
+
+
+PAGE_MARKERS = "\n\n".join(
+    f"# Page {n}\n\nSome body text for page {n}." for n in range(1, 16)
+)
+
+
+@pytest.mark.asyncio
+async def test_a_conversion_of_only_page_numbers_is_unusable(tmp_path) -> None:
+    # Four ESMO guidelines converted to nothing but `Page 1`, `Page 2`, ... Stage 1 accepted
+    # them -- they are headings -- so they were reported usable, and `adopt` then recorded that
+    # verdict as provenance, which made the converter skip them for good.
+    pdf = write_pdf(tmp_path)
+
+    result = await convert(pdf, parser=FakeParser(PAGE_MARKERS))
+
+    assert result.usable is False
+    assert "page numbers" in (result.refusal or "")
+
+
+def test_adoption_cannot_bless_a_page_number_conversion(tmp_path) -> None:
+    pdf = write_pdf(tmp_path)
+    markdown_path_for(pdf).write_text(PAGE_MARKERS, encoding="utf-8")
+
+    assert adopt(pdf).usable is False
+
+
+@pytest.mark.asyncio
+async def test_a_real_document_that_mentions_a_page_is_still_usable(tmp_path) -> None:
+    # One page marker among real headings is ordinary; the test is the share, not the presence.
+    pdf = write_pdf(tmp_path)
+    markdown = "# Chapter\n\nBody.\n\n## Section\n\nBody.\n\n# Page 4\n\nBody.\n"
+
+    result = await convert(pdf, parser=FakeParser(markdown))
+
+    assert result.usable is True

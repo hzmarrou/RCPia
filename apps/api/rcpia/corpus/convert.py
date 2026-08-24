@@ -25,6 +25,7 @@ document, when the document is acquired.
 import asyncio
 import hashlib
 import json
+import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -120,6 +121,14 @@ def is_current(pdf: Path, markdown: Path) -> bool:
     return sidecar.get("source_sha256") == digest(pdf)
 
 
+# A heading that is only a page number. Stage 1 accepts these -- they are headings, and the
+# document does have structure by its measure -- but a section path of `Page 17` says nothing
+# about what the passage is, so every rule written against it would be blind.
+_PAGE_HEADING = re.compile(r"^#+\s*Page\s+\d+\s*$", re.IGNORECASE)
+# Below this share of real headings the conversion is page furniture rather than structure.
+STRUCTURE_THRESHOLD = 0.5
+
+
 def inspect(
     markdown: str, *, source: str
 ) -> tuple[bool, str | None, int, int, tuple[str, ...]]:
@@ -128,13 +137,32 @@ def inspect(
     Artefacts are surveyed but do not make a conversion unusable on their own: `outline` is
     called with `allow_artefacts=True` so the report can say "converted, and it carries 27
     glyph codes" rather than refusing and leaving the operator nothing to look at.
+
+    **Passing stage 1 is not the same as being worth routing.** Four ESMO guidelines converted
+    to nothing but `Page 1`, `Page 2`, ... headings. Stage 1 accepted them -- they are headings,
+    and by its measure the document has structure -- so they were reported usable, and `adopt`
+    then recorded that verdict as provenance, which made the converter skip them for good. A
+    conversion whose headings are page numbers is refused here instead.
     """
-    heading_count = sum(1 for line in markdown.splitlines() if line.startswith("#"))
+    headings = [line for line in markdown.splitlines() if line.startswith("#")]
+    heading_count = len(headings)
     artefacts = tuple(find_pdf_artefacts(markdown))
     try:
         report = outline(markdown, source=source, allow_artefacts=True)
     except PrepareError as exc:
         return False, str(exc), heading_count, 0, artefacts
+
+    pages = sum(1 for line in headings if _PAGE_HEADING.match(line))
+    if heading_count and pages / heading_count > STRUCTURE_THRESHOLD:
+        return (
+            False,
+            f"{pages} of {heading_count} headings are page numbers, so this conversion "
+            "carries page furniture rather than document structure and nothing can be routed "
+            "against it",
+            heading_count,
+            len(report.sections),
+            artefacts,
+        )
     return True, None, heading_count, len(report.sections), artefacts
 
 
