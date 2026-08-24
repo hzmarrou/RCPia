@@ -1,0 +1,61 @@
+{
+  "document_id": "siog.bladder.2020",
+  "note": "SIOG's bladder cancer task force position paper, 2020, and still current -- the literature search of 24 August found no successor. It is organised by disease stage, so it routes more precisely than most geriatric material.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Introduction, methods and the general approach to geriatric assessment, which apply at any stage."
+  },
+  "rules": [
+    {
+      "match_section": "10. Summary",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "match_leaf": true,
+      "note": "The summary itself. Leaf-matched so it survives the exclusion below, which takes everything filed beneath it."
+    },
+    {
+      "match_section": "10. Summary",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "every_occurrence": true,
+      "note": "The reference list, and the citation fragments the conversion promoted to headings beside it -- `30911. BJU Int 2016;118(3):423-8.` is a heading in this markdown. All of them sit under the summary, and none is a passage."
+    },
+    {
+      "match_section": "4. Non muscle-invasive bladder cancer",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "every_occurrence": true,
+      "note": "MUST precede the muscle-invasive rule, which is a substring of this heading."
+    },
+    {
+      "match_section": "5. Muscle-invasive bladder cancer",
+      "setting": "bladder_mibc_non_metastatic",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "6. Neoadjuvant and adjuvant chemotherapy",
+      "setting": "bladder_mibc_non_metastatic",
+      "therapy_line": "neoadjuvant",
+      "every_occurrence": true,
+      "note": "The chapter dossier 2 needs: whether an 85-year-old with a clearance of 30 can have the cisplatin the textbook answer assumes."
+    },
+    {
+      "match_section": "7. Trimodality therapy",
+      "setting": "bladder_mibc_non_metastatic",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "8. Alternative bladder-preserving techniques",
+      "setting": "bladder_mibc_non_metastatic",
+      "every_occurrence": true,
+      "note": "What is offered when radical cystectomy is not, which is the question an older patient raises."
+    },
+    {
+      "match_section": "9. Metastatic bladder cancer",
+      "setting": "bladder_metastatic",
+      "every_occurrence": true
+    }
+  ]
+}

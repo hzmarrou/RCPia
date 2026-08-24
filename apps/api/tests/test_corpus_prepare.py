@@ -211,3 +211,42 @@ def test_a_heading_repeated_a_few_times_is_kept() -> None:
 def test_a_document_that_is_all_furniture_is_refused() -> None:
     with pytest.raises(PrepareError, match="page furniture and no structure"):
         outline("\n".join(["# BANNER", "Body."] * 20))
+
+
+CITATIONS = """# Discussion
+
+Body of the discussion.
+
+# References
+
+# 1. Extermann M, Aapro M, Bernabei R, et al. Use of comprehensive geriatric assessment.
+
+Journal, year, pages.
+
+# 2. Puts MT, Hardt J, Monette J, et al. Use of geriatric assessment for older adults.
+
+Journal, year, pages.
+"""
+
+
+def test_a_bibliography_converted_into_headings_is_marked() -> None:
+    # SIOG's screening paper turns its whole bibliography into numbered headings, so the numbered
+    # strategy reads 64 citations as chapters -- 71 of its 109 passages. A routing rule cannot
+    # fix that: a rule matches a heading it can name, and there is no naming sixty-four citations.
+    report = outline(CITATIONS)
+    marked = [s for s in report.sections if s.is_reference]
+    assert len(marked) == 2
+    assert all(s.section_path[-1].startswith(("1.", "2.")) for s in marked)
+
+
+def test_a_chapter_title_is_not_mistaken_for_a_citation() -> None:
+    # `3. EPIDEMIOLOGY AND AETIOLOGY` matched a looser version of this pattern: `EPIDEMIOLOGY` and
+    # `AND` have a citation's shape and the wrong case. Requiring lower case in the surname is
+    # what separates them, and it was found by testing against the whole library rather than by
+    # reasoning about it.
+    report = outline("# 3. EPIDEMIOLOGY AND AETIOLOGY\n\nBody.\n")
+    assert not any(s.is_reference for s in report.sections)
+
+
+def test_an_ordinary_section_is_not_a_reference() -> None:
+    assert not any(s.is_reference for s in outline(SATURATED).sections)

@@ -82,6 +82,10 @@ class Section:
     text: str
     line_start: int
     line_end: int
+    # Whether this "section" is really one line of a bibliography. Marked here rather than left
+    # to a routing rule, because a rule matches a heading it can name and there is no naming
+    # sixty-four citations. See `_CITATION_HEADING`.
+    is_reference: bool = False
 
 
 # Above this many repetitions a heading cannot be identifying anything, so it is dropped from
@@ -97,6 +101,18 @@ class Section:
 # which passage it introduces. Neither can identify a section, which is the only thing a path
 # element is for.
 RECURRING_HEADING_LIMIT = 15
+
+# A numbered heading that is really a reference line. SIOG's screening paper converts its whole
+# bibliography into headings -- `1. Extermann M, Aapro M, Bernabei R, et al. Use of...` -- and
+# because they are numbered, the numbered strategy reads all sixty-four as chapters. That is 64
+# of its 102 headings and 71 of its 109 passages.
+#
+# The surname must carry lower case and the initials must be followed by a comma or a period,
+# which is what separates a citation from a chapter title: `3. EPIDEMIOLOGY AND AETIOLOGY` matched
+# a looser version of this pattern, because `EPIDEMIOLOGY` and `AND` have the right shape and the
+# wrong case. Measured against every document in the library: 64 hits in the screening paper and
+# none at all in the other twelve, across 2,344 headings.
+_CITATION_HEADING = re.compile(r"^\d{1,3}\.\s+[A-Z][a-z][A-Za-z'’-]*\s+[A-Z]{1,3}[,.]")
 
 
 @dataclass(frozen=True)
@@ -280,7 +296,13 @@ def outline(
         end = headings[index + 1].line - 1 if index + 1 < len(headings) else len(lines)
         body = "\n".join(lines[heading.line : end]).strip()
         sections.append(
-            Section(section_path=path, text=body, line_start=heading.line, line_end=end)
+            Section(
+                section_path=path,
+                text=body,
+                line_start=heading.line,
+                line_end=end,
+                is_reference=bool(_CITATION_HEADING.match(heading.label)),
+            )
         )
 
     return Outline(

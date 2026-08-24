@@ -357,10 +357,15 @@ def parse_rules(document: Any, *, source: str = "rules") -> RoutingRules:
         for index, record in enumerate(raw_rules)
     )
 
-    seen: Counter[tuple[str, int | None]] = Counter(
-        (rule.needle, rule.occurrence) for rule in rules
+    # `match_leaf` is part of the identity, because two rules naming the same heading are two
+    # different rules when one means the heading and the other means everything filed beneath it.
+    # SIOG's bladder paper needs exactly that pair: `10. Summary` as a leaf is the summary and
+    # keeps its setting, while `10. Summary` as a path is the reference list under it and is
+    # excluded. Keying on the needle alone called the second one dead, which it is not.
+    seen: Counter[tuple[str, int | None, bool]] = Counter(
+        (rule.needle, rule.occurrence, rule.match_leaf) for rule in rules
     )
-    duplicated = sorted(needle for (needle, _), count in seen.items() if count > 1)
+    duplicated = sorted(needle for (needle, _, _), count in seen.items() if count > 1)
     if duplicated:
         raise RuleError(
             f"{document_id} repeats rules for {', '.join(duplicated)}. The second can never "

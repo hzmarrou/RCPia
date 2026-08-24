@@ -1,0 +1,44 @@
+{
+  "document_id": "esmo-siog.geriatric-assessment.2024",
+  "note": "The ESMO/SIOG Cancer in the Elderly Working Group position paper, 2024. **Loaded as a joint position paper, not as a new edition of Wildiers 2014 or Decoster 2015** -- neither the paper nor SIOG's own guidance pages say it supersedes them, and recording a supersession nobody declared would be our invention. What it adds is roughly a decade of trial evidence on geriatric assessment and management.\n\nNothing in it is about a disease stage, so the rule file is exclusions and a default.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Geriatric assessment and management, tools, timing, and who to assess. True at every stage of every cancer, which is what `general_principle` states -- the same shape the 2014 and 2015 SIOG papers already carry at 114 of 114 and 81 of 81 passages."
+  },
+  "rules": [
+    {
+      "match_section": "REFERENCES",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "ACKNOWLEDGEMENTS",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "FUNDING",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "DISCLOSURE",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    }
+  ]
+}

@@ -53,6 +53,13 @@ REVIEWED_NOT_REPRODUCED = {
     "afu.prostate-geriatric.2019",
     "afu.bladder-geriatric-epidemiology.2019",
     "afu.bladder-geriatric-management.2019",
+    # SIOG. The bladder and screening papers are in corpus v4.0, and these rules do not reproduce
+    # what it carries: v4.0 routed them from the passage body like everything that was not AFU.
+    # The other two arrived on 24 August.
+    "siog.bladder.2020",
+    "siog.geriatric-screening.2015",
+    "siog.prostate.2019",
+    "esmo-siog.geriatric-assessment.2024",
 }
 
 # Documents whose rule file is deliberately nothing but a default. Nothing in them is about a
@@ -62,6 +69,11 @@ REVIEWED_NOT_REPRODUCED = {
 # one that never had any, and that is the failure the routing audit exists to catch.
 DEFAULT_ONLY = {
     "sfap.pallia10",
+    # Nothing in a paper about which geriatric screening instrument to use, at what cutoff, is
+    # about a disease stage. Corpus v4.0 agrees: all 81 of its passages are `general_principle`.
+    # Its bibliography is marked by stage 1 rather than by a rule -- 64 of its 102 headings are
+    # citations, and there is no naming sixty-four of them.
+    "siog.geriatric-screening.2015",
 }
 
 

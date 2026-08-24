@@ -1,0 +1,66 @@
+{
+  "document_id": "siog.prostate.2019",
+  "note": "SIOG's current prostate recommendations, Boyle et al. 2019, replacing the 2010 edition this corpus carried until today. The 2010 paper had 17 of its 42 passages blocked as superseded treatment guidance and is excluded from v5; this is what supersedes them.\n\nThe accepted manuscript from HAL, so its pages do not match the journal's 116-136 -- citations must carry the journal pagination rather than the PDF's.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Health status evaluation, geriatric screening and comprehensive assessment apply across the disease course. This is the paper's centre of gravity and the reason it is in the corpus."
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Search strategy and selection criteria",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Contributors",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Conflict of Interest",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Metastatic castration resistant prostate cancer",
+      "setting": "prostate_metastatic_castration_resistant",
+      "every_occurrence": true,
+      "note": "MUST precede the castration-sensitive rule: neither is a substring of the other, but keeping the more specific state first is the habit that stops the next edition breaking this file quietly."
+    },
+    {
+      "match_section": "Newly diagnosed metastatic castration-sensitive disease",
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Surgery, focal therapy and surveillance",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "every_occurrence": true,
+      "note": "Curative-intent local treatment, so non-metastatic. The chapter discusses what each option costs an older man rather than which risk group should have it."
+    },
+    {
+      "match_section": "External radiotherapy and brachytherapy",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "every_occurrence": true
+    }
+  ]
+}
