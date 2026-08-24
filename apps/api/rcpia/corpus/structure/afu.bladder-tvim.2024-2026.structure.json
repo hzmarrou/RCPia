@@ -1,0 +1,82 @@
+{
+  "document_id": "afu.bladder-tvim.2024-2026",
+  "note": "Derived from the section paths in corpus v4.0, so it records what the hand-written builder did rather than a fresh opinion about the document.",
+  "majors": [
+    "Traitement des TVIM non métastatiques",
+    "Bilan diagnostique",
+    "Traitement adjuvant",
+    "Les stratégies possibles de préservation vésicale",
+    "Traitements des TVIM métastatiques",
+    "Stadification, spécificités anatomopathologiques et biomarqueurs",
+    "Suivi",
+    "Annexes et tableaux",
+    "Traitement d’un patient ne pouvant pas recevoir un traitement optimal par chirurgie ou préservation vésicale",
+    "Traitement symptomatique"
+  ],
+  "appendix_major": "Annexes et tableaux",
+  "topics_by_major": {
+    "Traitement des TVIM non métastatiques": [
+      "Autres traitements néoadjuvants",
+      "Chimiothérapie néoadjuvante à base de cisplatine",
+      "Choix de la dérivation urinaire",
+      "Curage ganglionnaire",
+      "Examens extemporanés",
+      "Indications et délais",
+      "Le traitement standard des TVIM non métastatiques",
+      "Optimisation préopératoire et postopératoire",
+      "Préservation sexuelle",
+      "Urètre",
+      "Voie d’abord"
+    ],
+    "Bilan diagnostique": [
+      "Évaluation à distance",
+      "Ganglionnaire",
+      "Métastatique",
+      "RTUV",
+      "Stadification locale"
+    ],
+    "Traitement adjuvant": [
+      "La chimiothérapie adjuvante",
+      "La radiothérapie adjuvante",
+      "L’immunothérapie adjuvante"
+    ],
+    "Les stratégies possibles de préservation vésicale": [
+      "La cystectomie partielle",
+      "Le traitement trimodal (TTM)",
+      "Modalités du TTM",
+      "Situation néoadjuvante au TTM",
+      "Surveillance TTM"
+    ],
+    "Traitements des TVIM métastatiques": [
+      "Locorégionale",
+      "Stratégies de traitement de 1 re ligne",
+      "Stratégies de traitement de 2 e ligne"
+    ],
+    "Stadification, spécificités anatomopathologiques et biomarqueurs": [
+      "Nectine-4",
+      "Spécificités anatomopathologiques",
+      "Statut FGFR",
+      "Statut MSI",
+      "Statut PD-L1",
+      "TNM"
+    ],
+    "Annexes et tableaux": [
+      "Tableau I - Protocole de réhabilitation périopératoire pour une récupération améliorée après cystectomie (RAAC)."
+    ]
+  },
+  "excluded": [
+    "Plan",
+    "Biomarqueurs",
+    "Traitement chirurgical : cystectomie",
+    "Situation adjuvante au TTM",
+    "À distance",
+    "Figure 1",
+    "Déclaration de liens d’intérêts",
+    "Recommandation 1 - Bilan d’extension d’une TVIM.",
+    "Recommandation 2 - Traitements périopératoires.",
+    "Recommandation 3 - Traitements des TVIM localisées.",
+    "Recommandation 4 - Traitement des TVIM métastatiques.",
+    "Recommandation 5 - Surveillance des TVIM.",
+    "Références"
+  ]
+}

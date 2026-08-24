@@ -1,0 +1,108 @@
+{
+  "document_id": "afu.bladder-tvnim.2024-2026",
+  "note": "Derived from the section paths in corpus v4.0, so it records what the hand-written builder did rather than a fresh opinion about the document.",
+  "majors": [
+    "Classification pronostique",
+    "Anatomopathologie",
+    "Suivi des TVNIM",
+    "Bilan diagnostique initial",
+    "Épidémiologie – facteurs de risque",
+    "Traitements endovésicaux adjuvants",
+    "Nouvelles thérapies pour les hauts risques",
+    "RTUV",
+    "Traitement des récidives de TVNIM",
+    "Annexes et tableaux",
+    "Cas particulier du CIS isolé"
+  ],
+  "appendix_major": "Annexes et tableaux",
+  "topics_by_major": {
+    "Anatomopathologie": [
+      "Classification TNM (p et yp*)",
+      "Compte rendu anatomopathologique",
+      "Cytologie urinaire",
+      "Grades, sous-types histologiques et autres facteurs histopronostiques",
+      "Marqueurs urinaires"
+    ],
+    "Suivi des TVNIM": [
+      "Cystoscopie et biopsies",
+      "Cytologie urinaire et marqueurs",
+      "Imagerie"
+    ],
+    "Bilan diagnostique initial": [
+      "Échographie de l’appareil urinaire",
+      "Endoscopie : fibroscopie vésicale",
+      "Uro-IRM",
+      "Uro-TDM"
+    ],
+    "Traitements endovésicaux adjuvants": [
+      "Épirubicine",
+      "Contre-indications",
+      "Gemcitabine",
+      "Indication de l’instillation postopératoire précoce de chimiothérapie (IPOP)",
+      "Mitomycine C (MMC)",
+      "Modalités d’administrations",
+      "Prévention et prise en charge des effets secondaires",
+      "Thermochimiothérapie"
+    ],
+    "Nouvelles thérapies pour les hauts risques": [
+      "Immunothérapie systémique",
+      "Thérapie génique endovésicale"
+    ],
+    "RTUV": [
+      "Indication de la RTUV de réévaluation (dite de « second look »)",
+      "Luminofluorescence vésicale",
+      "Narrow-Band Imaging (NBI)",
+      "Principes techniques et critères qualitatifs de la RTUV",
+      "Utilisation des techniques d’optimisation visuelle"
+    ],
+    "Traitement des récidives de TVNIM": [
+      "La chimio-ablation",
+      "La fulguration",
+      "Récidive après un traitement par BCG",
+      "Récidive sous forme d’une tumeur de bas grade multi-récidivante",
+      "Surveillance active"
+    ],
+    "Annexes et tableaux": [
+      "Tableau I - Classification TNM 2017 des tumeurs de la vessie.",
+      "Tableau II - Compte rendu type de fibroscopie proposé par le CCAFU.",
+      "Tableau III - Stratification et primo traitement des TVNIM incidentes.",
+      "Tableau IV - Modalités de suivi des TVNIM.",
+      "Tableau V - Effets secondaires liés aux instillations de BCG.",
+      "Tableau VI - Classification et propositions de prise en charge des effets secondaires mineurs."
+    ],
+    "Cas particulier du CIS isolé": [
+      "Traitement du CIS isolé récidivant",
+      "Traitement du CIS isolé"
+    ],
+    "Classification pronostique": [
+      "Tumeurs de faible risque de progression",
+      "Tumeurs de haut risque",
+      "Tumeurs de risque intermédiaire",
+      "Tumeurs de très haut risque"
+    ]
+  },
+  "excluded": [
+    "Plan",
+    "Figure 1",
+    "Examens d’imagerie à visée diagnostique",
+    "Figure 2",
+    "Chimiothérapie endovésicale",
+    "BCG-thérapie endovésicale",
+    "Figure 3",
+    "Figure 4",
+    "Figure 5",
+    "Déclaration de liens d’intérêts",
+    "Légende : **Le suivi par cystoscopie doit être maintenu tant qu’une intoxication tabagique persiste quel que soit le niveau de risque de la tumeur.",
+    "Recommandation n o 1 - Gestion des facteurs de risque du Cancer de la vessie.",
+    "Recommandation n o 2 - Conduite à tenir adaptée aux résultats de la cytologie urinaire.",
+    "Recommandation n o 3 - Recommandations pour la lecture anatomopathologique des tumeurs vésicales.",
+    "Recommandation n o 4 - Bilan diagnostique d’une tumeur vésicale.",
+    "Recommandation n o 5 - Recommandations pour la réalisation de la résection transurétrale de Vessie.",
+    "Recommandation n o 6 - Traitement des TVNIM.",
+    "Recommandation n o 7 - Recommandations pour les Instillations endovésicales de chimiothérapie et de BCG.",
+    "Recommandation n o 8 - Suivi des TVNIM.",
+    "Recommandation n o 9 - Recommandations du CCAFU pour la réalisation de la surveillance active dans les TVNIM de faible risque.",
+    "Recommandation n o 10 - Prise en charge des récidives de TVNIM après BCG.",
+    "Références"
+  ]
+}

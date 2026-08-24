@@ -1,0 +1,127 @@
+{
+  "document_id": "afu.prostate.2024-2026",
+  "note": "Derived from the section paths in corpus v4.0, so it records what the hand-written builder did rather than a fresh opinion about the document.",
+  "majors": [
+    "Dépistage et détection précoce",
+    "Moyens thérapeutiques",
+    "Anatomie pathologique",
+    "Biopsies",
+    "Diagnostic",
+    "Indications thérapeutiques",
+    "Stadification",
+    "Épidémiologie, facteurs de risque, prévention",
+    "Génétique",
+    "Annexes et tableaux"
+  ],
+  "appendix_major": "Annexes et tableaux",
+  "topics_by_major": {
+    "Dépistage et détection précoce": [
+      "Détection précoce ( Recommandation 5 )",
+      "Dépistage organisé"
+    ],
+    "Moyens thérapeutiques": [
+      "Abstention surveillance ( watchful waiting )",
+      "Alternatives thérapeutiques",
+      "Surveillance active",
+      "Radiothérapie (RT)",
+      "Prostatectomie totale (PT)",
+      "Traitement focal"
+    ],
+    "Anatomie pathologique": [
+      "Analyse histopathologique des biopsies ( Tableau VII , Tableau VIII )",
+      "Analyse histopathologique [ 113 ] après traitement ( Tableau XII )",
+      "Analyse histopathologique des pièces de prostatectomie et curage ganglionnaire",
+      "Données cliniques minimales",
+      "Score de Gleason modifié (grade groupe ISUP ou score ISUP)"
+    ],
+    "Biopsies": [
+      "Précaution prébiopsies",
+      "Stratégie biopsique ( Recommandation 8 )",
+      "Complications"
+    ],
+    "Diagnostic": [
+      "Biomarqueurs",
+      "Imagerie",
+      "Tomographie par émission de positons couplée à l’IRM (TEP/IRM)",
+      "TR"
+    ],
+    "Indications thérapeutiques": [
+      "CaP localisé à haut risque ( Recommandation 17 )",
+      "CaP localisé de faible risque ( Recommandation 15 )",
+      "CaP localisé de risque intermédiaire ( Recommandation 16 )",
+      "cN1 ( Recommandation 18 )"
+    ],
+    "Stadification": [
+      "Ganglionnaire",
+      "Classifications",
+      "Extension locorégionale",
+      "Métastatique"
+    ],
+    "Épidémiologie, facteurs de risque, prévention": [
+      "Epidémiologie",
+      "Facteurs de risque",
+      "Prévention"
+    ],
+    "Génétique": [
+      "Génétique des formes métastatiques",
+      "Identifier les critères d’adressage en oncogénétique ( Recommandation 2 )",
+      "Gestion des patients mutés"
+    ],
+    "Annexes et tableaux": [
+      "Tableau I - Critères faisant évoquer une forme héréditaire de cancer de la prostate associé au cancer du sein ou de l’ovaire.",
+      "Tableau II - Taux de détection des cancers ISUP ≥ 2 en fonction du score PIRADS et de la densité de PSA, d’après la méta-analyse de Schoots et al. Incluant 3006 hommes naïfs de biopsie.",
+      "Tableau III - Modalités de détection précoce.",
+      "Tableau IV - Recommandations d’arrêt des principaux traitements antiagrégants plaquettaires et anticoagulants avant une biopsie prostatique.",
+      "Tableau IX - Biomarqueurs tissulaires pouvant être utilisés sur biopsies.",
+      "Tableau V - Résultats des essais randomisés comparant les performances des biopsies transpérinéales aux biopsies transrectales.",
+      "Tableau VI - Groupes pronostiques de la classification ISUP 2016.",
+      "Tableau VII - Prise en charge des biopsies.",
+      "Tableau VIII - Résultats : données indispensables dans le compte rendu pour chaque site et chaque cible.",
+      "Tableau X - Prise en charge de la pièce de prostatectomie.",
+      "Tableau XI - Résultats : données indispensables dans le compte rendu de prostatectomie.",
+      "Tableau XII - Analyse pathologique après traitement.",
+      "Tableau XIII - Classification TNM 2016.",
+      "Tableau XIV - Classification pTNM 2016 (AJCC 8 e édition) a .",
+      "Tableau XV - Classification de D’Amico.",
+      "Tableau XVI - Essais randomisés comparant le traitement local à une abstention/surveillance pour un cancer de la prostate localisé.",
+      "Tableau XVII - Résultats des principales études de cohorte dans la surveillance active.",
+      "Tableau XVIII - Principaux essais d’escalade de dose en radiothérapie."
+    ]
+  },
+  "excluded": [
+    "Plan",
+    "Performance de l’IRM pour la détection du CaP en fonction du grade ISUP",
+    "Figure 1",
+    "Préparation rectale",
+    "RTUP à visée diagnostique",
+    "Tomographie par émission de positons couplée à la tomodensitométrie (TEP/TDM)",
+    "Biologie",
+    "Imageries de médecine nucléaire",
+    "Critères de sélection",
+    "Figure 2",
+    "Radiothérapie externe (RTE) ( Recommandation 14 )",
+    "Déclaration de liens d’intérêts",
+    "Légende : TP : voie transpérinéale ; TR : voie transrectale.",
+    "Légende : SA : surveillance active ; PT : prostatectomie totale.",
+    "Légende : WW : watchful waiting ; NR : non rapporté ; HR : hazard ratio ; IC : interval de confiance.",
+    "Recommandation 1 - Prévention du CaP.",
+    "Recommandation 2 - Indication de consultation en oncogénétique.",
+    "Recommandation 3 - Dépistage du CaP en cas de mutation germinale.",
+    "Recommandation 4 - Modalités du dépistage individuel chez les patients présentant une mutation germinale BRCA2 ou HOXB13.",
+    "Recommandation 5 - Détection précoce dans la population générale.",
+    "Recommandation 6 - Schéma biopsique en fonction de l’IRM.",
+    "Recommandation 7 - Résumé des précautions prébiopsies–recommandations selon la voie d’abord.",
+    "Recommandation 8 - Biopsies prostatiques.",
+    "Recommandation 9 - Classifications.",
+    "Recommandation 10 - Bilan d’extension local, ganglionnaire et métastatique.",
+    "Recommandation 11 - Surveillance Active (SA).",
+    "Recommandation 12 - Curage ganglionnaire.",
+    "Recommandation 13 - Prostatectomie totale (PT).",
+    "Recommandation 14 - Radiothérapie (RT).",
+    "Recommandation 15 - Traitement cancer de la prostate localisé à faible risque.",
+    "Recommandation 16 - Traitement cancer de la prostate localisé à risque intermédiaire.",
+    "Recommandation 17 - Traitement cancer de la prostate localisé à haut risque.",
+    "Recommandation 18 - Traitement des cancers de la prostate cN1 M0.",
+    "Références"
+  ]
+}
