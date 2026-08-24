@@ -219,19 +219,55 @@ def _paths_by_number(headings: list[Heading]) -> list[tuple[str, ...]]:
     return paths
 
 
-def _paths_by_level(headings: list[Heading]) -> list[tuple[str, ...]]:
+def _paths_by_level(
+    headings: list[Heading], *, boundaries: frozenset[str] = frozenset()
+) -> list[tuple[str, ...]]:
+    """One path per heading that is not a boundary, in order.
+
+    `boundaries` are the labels dropped as page furniture *and* declared to end their section.
+    They are passed in rather than filtered out beforehand because such a heading is still a
+    boundary, and deleting it outright makes the headings after it inherit an ancestor that the
+    document ended.
+
+    **Whether page furniture ends a section is a property of the document, not something to
+    infer.** Two layouts produce identical markdown and want opposite answers, so `outline`
+    takes it as a declaration; see `furniture_ends_section` there.
+
+    NCCN is the case. Its discussion pages are laid out as::
+
+        # NCCN Guidelines Version 6.2026     <- banner, repeats on every page
+        # Prostate Cancer                    <- banner
+        ## Overview                          <- the real chapter
+
+    Every real chapter is `##`, and the only `#` above it is a banner. Drop the banners and
+    each chapter attaches to the last `#` that survived -- `# Table of Contents`, which then
+    held 234 of the document's 394 passages. The bladder guideline was worse: 156 of 282
+    passages arrived under `Primary Carcinoma of the Urethra`, a heading that is out of scope,
+    so a rule excluding it correctly would have deleted more than half the document.
+
+    A boundary therefore pops the stack the way any heading of its level would, and then is not
+    pushed. The chapters beneath it become roots, which is what they are: their real parent was
+    page furniture and the document does not say what else it might be. Saying nothing is the
+    honest answer, and a routing rule can name a root.
+    """
     paths: list[tuple[str, ...]] = []
     stack: list[Heading] = []
     for heading in headings:
         while stack and stack[-1].level >= heading.level:
             stack.pop()
+        if heading.label in boundaries:
+            continue
         stack.append(heading)
         paths.append(tuple(item.label for item in stack))
     return paths
 
 
 def outline(
-    markdown: str, *, source: str = "document", allow_artefacts: bool = False
+    markdown: str,
+    *,
+    source: str = "document",
+    allow_artefacts: bool = False,
+    furniture_ends_section: bool = False,
 ) -> Outline:
     """Every section of a document, with the path each one sits at.
 
@@ -243,6 +279,26 @@ def outline(
     for. Repairing them here was considered and rejected: choosing which character was meant is a
     guess, and a wrong guess inside a threshold is worse than a refusal. `allow_artefacts` exists
     so their extent can be measured before deciding what to do about them.
+
+    `furniture_ends_section` says whether a heading dropped as page furniture also *ends* the
+    section that was open. It is a declaration rather than a measurement, because the two
+    layouts that need opposite answers are indistinguishable in the markdown. Both look like::
+
+        # a real chapter
+        # the banner that repeats on every page
+        ## a subsection
+
+    In AUA's guidelines the banner is a page turn *inside* a chapter, and the subsection after
+    it belongs to the chapter above -- which is what dropping the banner already achieves. In
+    NCCN's the banner is the only `#` in the whole discussion, every real chapter is `##`, and
+    the subsection after it belongs to a new chapter the banner replaced. Dropping the banner
+    there attaches 234 of 394 passages to `# Table of Contents`, and in the bladder guideline
+    156 of 282 to `Primary Carcinoma of the Urethra` -- a heading that is out of scope, so a
+    rule excluding it correctly would delete more than half the document.
+
+    Measuring the difference was tried and abandoned: the share of a level that is furniture is
+    63-82% across the AUA guidelines and 88-94% across NCCN, and a threshold in that gap decides
+    half a document on six percentage points. Whoever adds a document says which layout it has.
     """
     artefacts = find_pdf_artefacts(markdown)
     if artefacts and not allow_artefacts:
@@ -267,10 +323,14 @@ def outline(
     ignored = sorted(
         label for label, count in repetitions.items() if count > RECURRING_HEADING_LIMIT
     )
+    # Kept in `all_headings` so the level stack can still treat them as boundaries; see
+    # `_paths_by_level`. Their own text is not lost -- it belongs to the section that was open
+    # when the page turned, which is where a reader would look for it -- but the headings that
+    # follow them must not inherit an ancestor the document ended.
+    all_headings = headings
+    boundaries = frozenset(ignored)
     if ignored:
-        # Dropped entirely rather than kept as leaves. Their text is not lost: it belongs to the
-        # section that was open when the page turned, which is where a reader would look for it.
-        headings = [heading for heading in headings if heading.label not in set(ignored)]
+        headings = [heading for heading in headings if heading.label not in boundaries]
         if not headings:
             raise PrepareError(
                 f"{source}: every heading repeats more than {RECURRING_HEADING_LIMIT} times, so "
@@ -285,8 +345,15 @@ def outline(
         else HeadingStrategy.level
     )
     paths = (
+        # The numbered strategy needs no boundary handling: ancestry there comes from the
+        # number, and a banner carries none, so it could never have become anybody's parent.
         _paths_by_number(headings)
         if strategy is HeadingStrategy.numbered
+        else _paths_by_level(all_headings, boundaries=boundaries)
+        if furniture_ends_section
+        # Without the declaration the boundaries are simply gone, so the filtered list is what
+        # the stack sees -- and it must be the filtered list, or every dropped heading would
+        # get a path of its own and there would be more paths than sections.
         else _paths_by_level(headings)
     )
 

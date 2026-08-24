@@ -250,3 +250,42 @@ def test_a_chapter_title_is_not_mistaken_for_a_citation() -> None:
 
 def test_an_ordinary_section_is_not_a_reference() -> None:
     assert not any(s.is_reference for s in outline(SATURATED).sections)
+
+
+# NCCN's discussion pages: the only `#` is the banner, and every real chapter is `##`.
+BANNER_REPLACES_CHAPTER = "\n".join(
+    ["# Table of Contents", "Overview .... MS-1"]
+    + [
+        line
+        for n in range(20)
+        for line in ("# NCCN Guidelines Version 6.2026", f"## Real chapter {n}", f"Body {n}.")
+    ]
+)
+
+
+def test_page_furniture_does_not_end_a_section_unless_declared() -> None:
+    # AUA's banners are page turns *inside* a chapter, and the subsection after one belongs to
+    # the chapter above. Dropping the banner already achieves that, so it stays the default:
+    # turning this on globally cost the six AUA guidelines most of their routing precision.
+    report = outline(BANNER_REPLACES_CHAPTER)
+    assert "NCCN Guidelines Version 6.2026" in report.ignored_headings
+    chapters = [s for s in report.sections if s.section_path[-1].startswith("Real chapter")]
+    assert chapters
+    assert all(s.section_path[0] == "Table of Contents" for s in chapters)
+
+
+def test_declared_page_furniture_ends_the_section_it_interrupts() -> None:
+    # NCCN's banner replaces the chapter level rather than interrupting it, so the chapters
+    # after it are not children of whatever `#` last survived. That was the table of contents,
+    # which took 234 of the prostate guideline's 394 passages with it -- and in the bladder
+    # guideline, `Primary Carcinoma of the Urethra` took 156 of 282, a heading that is out of
+    # scope, so excluding it correctly would have deleted more than half the document.
+    report = outline(BANNER_REPLACES_CHAPTER, furniture_ends_section=True)
+    chapters = [s for s in report.sections if s.section_path[-1].startswith("Real chapter")]
+    assert chapters, "the real chapters should survive"
+    assert all(len(s.section_path) == 1 for s in chapters)
+    assert not any("Table of Contents" in s.section_path for s in chapters)
+
+
+def test_the_declaration_changes_nothing_in_a_document_without_furniture() -> None:
+    assert outline(SATURATED).sections == outline(SATURATED, furniture_ends_section=True).sections
