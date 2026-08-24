@@ -22,6 +22,28 @@ real person is identified. Real patient names must not be uploaded. The parser a
 keeps `liteparse` as the local option precisely so a production deployment can parse
 inside the hospital.
 
+### 1b. Corpus conversion sends published guidelines to the same provider
+
+`rcpia.corpus.convert` sends **source guideline PDFs** to LlamaParse Cloud to obtain the
+markdown the corpus is built from. This is a different question from decision 1 and carries
+a different risk.
+
+**No patient data is involved.** These are published clinical guidelines — EAU, AUA, AFU,
+SIOG, ESPEN. Nothing about a person leaves the hospital on this path, so the constraint in
+decision 1 does not apply to it.
+
+**What does apply is licence.** Several of these documents are all-rights-reserved (the AFU
+chapters carry an Elsevier Masson line; AUA and NCCN publish under their own terms), and
+uploading one to a third-party service is a use their licence may not cover. The corpus
+already records `licence_status` and `licence_evidence` per document for exactly this kind
+of question, and today nine of 112 records carry evidenced permission. **Conversion should
+follow the licence check, not precede it.**
+
+Conversion is a one-off per document and is deliberately not part of the corpus build: the
+build reads markdown from disk and runs with no network and no API key. A converted document
+records its provider and job id in a `.conversion.json` sidecar, so what was sent where is
+answerable after the fact rather than from memory.
+
 ### 2. No de-identification pass before storage
 
 Parsed text is stored verbatim in `document_chunks.text` and in

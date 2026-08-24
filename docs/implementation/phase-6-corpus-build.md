@@ -618,6 +618,7 @@ as an oversight — and so the question is not reopened in six months.
 | 10c | **French geriatric urology — AFU 2019 (3 chapters)** — **acquired 24 August**; needs conversion, a licence attestation and rules | 6 |
 | 11 | Build, load, run probes → **v5.0** | 7, 8, 10, 10b; 10c if acquired in time |
 | 12 | CI job for rule-file validation | 2 |
+| 13 | ~~Stage 0: PDF conversion as a pipeline step~~ — **done 24 August**: `rcpia.corpus.convert`, reusing the dossier LlamaParse client; verifies its own output against stage 1 and caches on the source digest | 3 |
 
 ~~Three corrections to the source inventory must land before step 5~~ — **all three done,
 24 August.** ref-27 (SIOG) is curated, six records including the two new editions and the two
@@ -628,6 +629,15 @@ which is a statement of relevance rather than a retrieval filter, so it stays al
 `rcp_synthesis` as an agent that reads outputs rather than passages. ESPEN and MNA were also
 found untagged for `nutrition` and fixed. The curation now covers all 26 reference folders:
 104 records, 80 included. See `decisions.md`, 24 August.
+
+**Stage 0 was added after the fact, and belongs at the front.** Conversion was manual for the
+whole of steps 3–10, and two tranches were lost to it: the ASPEN practice tools and the AFU
+2019 chapters both arrived as multi-column PDFs read straight across the columns, with no
+markdown headings at all, and nothing said so until stage 1 refused them. `rcpia.corpus.convert`
+now runs the conversion and immediately asks stage 1 what it makes of the result, recording the
+verdict beside the file. It is not part of the build — the build must stay runnable with no
+network and no API key — but it is part of the pipeline, and it is the step that stops a bad
+conversion from being discovered three weeks downstream. See `decisions.md`, 24 August.
 
 **Step 4 is the one that proves the design.** Re-expressing the hand-tuned documents as rule
 data must reproduce v4.0's routing exactly. If the data format cannot express what the Python

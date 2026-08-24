@@ -464,6 +464,52 @@ not one markdown heading in any of the three. Stage 1 refused them, correctly. T
 conversions carry real headings, restore reading order, and contain *more* words than the files
 they replace — the 30-50% drop in bytes was column padding.
 
+## 2026-08-24 — PDF conversion becomes a pipeline stage, and checks its own work
+
+Conversion was the one manual step left: upload a PDF to LlamaParse by hand, download the
+markdown, drop it beside the source. It is now `rcpia.corpus.convert` — stage 0.
+
+**It reuses the parser that was already there.** `rcpia/parsing/llamaparse.py` has existed
+since v1 for dossier parsing, with upload, polling, and error translation already written and
+tested. It fetched only the JSON result, because a fact extracted from a dossier must cite a
+page and a bounding box. The corpus wants the *markdown* result instead, because stage 1
+rebuilds a section path from `#` levels and the JSON result flattens them. So the client
+gained `parse_markdown`, sharing upload and polling; nothing was duplicated, and the dossier
+path is unchanged and still covered.
+
+Markdown and JSON are not lossy versions of each other — they answer different questions
+about the same PDF. That is why `MarkdownParser` is a separate protocol from `DocumentParser`
+rather than an extra method on it: LiteParse exists so a hospital that must not send
+documents outside its walls still has a dossier path, and requiring it to produce corpus
+markdown would make the corpus builder look portable when it is not. The corpus is built once,
+by us, from published guidelines.
+
+**The reason it verifies itself.** Two tranches were lost to silent conversion failures. The
+three ASPEN practice tools and the AFU 2019 chapters are multi-column PDFs whose first
+conversion read straight across the columns — interleaved sentences, not one markdown heading
+in any of them. Nothing reported it. Stage 1 refused them weeks later, after curation records
+had already been written against them. So stage 0 now runs stage 1 against its own output at
+the moment the file is written, and records the verdict in a `.conversion.json` sidecar:
+usable, heading count, section count, glyph artefacts. An unusable conversion is still written
+to disk, so the failure can be looked at rather than re-run blind.
+
+**Conversions are cached on the source digest.** LlamaParse bills per page and a 245-page
+guideline takes minutes; running the converter over a folder must not re-parse everything in
+it. The sidecar records the SHA-256 of the PDF it came from, and a matching digest means
+reuse. Digest rather than mtime, because OneDrive rewrites mtimes when it syncs.
+
+**Verified against the live API, not only a mock.** The v1 markdown endpoint
+(`/job/{id}/result/markdown`) was confirmed by converting a real PDF: 14 sections, 14
+headings, and a second run reused it in 0.06s against a parser that raises on any network
+call. Worth noting that the pipeline conversion of that document is *better* than the hand
+conversion it replaces — the hand one produced 3 sections wrapped in mermaid blocks.
+
+**Deliberately not wired into the build.** The corpus build reads markdown from disk and must
+stay runnable with no network, no API key and no spend. Conversion happens once per document,
+when the document is acquired. See `data-handling.md` §1b: no patient data is on this path,
+but licence is a real question, and conversion should follow the licence check rather than
+precede it.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated
