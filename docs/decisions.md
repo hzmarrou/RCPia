@@ -332,6 +332,52 @@ positive reviews the same report lists. That is a labelled guideline divergence 
 a direction, and belongs in the retrieval evaluation's gold set — the evaluation notes that such
 labels otherwise depend on a clinician annotating disagreements by hand.
 
+## 2026-08-24 — The score instruments are inputs, not reference documents
+
+Step 7 was scoped as "rules for the instruments tranche (~11 documents)". It closes with one
+document routed and eight removed, and the reason came from the dossiers rather than from the
+documents.
+
+**Seven of the nine are fields on the RCP form**, and the ledger already holds every one —
+`pallia10`, `g8_score`, `iief5`, `ipss`, `mna`, `adl`, `who_status`. The clinician fills them in
+before the dossier reaches us. So the agent never administers these questionnaires and never
+scores them; it is handed `G8 : 5`. A searchable copy of the G8 questionnaire answers a question
+nobody will ask.
+
+The "compute it when the score is missing" case does not rescue them either. Dossier 3 records
+`G8 : RAS` and `DFG : RAS`, genuinely absent — but dossiers record only the total, never the
+seven individual answers, so there is nothing to score from.
+
+**Kept:** Pallia 10, because SFAP wrote real guidance around the instrument — what palliative
+care is, who it is for, when to involve the team. That is a clinical question the dossier does
+not answer. Its rule file is a default and nothing else: whether to involve a palliative team is
+decided from trajectory and symptom burden and reads the same at every disease stage.
+
+**Removed, with the reason recorded per document rather than as a batch:**
+
+- `IIEF-5`, `IPSS`, `G8` — the completed score arrives on the dossier.
+- `ECOG/WHO` — Karnofsky and WHO scales as lookup tables, captured from **arcagy.org**, a
+  patient-information website. The scale is authoritative; this copy is not, and a citation
+  resolving to a patient site is not provenance a clinician would accept. EAU and NCCN carry the
+  scale where a citation is needed.
+- `Fried` — a band lookup captured from **guideline.care**, an online calculator. It cites the
+  Cardiovascular Health Study; that paper, not this page, is the citable authority.
+- `Mini-GDS` — four questions to put to a patient, corresponding to no ledger field.
+- `MNA`, `Katz ADL` — both from **medicalcul.free.fr**, both damaged: UTF-8 read as Latin-1
+  throughout, and MNA is a JavaScript form captured as `**Field (input):** vItem1` 49 times.
+
+Nothing is deleted. All eight remain in the curation with `include_in_poc: false` and an
+`exclusion_reason`, so the decision does not read as an oversight and the question is not
+reopened in six months.
+
+**What the tranche was supposed to deliver is still missing.** The v5 change request asked for
+the guidance that gives a number consequences — what a G8 of 5 implies for treatment intent,
+what an MNA of 7 means for tolerating surgery. It is in none of these files. It is in SIOG,
+ESPEN and the oncogeriatric sources, which makes steps 10 and 10b the ones that actually close
+this gap.
+
+v5 drops from roughly 56 documents to roughly 48.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated

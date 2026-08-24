@@ -396,15 +396,15 @@ plus the sources. **The corpus stops being an artefact we receive and becomes on
 | tranche | documents | rationale |
 |---|---|---|
 | **Core urology** — EAU, AUA, AFU, NCCN, ESMO, WHO classification, TNM/AJCC, RECIST | ~32 | what the RCP decides on |
-| **Instruments** — G8, IPSS, IIEF-5, MNA, Katz ADL, Mini-GDS, Pallia 10 | ~11 | `fact_schema` already extracts every one and nothing interprets them |
+| **Instruments** — Pallia 10 only | **1** | **8 of 9 removed 24 August, per §6.6** — the scores arrive completed on the dossier |
 | **SIOG** — ref-27 | **5** | 2014, 2015 and the 2020 bladder paper stay; **2010 excluded**, **Boyle 2019 and ESMO/SIOG 2024 added** (24 Aug); still **absent from the curation manifest** |
 | ~~**Psycho-oncology** — ref-21/22/23~~ | **0** | **excluded from v5 by the clinician, 24 August 2026** — see §6.2 |
 | **Nutrition** — ASPEN (ref-16), ESPEN (ref-17), ESMO cachexia (ref-25) | **6** | see §6.3; ESPEN surgery and ESMO cachexia added 24 Aug, ESPEN permission attested |
 | **French geriatric urology** — AFU 2019 *Onco-urologie du patient âgé* | 3 | in scope 24 Aug; **not held — must be obtained**, see §6.5 |
 
-Roughly **56 documents**, against v4's 10 — of which **3 are not yet held**. It was ~68 until
-the psycho-oncology tranche was excluded (§6.2); the SIOG and AFU changes of 24 August added
-back four; and AUA curation may take it lower again.
+Roughly **48 documents**, against v4's 10 — of which **3 are not yet held**. It was ~68 before
+psycho-oncology was excluded (§6.2) and ~56 before the instruments were triaged (§6.6). AUA
+curation may take it lower again.
 
 ### 6.1 SIOG is missing from the curation — **fixed 24 August**
 
@@ -559,6 +559,47 @@ two facts explain the identical 12,578-byte error pages in `ref-27/_invalid_down
 
 ---
 
+### 6.6 The instruments are inputs, not references
+
+Triaged 24 August, against the corpus test from the v5 change request: could a clinician read
+this passage aloud in an RCP and have it mean something? **One of nine can.**
+
+| document | v5 |
+|---|---|
+| **Pallia 10** (SFAP) | **kept** — narrative guidance on what palliative care is and when to call the team |
+| IIEF-5, IPSS, G8 | removed — the completed score arrives on the dossier |
+| ECOG/WHO (arcagy.org), Fried (guideline.care) | removed — lookup tables captured from a patient-information site and an online calculator |
+| Mini-GDS | removed — a questionnaire this build never administers |
+| MNA, Katz ADL (medicalcul.free.fr) | removed — captures damaged beyond use |
+
+**The decisive fact came from the dossiers, not from the documents.** Seven of the nine are
+fields on the RCP form, and the ledger already holds every one:
+
+```
+Pallia 10 : ≥ 4    G8 : 5      IIEF5 : RAS    IPSS : RAS
+MNA : 7            ADL : 4     OMS 1          DFG : 30
+```
+
+So the agent never administers these questionnaires and never scores them — the clinician did
+both before the dossier arrived. A searchable copy of the G8 questionnaire answers a question
+nobody will ask. Nor does the "derive it when absent" case rescue them: dossier 3 records
+`G8 : RAS`, but the seven individual answers are never recorded either, so there is nothing to
+score.
+
+Two of the nine are not even form fields. Fried and Mini-GDS correspond to no ledger field at
+all, so they document nothing this build holds.
+
+**What the tranche was scoped to deliver is still missing, and is somewhere else.** The change
+request asked for the guidance that gives a number consequences — what a G8 of 5 implies for
+treatment intent, what an MNA of 7 means for tolerating surgery. None of that is in these files.
+It is in SIOG, ESPEN and the oncogeriatric sources, which are steps 10 and 10b.
+
+Nothing is deleted. All eight stay in the curation with `include_in_poc: false` and an
+`exclusion_reason` naming which of the three problems each one has, so a decision does not read
+as an oversight — and so the question is not reopened in six months.
+
+---
+
 ## 7. Order of work
 
 | step | deliverable | blocked on |
@@ -569,7 +610,7 @@ two facts explain the identical 12,578-byte error pages in `ref-27/_invalid_down
 | 4 | Re-express the hand-tuned documents' rules as data; **byte-identical routing to v4.0** | 1, 2 |
 | 5 | Manifest emission, self-checked against `rcpia.evidence.manifest` | 3 |
 | 6 | `probes.json` + the stage-4 verifier | 4, 5 |
-| 7 | Rules for the instruments tranche (~11 documents) | 6 |
+| 7 | ~~Rules for the instruments tranche (~11 documents)~~ — **done 24 August**: one document routed, eight removed, per §6.6 | 6 |
 | 8 | Rules for core urology (~32 documents) | 6 |
 | ~~9~~ | ~~Psycho-oncology (18 documents)~~ — **dropped from v5**, per §6.2 | — |
 | 10 | Nutrition — ASPEN, ESPEN, ESMO cachexia (6 documents), per §6.3 | 6 |
