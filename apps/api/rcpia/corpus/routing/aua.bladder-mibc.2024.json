@@ -1,0 +1,76 @@
+{
+  "document_id": "aua.bladder-mibc.2024",
+  "note": "AUA/ASCO/ASTRO/SUO: treatment of non-metastatic muscle-invasive bladder cancer, 2017 amended 2020 and 2024. The whole document is one disease setting -- its title says non-metastatic MIBC and it never leaves it -- so the setting is carried by the default and the rules below are almost entirely exclusions.\n\n**The document says everything twice.** AUA's format is a summary of the guideline statements followed by the full discussion, under identical headings: `GUIDELINE STATEMENTS > INITIAL PATIENT EVALUATION AND COUNSELING` appears once with one passage and again with six. Both are real content -- the first is the statement, the second is the evidence for it -- so nothing here pins an occurrence. What that does mean is that any exclusion has to claim `every_occurrence`, or it removes the front matter from the summary and leaves the identical block in the discussion.",
+  "default": {
+    "setting": "bladder_mibc_non_metastatic",
+    "note": "The document's own title. Metastatic disease is out of its scope and is covered by the EAU metastatic guideline already in the corpus."
+  },
+  "rules": [
+    {
+      "match_section": "REFERENCES",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "18 passages, the single largest block in the document."
+    },
+    {
+      "match_section": "PANEL, CONSULTANTS, AND STAFF",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "Claims the whole closing chapter: panel rosters, conflict-of-interest disclosures, peer reviewers and the disclaimer. Not leaf-matched, because it is the chapter and its twelve subsections that go."
+    },
+    {
+      "match_section": "Panel Members",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Amendment Panel",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Catches the 2020 and 2024 rosters in the front matter with one rule. The identically named subsections inside the closing chapter are already claimed above; this reaches the front-matter copies."
+    },
+    {
+      "match_section": "Staff and Consultants",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Abbreviations",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Assessment of the Risk of Bias of Individual Studies",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "How AUA graded its evidence, including the nomenclature linking statement type to evidence strength. It describes the method that produced the recommendations rather than any recommendation, and a panel asking what to do for a patient should never retrieve it."
+    },
+    {
+      "match_section": "Methodology",
+      "setting": "bladder_mibc_non_metastatic",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "Substring, so it claims both the front-matter `Methodology` and the `METHODOLOGY` chapter with its systematic-review and data-extraction subsections."
+    }
+  ]
+}
