@@ -45,6 +45,7 @@ from rcpia.corpus.vocabulary import (
     CLINICAL_PURPOSES,
     DISEASE_SETTINGS,
     NOT_SPECIFIED_REASONS,
+    RETRIEVAL_EXCLUSION_REASONS,
     THERAPY_LINES,
 )
 
@@ -59,6 +60,7 @@ _RULE_FIELDS = frozenset(
     {
         "match_section", "setting", "reason", "therapy_line",
         "purposes", "roles", "occurrence", "note",
+        "exclude", "exclusion_reason",
     }
 )
 _FILE_FIELDS = frozenset({"document_id", "default", "rules", "note"})
@@ -101,6 +103,13 @@ class Rule:
     # Which occurrence of an ambiguous path this rule means, 1-based. `None` is valid only
     # where the path occurs at most once; `audit` decides that against the real document.
     occurrence: int | None = None
+    # Kept in the release, never returned by retrieval. The case that forced it: EAU prostate's
+    # chapter 9 is 118 passages of references, written as prose rather than as the `| [1] |`
+    # tables the split stage recognises by shape. Corpus v4.0 excluded these by matching the
+    # section heading, which is a routing decision -- so it belongs in a rule, where the
+    # ordering and the audit already apply to it.
+    exclude: bool = False
+    exclusion_reason: str | None = None
     note: str = ""
 
     @property
@@ -236,6 +245,26 @@ def _parse_rule(record: Any, *, where: str, require_match: bool) -> Rule:
     if therapy_line not in THERAPY_LINES:
         raise RuleError(f"{where} has therapy_line {therapy_line!r}, which is not implemented")
 
+    exclude = document.get("exclude", False)
+    if not isinstance(exclude, bool):
+        raise RuleError(f"{where} has exclude {exclude!r}; it must be true or false")
+    exclusion_reason = document.get("exclusion_reason")
+    if exclude:
+        if exclusion_reason not in RETRIEVAL_EXCLUSION_REASONS:
+            raise RuleError(
+                f"{where} excludes its passages from retrieval with reason "
+                f"{exclusion_reason!r}, which this build does not implement. Choose from "
+                f"{', '.join(sorted(RETRIEVAL_EXCLUSION_REASONS))}. A passage removed for an "
+                "unreadable reason is removed silently, which is what excluding is meant to "
+                "avoid."
+            )
+    elif exclusion_reason is not None:
+        raise RuleError(
+            f"{where} carries exclusion_reason {exclusion_reason!r} but does not exclude "
+            "anything. A reason attached to a passage that is still retrieved states something "
+            "false about it."
+        )
+
     occurrence = document.get("occurrence")
     if occurrence is not None:
         if not isinstance(occurrence, int) or isinstance(occurrence, bool) or occurrence < 1:
@@ -253,6 +282,8 @@ def _parse_rule(record: Any, *, where: str, require_match: bool) -> Rule:
             document.get("roles"), field_name=f"{where}.roles", allowed=AGENT_ROLES
         ),
         occurrence=occurrence,
+        exclude=exclude,
+        exclusion_reason=exclusion_reason,
         note=document.get("note") or "",
     )
 

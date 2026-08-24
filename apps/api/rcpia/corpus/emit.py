@@ -120,6 +120,12 @@ class RoutedPassage:
     page_first: int = 0
     page_last: int = 0
     page_confidence: float = 0.0
+    # Set by a routing rule that excludes its passages. Kept separate from the passage kind,
+    # because the two find different things: the kind catches a reference list by its shape,
+    # a rule catches a whole chapter by its heading, and EAU's references are only caught by
+    # the second.
+    exclude: bool = False
+    exclusion_reason: str | None = None
 
 
 @dataclass
@@ -160,7 +166,8 @@ def build_chunk(
     spec: DocumentSpec, routed: RoutedPassage, *, within: int, running: int
 ) -> dict[str, Any]:
     kind = routed.passage.kind
-    excluded = kind == "references"
+    excluded = routed.exclude or kind == "references"
+    exclusion_reason = routed.exclusion_reason or (_REFERENCE_EXCLUSION if excluded else None)
     body = routed.passage.text
     return {
         "chunk_id": chunk_id(spec.document_id, routed.section_path, within, running),
@@ -191,7 +198,7 @@ def build_chunk(
         "not_specified_reason": routed.not_specified_reason,
         "embedding_sha256": None,
         "retrieval_eligible": not excluded,
-        "retrieval_exclusion_reason": _REFERENCE_EXCLUSION if excluded else None,
+        "retrieval_exclusion_reason": exclusion_reason if excluded else None,
     }
 
 

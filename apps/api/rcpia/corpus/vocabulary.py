@@ -44,6 +44,24 @@ DISEASE_SETTINGS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Why a passage is kept but never returned. **Recorded here rather than invented**: every value
+# is one corpus v4.0 already uses, and the counts are what makes the mechanism necessary --
+# 179 bibliography passages, 17 superseded, 8 appendix. A release may not coin a new reason,
+# because a reason nothing reads excludes a passage without telling anyone why.
+#
+# Excluding is not deleting. The passage is written, hashed and traceable; it simply never
+# answers a question. That distinction is the whole point: a passage removed silently and a
+# passage removed for a stated reason look identical from the outside otherwise.
+RETRIEVAL_EXCLUSION_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        "bibliography_entry",
+        "appendix_content",
+        "historical_treatment_guidance_superseded",
+        "local_not_guidance",
+        "local_setting_mislabelled",
+    }
+)
+
 # Why a passage carries no setting. The distinction that matters is between guidance that
 # genuinely applies everywhere (`general_principle`) and guidance the rules could not place
 # (`not_determinable`) — the second is routing debt, the first is not. 26% of the v4 corpus is

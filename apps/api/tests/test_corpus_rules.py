@@ -570,3 +570,77 @@ def test_a_string_prefix_is_not_treated_as_an_ancestor() -> None:
     )
 
     assert [r.match_section for r in report.ambiguous] == ["traitement du cis isole"]
+
+
+def test_a_rule_may_exclude_its_passages_from_retrieval() -> None:
+    # EAU prostate's chapter 9 is 118 passages of references written as prose, so the shape
+    # detector cannot see them. Corpus v4.0 excluded them by section heading, which is a routing
+    # decision.
+    rules = parse_rules(
+        {
+            "document_id": "test.doc",
+            "default": {"setting": "not_specified", "reason": "not_determinable"},
+            "rules": [
+                {
+                    "match_section": "9. REFERENCES",
+                    "setting": "not_specified",
+                    "reason": "not_determinable",
+                    "exclude": True,
+                    "exclusion_reason": "bibliography_entry",
+                }
+            ],
+        }
+    )
+    assert rules.rules[0].exclude
+    assert rules.rules[0].exclusion_reason == "bibliography_entry"
+
+
+def test_excluding_without_a_reason_is_refused() -> None:
+    # A passage removed for an unreadable reason is removed silently, which is what excluding
+    # exists to avoid.
+    with pytest.raises(RuleError, match="does not implement"):
+        parse_rules(
+            {
+                "document_id": "test.doc",
+                "default": {"setting": "not_specified", "reason": "not_determinable"},
+                "rules": [
+                    {"match_section": "x", "setting": "no_known_cancer", "exclude": True}
+                ],
+            }
+        )
+
+
+def test_an_invented_exclusion_reason_is_refused() -> None:
+    with pytest.raises(RuleError, match="does not implement"):
+        parse_rules(
+            {
+                "document_id": "test.doc",
+                "default": {"setting": "not_specified", "reason": "not_determinable"},
+                "rules": [
+                    {
+                        "match_section": "x",
+                        "setting": "no_known_cancer",
+                        "exclude": True,
+                        "exclusion_reason": "looked_untidy",
+                    }
+                ],
+            }
+        )
+
+
+def test_a_reason_without_an_exclusion_is_refused() -> None:
+    # It would state something false about a passage that is still retrieved.
+    with pytest.raises(RuleError, match="does not exclude anything"):
+        parse_rules(
+            {
+                "document_id": "test.doc",
+                "default": {"setting": "not_specified", "reason": "not_determinable"},
+                "rules": [
+                    {
+                        "match_section": "x",
+                        "setting": "no_known_cancer",
+                        "exclusion_reason": "bibliography_entry",
+                    }
+                ],
+            }
+        )

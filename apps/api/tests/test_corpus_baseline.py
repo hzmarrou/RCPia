@@ -40,6 +40,11 @@ RULE_FILES = sorted(ROUTING.glob("*.json"))
 # arriving here silently would get the weaker guarantee without anyone choosing it.
 REVIEWED_NOT_REPRODUCED = {
     "sfap.pallia10",
+    # EAU prostate is the deliberate case: corpus v4.0 carries it, and these rules do *not*
+    # reproduce what it carries. v4.0 routed it from the passage body -- 84 of 443 passages
+    # depended on that -- which is how a paragraph about diabetes and metformin came to be
+    # locally advanced disease. Reproducing it would mean reproducing the bug.
+    "eau.prostate.2026",
 }
 
 # Documents whose rule file is deliberately nothing but a default. Nothing in them is about a
