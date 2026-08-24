@@ -60,6 +60,7 @@ REVIEWED_NOT_REPRODUCED = {
     "siog.geriatric-screening.2015",
     "siog.prostate.2019",
     "esmo-siog.geriatric-assessment.2024",
+    "siog.geriatric-assessment.2014",
 }
 
 # Documents whose rule file is deliberately nothing but a default. Nothing in them is about a
