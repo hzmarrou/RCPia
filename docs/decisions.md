@@ -510,6 +510,41 @@ when the document is acquired. See `data-handling.md` §1b: no patient data is o
 but licence is a real question, and conversion should follow the licence check rather than
 precede it.
 
+## 2026-08-24 — nmCRPC becomes a disease setting
+
+`prostate_nonmetastatic_castration_resistant` is added to `DISEASE_SETTINGS`. It is the
+second value in that vocabulary corpus v4.0 does not carry, and the reason is the same as for
+`out_of_scope_disease`: a real document needed it and no existing value was true.
+
+**What forced it.** AUA's advanced prostate guideline gives non-metastatic castration-resistant
+disease its own top-level chapter, beside metastatic hormone-sensitive and metastatic
+castration-resistant. Its treatment subsections are apalutamide, darolutamide and enzalutamide.
+There was nowhere to put them. Filing them under metastatic castration-resistant would place
+drugs indicated before metastasis in front of a question about a patient who already has it.
+
+The clearest evidence that the distinction is real: **enzalutamide appears in both chapters** —
+two passages under nmCRPC, six under mCRPC. Without the new setting those eight passages are
+one undifferentiated pile.
+
+**It was already costing us.** `afu.prostate-geriatric.2019` routes its entire advanced-disease
+chapter to `spans_settings`, and its note says outright that the castration state cannot be
+recovered. EAU and NCCN prostate both cover nmCRPC as well. Those files keep their current
+routing until each is revisited — a rule file changes against its baseline, not by a sweep.
+
+**Cheap in the schema, not free in the system.** `disease_setting` is a `String(80)` rather
+than a database enum, so there is no migration, and `Filter.disease_setting` is a plain string,
+so a query can already ask for it. The cost sits on the query side: nothing in `rcpia/` yet
+maps a patient's clinical state to a setting, so whatever eventually does must learn this value
+or these passages become harder to reach than they were. That is a known debt, recorded here
+rather than discovered later.
+
+**One ordering trap, worth stating because no test would catch it.** `METASTATIC
+CASTRATION-RESISTANT` is a substring of `NON-METASTATIC CASTRATION-RESISTANT`. In
+`aua.prostate-advanced.2026` the non-metastatic rule is therefore stated first. Reversing the
+two would file every nmCRPC recommendation under metastatic disease, and both values are valid,
+so the audit would pass and the baseline would simply record the wrong answer. The rule file
+says this in its own note.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated

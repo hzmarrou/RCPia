@@ -30,6 +30,26 @@ DISEASE_SETTINGS: Final[frozenset[str]] = frozenset(
         "prostate_node_positive_non_metastatic",
         "prostate_biochemical_recurrence",
         "prostate_metastatic_hormone_sensitive",
+        # The one value here corpus v4.0 does not already carry, added 24 August because a
+        # real document needed it and no existing value was true.
+        #
+        # AUA's advanced prostate guideline gives non-metastatic castration-resistant disease
+        # its own top-level chapter, alongside the metastatic hormone-sensitive and metastatic
+        # castration-resistant ones. The distinction is not academic: apalutamide,
+        # darolutamide and enzalutamide are indicated here and the neighbouring settings carry
+        # different regimens, so filing an nmCRPC recommendation under either neighbour would
+        # put the wrong drug in front of a question.
+        #
+        # It was already costing the corpus elsewhere. `afu.prostate-geriatric.2019` routes
+        # its whole advanced-disease chapter to `spans_settings` and says in its note that the
+        # castration state cannot be recovered; EAU and NCCN prostate both cover nmCRPC too.
+        # Those documents keep their current routing until each is revisited -- a rule file is
+        # changed against its baseline, not by a sweep.
+        #
+        # Free of migration cost: `disease_setting` is a String(80), not a database enum. The
+        # cost is on the query side, where whatever forms a Filter must learn the value or
+        # these passages become harder to reach than they were.
+        "prostate_nonmetastatic_castration_resistant",
         "prostate_metastatic_castration_resistant",
         "bladder_nmibc_low_risk",
         "bladder_nmibc_unspecified_risk",
