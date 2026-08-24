@@ -408,6 +408,29 @@ Checking that turned up the wider fact: **the three AFU 2024-2026 guidelines alr
 record `licence_status: unknown`.** So this is one attestation covering six documents, three of
 them already in the database, and it is one of the four `unknown` licences flagged this morning.
 
+## 2026-08-24 — AFU permission attested, covering six documents
+
+The treating clinician holds permission to use AFU material. All six AFU documents are recorded
+`permission_user_attested`: the three 2024-2026 guidelines and the three 2019 geriatric chapters.
+
+**Three of the six have been in the database since before this rebuild, recording
+`licence_status: unknown`.** Nobody had ever checked. They were among the four unknown licences
+found this morning, and they are the corpus's most-cited documents — every one of the AFU rule
+files written in step 4 routes them.
+
+The distinction being attested: AFU publishes these without charge and without authentication
+from urofrance.org, and the PDFs are all-rights-reserved — Elsevier Masson for the 2019 report.
+Free to read is not openly licensed, and a corpus that quotes passages back is reuse. The
+attestation is what covers it; the copyright line is recorded beside it so the claim can be
+checked rather than trusted.
+
+Nine of 112 curated records now carry evidenced licences: six AFU, two ESPEN, one ESMO. The
+remaining 103 mean nobody has looked, which is deliberately not the same as permissive.
+
+**Applied by the v5 builder, not patched into the database.** The three loaded documents carry
+`unknown` in the corpus as it stands; v5 replaces it. Same treatment as the SIOG publisher
+corrections.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated
