@@ -606,10 +606,10 @@ as an oversight — and so the question is not reopened in six months.
 |---|---|---|
 | 1 | `corpus/` package skeleton; rule schema; rule engine + tests | nothing |
 | 2 | Section-path extraction; fixture generator; dead-rule check | 1 |
-| 3 | Port chunking from `build_corpus_v2_slice.py` into stage 1 | nothing |
-| 4 | Re-express the hand-tuned documents' rules as data; **byte-identical routing to v4.0** | 1, 2 |
-| 5 | Manifest emission, self-checked against `rcpia.evidence.manifest` | 3 |
-| 6 | `probes.json` + the stage-4 verifier | 4, 5 |
+| 3 | ~~Port chunking into stage 1~~ — **done 24 August**: two readers, splitting, cover stripping, artefact refusal, page location | nothing |
+| 4 | ~~Re-express the hand-tuned documents' rules as data~~ — **done**: 233/233 identical to v4.0 | 1, 2 |
+| 5 | ~~Manifest emission, self-checked against `rcpia.evidence.manifest`~~ — **done 24 August** | 3 |
+| 6 | ~~`probes.json` + the stage-4 verifier~~ — **done 24 August**: 12 probes, green against v4.0 | 4, 5 |
 | 7 | ~~Rules for the instruments tranche (~11 documents)~~ — **done 24 August**: one document routed, eight removed, per §6.6 | 6 |
 | 8 | Rules for core urology (~32 documents) | 6 |
 | ~~9~~ | ~~Psycho-oncology (18 documents)~~ — **dropped from v5**, per §6.2 | — |
