@@ -237,6 +237,54 @@ into the database:**
    pages. Page spans taken from the PDF will not resolve against the published article, so the
    citation must carry the journal pagination.
 
+## 2026-08-24 — `safety_reviewer` is not a chunk role, and the curation now covers every folder
+
+Closing the three source-inventory corrections that `phase-6-corpus-build.md` §7 requires before
+step 5.
+
+**ref-27 (SIOG) was never curated.** Six records added — the four documents already in the
+database plus Boyle 2019 and the 2024 ESMO/SIOG paper — and `siog.prostate.2010` is recorded
+`superseded_by_boyle_2019` rather than deleted. The two files in `_invalid_downloads/` are now
+recorded too, as `invalid_download`, with the reasons the search established: the 2014 update is
+paywalled with no lawful free copy, and the 2017 one does not exist. Recording them is what stops
+a third attempt.
+
+**ref-16 (ASPEN) was curated as a portal.** Its only record was the conference call-for-papers
+that sits at the top level; the actual guidance is in subfolders. Three documents added, and the
+head-and-neck set recorded `out_of_scope` rather than left silent.
+
+Two new `preparation_status` values were needed and are stated rather than borrowed:
+`pending_markdown_conversion` for the two new SIOG PDFs, and `superseded_edition`. Reusing
+`metadata_only` for a real document awaiting conversion would have made it read as a portal shell.
+
+**`safety_reviewer` stays out of the chunk role vocabulary.** §6.4 recorded it as a gap: the
+agent exists and the curation uses it, but `AGENT_ROLES` does not carry it, so "that agent cannot
+filter for its own material". Measured before deciding:
+
+```
+included records: 80
+safety_reviewer   67  (84%)     medical_oncology  42 (52%)
+geriatric_frailty 40  (50%)     urology_oncology  33 (41%)
+rcp_synthesis      4  ( 5%)     nutrition          3 ( 4%)
+```
+
+**A filter that selects 84% of the corpus is not a filter.** The curation applies
+`safety_reviewer` to essentially every guideline, which is reasonable as a statement about
+relevance and useless as retrieval metadata — an agent filtering on it would receive the corpus.
+So it is resolved the way `rcp_synthesis` is: an agent that reads other agents' outputs and the
+safety rules, not one that filters passages. Both remain agent directories and neither is a chunk
+role.
+
+This is reversible and cheap to revisit. If a safety agent later needs its own material, the
+right move is a narrow role earned by content — contraindications, toxicity, renal dosing — not
+the current blanket tag.
+
+**One more role gap, fixed.** ESPEN (ref-17) and MNA (ref-12) did not carry the `nutrition` role,
+because the role entered the vocabulary after this curation was written. The nutrition tranche's
+two most important sources were not tagged nutrition. Both now are.
+
+The curation covers all 26 reference folders: 104 records, 80 included.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated

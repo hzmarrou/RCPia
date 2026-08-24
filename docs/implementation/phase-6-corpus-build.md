@@ -406,7 +406,7 @@ Roughly **54 documents**, against v4's 10 — of which **3 are not yet held**. I
 the psycho-oncology tranche was excluded (§6.2); the SIOG and AFU changes of 24 August added
 back four; and AUA curation may take it lower again.
 
-### 6.1 SIOG is missing from the curation
+### 6.1 SIOG is missing from the curation — **fixed 24 August**
 
 `poc_document_manifest.json` covers ref-01 to ref-25. **ref-27 is not in it**, and ref-27 is
 SIOG — four documents that are live in the database today, added later in the v3.1 release.
@@ -493,7 +493,7 @@ same pattern before v5 builds.
 `nutrition` is added to `AGENT_LABELS` in `rcpia/pps/generator.py`. It must also enter the
 release's `agent_roles` enum when the builder owns that vocabulary.
 
-### 6.4 The role vocabulary has two gaps
+### 6.4 The role vocabulary has two gaps — **resolved 24 August**
 
 The earlier implementation's nine agents map onto our ten roles with residue:
 
@@ -561,10 +561,15 @@ two facts explain the identical 12,578-byte error pages in `ref-27/_invalid_down
 | 11 | Build, load, run probes → **v5.0** | 7, 8, 10 |
 | 12 | CI job for rule-file validation | 2 |
 
-Three corrections to the source inventory must land before step 5, because each is an omission
-the coverage proof would otherwise pass over: **add ref-27 (SIOG) to the curation** (§6.1),
-**re-check every folder marked `portal_or_metadata_only`** for the ref-16 pattern (§6.3), and
-**resolve `safety_reviewer`** in the role vocabulary (§6.4).
+~~Three corrections to the source inventory must land before step 5~~ — **all three done,
+24 August.** ref-27 (SIOG) is curated, six records including the two new editions and the two
+invalid downloads; the `portal_or_metadata_only` sweep was run across all 15 such exclusions and
+found exactly one real hit, ref-16 (ASPEN), whose three in-scope documents are now curated; and
+`safety_reviewer` is resolved as **not** a chunk role — it is applied to 84% of included records,
+which is a statement of relevance rather than a retrieval filter, so it stays alongside
+`rcp_synthesis` as an agent that reads outputs rather than passages. ESPEN and MNA were also
+found untagged for `nutrition` and fixed. The curation now covers all 26 reference folders:
+104 records, 80 included. See `decisions.md`, 24 August.
 
 **Step 4 is the one that proves the design.** Re-expressing the hand-tuned documents as rule
 data must reproduce v4.0's routing exactly. If the data format cannot express what the Python
