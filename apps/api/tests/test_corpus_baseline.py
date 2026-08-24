@@ -80,6 +80,15 @@ DEFAULT_ONLY = {
     # Its bibliography is marked by stage 1 rather than by a rule -- 64 of its 102 headings are
     # citations, and there is no naming sixty-four of them.
     "siog.geriatric-screening.2015",
+    # A prostate MRI reporting standard. Every passage is about how the scan is acquired, read
+    # and scored, which is the same procedure whatever the disease turns out to be, so the
+    # document sits whole in one setting and there is nothing to divide.
+    "acr.pi-rads.v2-1",
+    # RECIST 1.1 itself: three passages under two headings, defining measurable disease and the
+    # response categories. Response evaluation applies to any solid tumour under treatment, and
+    # the document is too small to have furniture worth excluding -- it carries no bibliography
+    # of its own.
+    "recist.criteria-1-1.fr",
 }
 
 
