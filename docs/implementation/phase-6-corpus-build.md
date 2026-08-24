@@ -399,10 +399,10 @@ plus the sources. **The corpus stops being an artefact we receive and becomes on
 | **Instruments** — G8, IPSS, IIEF-5, MNA, Katz ADL, Mini-GDS, Pallia 10 | ~11 | `fact_schema` already extracts every one and nothing interprets them |
 | **SIOG** — ref-27 | **5** | 2014, 2015 and the 2020 bladder paper stay; **2010 excluded**, **Boyle 2019 and ESMO/SIOG 2024 added** (24 Aug); still **absent from the curation manifest** |
 | ~~**Psycho-oncology** — ref-21/22/23~~ | **0** | **excluded from v5 by the clinician, 24 August 2026** — see §6.2 |
-| **Nutrition** — ASPEN (ref-16), ESPEN (ref-17) | ~4 | see §6.3 |
+| **Nutrition** — ASPEN (ref-16), ESPEN (ref-17), ESMO cachexia (ref-25) | **6** | see §6.3; ESPEN surgery and ESMO cachexia added 24 Aug, ESPEN permission attested |
 | **French geriatric urology** — AFU 2019 *Onco-urologie du patient âgé* | 3 | in scope 24 Aug; **not held — must be obtained**, see §6.5 |
 
-Roughly **54 documents**, against v4's 10 — of which **3 are not yet held**. It was ~68 until
+Roughly **56 documents**, against v4's 10 — of which **3 are not yet held**. It was ~68 until
 the psycho-oncology tranche was excluded (§6.2); the SIOG and AFU changes of 24 August added
 back four; and AUA curation may take it lower again.
 

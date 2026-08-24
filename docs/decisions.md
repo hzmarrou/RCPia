@@ -285,6 +285,53 @@ two most important sources were not tagged nutrition. Both now are.
 
 The curation covers all 26 reference folders: 104 records, 80 included.
 
+## 2026-08-24 — ESPEN permission attested, and the curation starts carrying licence evidence
+
+**The treating clinician obtained permission from ESPEN.** Both ESPEN guidelines are recorded
+`permission_user_attested`, the same status the NCCN documents carry, and not
+`open_access_copy`.
+
+The distinction is not pedantry. Both ESPEN guidelines are free to read on espen.org and both
+carry the line *"© 2021 European Society for Clinical Nutrition and Metabolism. Published by
+Elsevier Ltd. All rights reserved."* Free to read is not openly licensed, and the record that
+conflates them is the one that cannot be defended later. The ESMO cachexia guideline, by
+contrast, states its licence in the PDF — CC BY-NC-ND 4.0 — and is recorded `open_access_copy`
+on that evidence.
+
+**The curation now carries `licence_status` and `licence_evidence`.** The evidence field holds
+the copyright line as printed, plus the attestation where one exists, so a reader can check the
+claim rather than trust it. Three records of 106 carry it — the three nutrition guidelines whose
+PDFs were actually read. **A record without these fields means nobody has looked**, which must
+not render the same as a record that was checked and found permissive. That is the same
+principle as the release manifest's coverage proof, one level up in the pipeline.
+
+This also settles a defect noted earlier: `ESPEN_Clinical_Nutrition_in_Cancer.pdf` had been
+curated and scoped as the nutrition tranche's anchor without its licence ever being read. It has
+the same copyright line and is covered by the same attestation.
+
+**Two documents were added**, both fetched and verified on 24 August against the report at
+`docs/reviews/nutrition-sources-2026-08-24.md`:
+
+| document | ref | licence |
+|---|---|---|
+| ESPEN practical guideline: Clinical nutrition in surgery (2021), 17 pp | ref-17 | `permission_user_attested` |
+| Cancer cachexia in adult patients: ESMO Clinical Practice Guidelines (2021), 18 pp | ref-25 | `open_access_copy`, CC BY-NC-ND |
+
+Both answer questions dossier 2 raises and the corpus cannot: nutritional optimisation before
+radical cystectomy, and cachexia in advanced disease. Both are `pending_markdown_conversion`.
+
+**Not taken from the same report:** ERAS 2013 (its own reviewer calls it dated and partly
+extrapolated from colorectal surgery), the ASPEN 2024 systematic review and ASCO guidelines
+(paywalled, metadata only), and the secondary tier of reviews and summaries. The report also
+recommended fetching EAU prostate 2026, EAU MIBC 2026 and AFU TVIM 2024-2026, all three of which
+are already held — AFU TVIM is loaded and routed.
+
+One finding from it is worth keeping regardless of what was loaded: **SWOG S1600 (2025) found no
+benefit from immunonutrition in unselected cystectomy patients**, contradicting the earlier
+positive reviews the same report lists. That is a labelled guideline divergence with a date and
+a direction, and belongs in the retrieval evaluation's gold set — the evaluation notes that such
+labels otherwise depend on a clinician annotating disagreements by hand.
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated
