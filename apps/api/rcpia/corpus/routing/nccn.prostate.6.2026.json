@@ -71,6 +71,12 @@
       "note": "Stated before both CRPC rules below. Enzalutamide is discussed across the castration-resistant states in one section, and NCCN says so in the heading. Routing it to either state would hide it from the other half of the patients it is written about."
     },
     {
+      "match_section": "M0 CRPC",
+      "setting": "prostate_nonmetastatic_castration_resistant",
+      "every_occurrence": true,
+      "note": "Apalutamide and darolutamide in M0 CRPC. M0 is non-metastatic, and these are the two drugs indicated there; without this rule both sections fell to the document default and lost the distinction the setting was added for. Found by sweeping every fixture for headings that name non-metastatic castration-resistant disease and checking where they routed. Distinct from `M0 and M1 CRPC` above, which is enzalutamide discussed across both states and stays spanning."
+    },
+    {
       "match_section": "mCSPC",
       "setting": "prostate_metastatic_hormone_sensitive",
       "every_occurrence": true,

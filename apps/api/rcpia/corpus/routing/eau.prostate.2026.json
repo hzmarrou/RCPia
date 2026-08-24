@@ -119,8 +119,8 @@
     },
     {
       "match_section": "6.7.15",
-      "setting": "prostate_nonmetastatic_unspecified_risk",
-      "note": "Non-metastatic castration-resistant disease. The vocabulary has no value for it, so this records what can be said -- non-metastatic, risk not narrowed -- and loses 'castration-resistant'. v3 made the same substitution. A prostate_nonmetastatic_castration_resistant value would fix it, and adding one is a decision. MUST precede 6.7."
+      "setting": "prostate_nonmetastatic_castration_resistant",
+      "note": "Non-metastatic castration-resistant disease, and now routed to it. Until 24 August the vocabulary had no value for this, so the rule recorded what could be said -- non-metastatic, risk not narrowed -- and lost `castration-resistant`; corpus v3 made the same substitution. `prostate_nonmetastatic_castration_resistant` was added later that day for AUA's advanced prostate guideline, and this rule was not revisited at the time. Found by a check for rules whose match sets overlap. MUST precede 6.7, whose rule routes castration-resistant disease to the metastatic setting."
     },
     {
       "match_section": "6.7 Treatment: Castration-resistant",

@@ -231,9 +231,26 @@ reachability, and total shadowing is unreachable.
 
 The residual risk is real but narrower: **total shadowing is caught, partial shadowing is not.**
 If only some of the longer-needle headings contained the shorter needle, the rule would still
-fire for the rest, the audit would pass, and a few passages would be misrouted silently. **No
-systematic check for partial shadowing across the 37 files has been done.** We consider this the
-single most likely place for an undetected error.
+fire for the rest, the audit would pass, and a few passages would be misrouted silently.
+
+**That check has since been run, and it found two real defects.** Every pair of rules whose match
+sets overlap with different outcomes: 22 pairs across the 37 files, 20 of them the deliberate
+orderings working correctly. The two that were not:
+
+- `eau.prostate.2026` section 6.7.15, *recommendation for non-metastatic castrate-resistant
+  disease*, was routed to `prostate_nonmetastatic_unspecified_risk`. Its own note said a
+  `prostate_nonmetastatic_castration_resistant` value would fix it; that value was added later
+  the same day for AUA and this rule was never revisited.
+- `nccn.prostate.6.2026` had no rule for `M0 CRPC`, so *apalutamide in M0 CRPC* and
+  *darolutamide in M0 CRPC* — the two drugs indicated in non-metastatic castration-resistant
+  disease — fell to the document default.
+
+Both fixed. nmCRPC now carries 15 passages across four guidelines rather than 11 across three.
+**The check was one-off and is not a test**, so the class is not closed; and one case was
+deliberately left alone rather than changed on inference — EAU 6.7.13 and 6.7.14, chapter-wide
+summaries titled *recommendations for systemic treatments of castrate-resistant disease*, are
+routed to the metastatic setting and plausibly span M0 and M1. **We would value your opinion on
+those two.**
 
 **Consistency across 37 files written in one long session.** Standards drifted. `match_leaf` is
 used liberally in the ESMO files and sparingly in the AUA ones; `not_specified` versus an
