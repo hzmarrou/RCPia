@@ -39,6 +39,10 @@ class Arm:
     rerank: bool
     legs: str = "both"  # "dense", "keyword", or "both"
     drop_dimension: str | None = None
+    # Whether a risk-band question also admits its risk-unspecified parent. An admission
+    # option rather than a routing dimension, so it is named rather than folded into
+    # `drop_dimension`.
+    admit_parent: bool = True
     note: str = ""
 
     @property
@@ -60,10 +64,17 @@ ARMS: tuple[Arm, ...] = (
         note="Production: routing, reranking and the relevance floor."),
 )
 
-ABLATIONS: tuple[Arm, ...] = tuple(
-    Arm(f"routed−{dimension}", routed=True, rerank=False, drop_dimension=dimension,
-        note=f"What {dimension} is worth on its own.")
-    for dimension in ROUTING_DIMENSIONS
+ABLATIONS: tuple[Arm, ...] = (
+    *(
+        Arm(f"routed−{dimension}", routed=True, rerank=False, drop_dimension=dimension,
+            note=f"What {dimension} is worth on its own.")
+        for dimension in ROUTING_DIMENSIONS
+    ),
+    # Not a dimension: an admission option, priced the same way. A risk-band question that
+    # cannot see guidance written across the bands reaches 14 of 332 non-metastatic prostate
+    # passages, which is what this arm exists to show rather than assert.
+    Arm("routed−parent_setting", routed=True, rerank=False, admit_parent=False,
+        note="What admitting the risk-unspecified parent is worth."),
 )
 
 
@@ -88,7 +99,7 @@ def filter_for(question: Question, arm: Arm) -> Filter:
     An unrouted arm keeps the cancer type, because that is an invariant: a prostate question
     reaching a bladder document is not a routing subtlety, it is a different disease.
     """
-    invariants = Filter(cancer_type=question.cancer_type)
+    invariants = Filter(cancer_type=question.cancer_type, admit_parent_setting=arm.admit_parent)
     if not arm.routed:
         return invariants
 
@@ -114,6 +125,7 @@ def filter_for(question: Question, arm: Arm) -> Filter:
 
     return replace(
         invariants,
+        admit_parent_setting=arm.admit_parent,
         disease_setting=str(setting) if setting else None,
         therapy_line=str(line) if line else None,
         clinical_purpose=purposes,

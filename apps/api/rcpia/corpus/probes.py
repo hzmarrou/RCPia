@@ -28,7 +28,7 @@ from rcpia.corpus.vocabulary import (
     CLINICAL_PURPOSES,
     DISEASE_SETTINGS,
 )
-from rcpia.evidence.retrieval import ADMISSIBLE_UNSPECIFIED_REASONS
+from rcpia.evidence.retrieval import ADMISSIBLE_UNSPECIFIED_REASONS, SETTING_PARENTS
 
 PROBES_FILENAME = "probes.json"
 UNIVERSAL_PURPOSE = "general"
@@ -91,14 +91,22 @@ def admits(chunk: dict[str, Any], probe_filter: ProbeFilter) -> bool:
         return False
 
     setting = chunk.get("disease_setting")
-    if probe_filter.disease_setting is not None and setting != probe_filter.disease_setting:
-        # A passage with no setting is admitted only when its reason says it is universal.
-        # `not_determinable` is the routing admitting it could not place the passage, which is
-        # not evidence that the passage applies everywhere.
-        if setting != "not_specified":
-            return False
-        if chunk.get("not_specified_reason") not in ADMISSIBLE_UNSPECIFIED_REASONS:
-            return False
+    if probe_filter.disease_setting is not None:
+        # A risk-band question also admits its risk-unspecified parent, because guidance
+        # written across the bands applies within one. Imported from `retrieval` rather than
+        # restated, so the two cannot drift.
+        admitted = {probe_filter.disease_setting}
+        parent = SETTING_PARENTS.get(probe_filter.disease_setting)
+        if parent is not None:
+            admitted.add(parent)
+        if setting not in admitted:
+            # A passage with no setting is admitted only when its reason says it is universal.
+            # `not_determinable` is the routing admitting it could not place the passage,
+            # which is not evidence that the passage applies everywhere.
+            if setting != "not_specified":
+                return False
+            if chunk.get("not_specified_reason") not in ADMISSIBLE_UNSPECIFIED_REASONS:
+                return False
 
     if probe_filter.clinical_purpose:
         wanted = set(probe_filter.clinical_purpose) | {UNIVERSAL_PURPOSE}

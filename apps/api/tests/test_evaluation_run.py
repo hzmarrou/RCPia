@@ -312,24 +312,29 @@ async def test_the_best_placed_passage_in_a_group_explains_the_loss(
     Blaming routing would be wrong: relaxing the filter would not have helped, because a
     candidate was already there and the ranking still did not return it.
     """
+    # All five passages tie on score, so the fusion's chunk-id tiebreak decides the order.
+    # Named to make that explicit: the two fillers take the two returned slots and
+    # `zz-candidate` is the one left just outside, by design rather than by luck.
     await add_document(session)
-    await add_chunk(session, "filler-1")
-    await add_chunk(session, "filler-2")
-    await add_chunk(session, "candidate")
+    await add_chunk(session, "aa-filler-1")
+    await add_chunk(session, "aa-filler-2")
+    await add_chunk(session, "zz-candidate")
     await add_chunk(session, "refused-a", disease_setting="prostate_localized_low_risk")
     await add_chunk(session, "refused-b", disease_setting="prostate_localized_low_risk")
 
     run = await run_question(
         session,
-        question=question(groups=(group("refused-a", "refused-b", "candidate"),)),
+        question=question(groups=(group("refused-a", "refused-b", "zz-candidate"),)),
         arm=ROUTED,
         embedding=vector(1),
         embedding_model=MODEL,
         reranker=FakeReranker({}),
         limit=2,
     )
-    assert "candidate" not in run.returned
-    assert [(loss.chunk_id, loss.stage) for loss in run.losses] == [("candidate", STAGE_RANK)]
+    assert "zz-candidate" not in run.returned
+    assert [(loss.chunk_id, loss.stage) for loss in run.losses] == [
+        ("zz-candidate", STAGE_RANK)
+    ]
 
 
 # --------------------------------------------------------------------------------------

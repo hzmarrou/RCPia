@@ -286,7 +286,9 @@ def test_a_routed_arm_applies_every_declared_dimension() -> None:
     assert routed.agent_role == "medical_oncology"
 
 
-@pytest.mark.parametrize("dimension", [a.drop_dimension for a in ABLATIONS])
+@pytest.mark.parametrize(
+    "dimension", [a.drop_dimension for a in ABLATIONS if a.drop_dimension]
+)
 def test_each_ablation_drops_exactly_the_dimension_it_names(dimension: str) -> None:
     """The ablations exist to price one dimension at a time. An arm that dropped two would
     attribute both losses to one name.

@@ -91,11 +91,33 @@ def test_a_probe_fails_when_the_document_it_needs_stops_answering() -> None:
         must_reach=("afu.bladder-tvnim.2024-2026",),
     )
     assert run_probe(probe, [chunk()]).passed
-    moved = chunk(disease_setting="bladder_nmibc_unspecified_risk")
+    moved = chunk(disease_setting="bladder_mibc_non_metastatic")
     result = run_probe(probe, [moved])
     assert not result.passed
     assert result.unreached == ("afu.bladder-tvnim.2024-2026",)
     assert "never reached" in result.describe()
+
+
+def test_moving_a_passage_up_to_its_parent_no_longer_trips_a_probe() -> None:
+    """**A real loss of detection, recorded rather than discovered later.**
+
+    This test used to move a high-risk NMIBC passage to `bladder_nmibc_unspecified_risk` and
+    assert the probe caught it. Since a risk band admits its risk-unspecified parent, that move
+    is admissible and the probe passes -- so a heading rename that pushes a passage *up* one
+    level is now invisible here, where before it was caught.
+
+    That is the price of the parent relation and it is worth paying: the alternative left an
+    intermediate-risk question able to reach 14 of 332 non-metastatic prostate passages. But it
+    is a price, and a rename that moves a passage sideways -- to a different disease stage --
+    is still caught, which is the case above.
+    """
+    probe = Probe(
+        question="BCG dans une TVNIM à haut risque",
+        filter=BLADDER,
+        must_reach=("afu.bladder-tvnim.2024-2026",),
+    )
+    moved_up = chunk(disease_setting="bladder_nmibc_unspecified_risk")
+    assert run_probe(probe, [moved_up]).passed
 
 
 def test_a_probe_fails_when_it_reaches_what_it_must_not() -> None:
