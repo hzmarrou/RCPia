@@ -72,6 +72,7 @@ AGENT_LABELS = {
     "geriatric_frailty": "Oncogériatrie",
     "palliative_supportive": "Soins de support et palliatifs",
     "nutrition": "Nutrition clinique",
+    "safety_reviewer": "Revue de sécurité",
 }
 
 

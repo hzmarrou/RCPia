@@ -288,13 +288,21 @@ def test_a_setting_outside_the_vocabulary_is_refused() -> None:
 
 
 def test_a_role_outside_the_vocabulary_is_refused() -> None:
-    """`safety_reviewer` is the live case: an agent directory exists and the curation manifest
-    uses the value, but no chunk carries it and nothing has decided what it routes to."""
+    """`rcp_synthesis` is the live case: an agent directory exists and the curation manifest
+    uses the value, but it reads other agents' outputs rather than passages, so it has no
+    business filtering the corpus.
+
+    **`safety_reviewer` used to be the example here and no longer is.** It was absent because
+    nothing had decided what it routes to; the corpus fitness review made that decision -- the
+    sections where a guideline writes about harm -- so it is now a real role with 49 passages.
+    The curation's document-level tag is still refused, in `build.py`, because 84% of records
+    carry it.
+    """
     with pytest.raises(RuleError, match="does not implement"):
         parse_rules(
             {
                 "document_id": "x",
-                "default": {"setting": "bladder_metastatic", "roles": ["safety_reviewer"]},
+                "default": {"setting": "bladder_metastatic", "roles": ["rcp_synthesis"]},
                 "rules": [],
             }
         )

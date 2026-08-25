@@ -37,6 +37,119 @@
       "exclusion_reason": "appendix_content"
     },
     {
+      "match_section": "Evaluation of comorbidity, frailty and cognition",
+      "setting": "bladder_mibc_non_metastatic",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "renal_safety",
+        "geriatric_frailty",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety",
+        "risk_stratification"
+      ],
+      "every_occurrence": true,
+      "note": "Named `renal_safety` because eligibility for platinum chemotherapy is a renal and fitness question before it is an oncological one, and this section is where the guideline says so. The corpus fitness review found the role held one passage in 3,532; an agent that gates cisplatin cannot be built on that. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing. Carries `safety_reviewer` as well: eligibility for a drug the patient cannot clear is harm guidance, and a safety reviewer that cannot see the cisplatin fork cannot review a bladder case."
+    },
+    {
+      "match_section": "Comorbidity scales, anaesthetic risk classification",
+      "setting": "bladder_mibc_non_metastatic",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "renal_safety",
+        "geriatric_frailty",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety",
+        "risk_stratification"
+      ],
+      "every_occurrence": true,
+      "note": "Named `renal_safety` because eligibility for platinum chemotherapy is a renal and fitness question before it is an oncological one, and this section is where the guideline says so. The corpus fitness review found the role held one passage in 3,532; an agent that gates cisplatin cannot be built on that. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing. Carries `safety_reviewer` as well: eligibility for a drug the patient cannot clear is harm guidance, and a safety reviewer that cannot see the cisplatin fork cannot review a bladder case."
+    },
+    {
+      "match_section": "Patients eligible for combination",
+      "setting": "bladder_metastatic",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "renal_safety",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety",
+        "therapy_indication"
+      ],
+      "every_occurrence": true,
+      "note": "Named `renal_safety` because eligibility for platinum chemotherapy is a renal and fitness question before it is an oncological one, and this section is where the guideline says so. The corpus fitness review found the role held one passage in 3,532; an agent that gates cisplatin cannot be built on that. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing. Carries `safety_reviewer` as well: eligibility for a drug the patient cannot clear is harm guidance, and a safety reviewer that cannot see the cisplatin fork cannot review a bladder case."
+    },
+    {
+      "match_section": "not eligible for combination therapy",
+      "setting": "bladder_metastatic",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "renal_safety",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety",
+        "therapy_indication"
+      ],
+      "every_occurrence": true,
+      "note": "Named `renal_safety` because eligibility for platinum chemotherapy is a renal and fitness question before it is an oncological one, and this section is where the guideline says so. The corpus fitness review found the role held one passage in 3,532; an agent that gates cisplatin cannot be built on that. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing. Carries `safety_reviewer` as well: eligibility for a drug the patient cannot clear is harm guidance, and a safety reviewer that cannot see the cisplatin fork cannot review a bladder case."
+    },
+    {
+      "match_section": "6.8.1.f Toxicity",
+      "setting": "bladder_mibc_non_metastatic",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety"
+      ],
+      "every_occurrence": true,
+      "note": "Named `safety_reviewer` because this is a section about harm -- what a treatment costs the patient -- which is what that agent reads for. Its role was absent from the vocabulary until the fitness review; it is earned here, per section, rather than taken from the curation's document-level tag which 84% of records carry. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing."
+    },
+    {
+      "match_section": "Follow-up of functional outcomes and complications",
+      "setting": "bladder_mibc_non_metastatic",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety",
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Named `safety_reviewer` because this is a section about harm -- what a treatment costs the patient -- which is what that agent reads for. Its role was absent from the vocabulary until the fitness review; it is earned here, per section, rather than taken from the curation's document-level tag which 84% of records carry. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing."
+    },
+    {
       "match_section": "8.5 Distant recurrence",
       "setting": "bladder_metastatic",
       "note": "Recurrence at distance is metastatic disease. MUST precede nothing in particular, but it sits inside chapter 8, which otherwise defaults to non-metastatic -- so it needs its own rule to escape it."

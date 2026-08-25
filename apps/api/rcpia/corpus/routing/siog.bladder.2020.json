@@ -24,6 +24,40 @@
       "note": "The reference list, and the citation fragments the conversion promoted to headings beside it -- `30911. BJU Int 2016;118(3):423-8.` is a heading in this markdown. All of them sit under the summary, and none is a passage."
     },
     {
+      "match_section": "5.1.1.3",
+      "setting": "bladder_mibc_non_metastatic",
+      "roles": [
+        "geriatric_frailty",
+        "urology_oncology",
+        "medical_oncology",
+        "renal_safety",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety",
+        "risk_stratification"
+      ],
+      "every_occurrence": true,
+      "note": "Named `renal_safety` because eligibility for platinum chemotherapy is a renal and fitness question before it is an oncological one, and this section is where the guideline says so. The corpus fitness review found the role held one passage in 3,532; an agent that gates cisplatin cannot be built on that. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing. Needle is the section number: the outliner merged this heading with its first sentence, so the number is the only stable part of the path. Carries `safety_reviewer` as well: eligibility for a drug the patient cannot clear is harm guidance, and a safety reviewer that cannot see the cisplatin fork cannot review a bladder case."
+    },
+    {
+      "match_section": "5.1.1.5",
+      "setting": "bladder_mibc_non_metastatic",
+      "roles": [
+        "geriatric_frailty",
+        "urology_oncology",
+        "medical_oncology",
+        "renal_safety",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety",
+        "risk_stratification"
+      ],
+      "every_occurrence": true,
+      "note": "Named `renal_safety` because eligibility for platinum chemotherapy is a renal and fitness question before it is an oncological one, and this section is where the guideline says so. The corpus fitness review found the role held one passage in 3,532; an agent that gates cisplatin cannot be built on that. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing. Needle is the section number, for the same reason as 5.1.1.3. Carries `safety_reviewer` as well: eligibility for a drug the patient cannot clear is harm guidance, and a safety reviewer that cannot see the cisplatin fork cannot review a bladder case."
+    },
+    {
       "match_section": "4. Non muscle-invasive bladder cancer",
       "setting": "bladder_nmibc_unspecified_risk",
       "every_occurrence": true,

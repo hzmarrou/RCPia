@@ -63,6 +63,44 @@
       "note": "Claims `**UTUC**` and `**Treatment of UTUC**`. Leaf-matched, so the advanced-disease sections the conversion filed beneath `**UTUC**` are untouched -- they are about urothelial carcinoma generally and belong to metastatic bladder disease."
     },
     {
+      "match_section": "not eligible for cisplatin",
+      "setting": "bladder_metastatic",
+      "roles": [
+        "medical_oncology",
+        "urology_oncology",
+        "radiation_oncology",
+        "pathology",
+        "radiology",
+        "renal_safety",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety",
+        "therapy_indication"
+      ],
+      "every_occurrence": true,
+      "note": "Named `renal_safety` because eligibility for platinum chemotherapy is a renal and fitness question before it is an oncological one, and this section is where the guideline says so. The corpus fitness review found the role held one passage in 3,532; an agent that gates cisplatin cannot be built on that. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing. Carries `safety_reviewer` as well: eligibility for a drug the patient cannot clear is harm guidance, and a safety reviewer that cannot see the cisplatin fork cannot review a bladder case. Replaces the former `advanced or metastatic UC` rule, whose own note said it covered \"both the fit-for-cisplatin and cisplatin-ineligible sections, and their recommendation blocks, under one substring\". Those are the four paths these two rules now split, so it became dead and the shadowing audit said so."
+    },
+    {
+      "match_section": "fit enough to tolerate cisplatin",
+      "setting": "bladder_metastatic",
+      "roles": [
+        "medical_oncology",
+        "urology_oncology",
+        "radiation_oncology",
+        "pathology",
+        "radiology",
+        "renal_safety",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety",
+        "therapy_indication"
+      ],
+      "every_occurrence": true,
+      "note": "Named `renal_safety` because eligibility for platinum chemotherapy is a renal and fitness question before it is an oncological one, and this section is where the guideline says so. The corpus fitness review found the role held one passage in 3,532; an agent that gates cisplatin cannot be built on that. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing. Carries `safety_reviewer` as well: eligibility for a drug the patient cannot clear is harm guidance, and a safety reviewer that cannot see the cisplatin fork cannot review a bladder case."
+    },
+    {
       "match_section": "Staging of NMIBC",
       "setting": "bladder_nmibc_unspecified_risk",
       "match_leaf": true,
@@ -104,13 +142,6 @@
       "match_leaf": true,
       "every_occurrence": true,
       "note": "Cisplatin-based chemotherapy around radical treatment of MIBC."
-    },
-    {
-      "match_section": "advanced or metastatic UC",
-      "setting": "bladder_metastatic",
-      "match_leaf": true,
-      "every_occurrence": true,
-      "note": "Covers both the fit-for-cisplatin and cisplatin-ineligible sections, and their recommendation blocks, under one substring."
     },
     {
       "match_section": "relapsed advanced/metastatic UC",

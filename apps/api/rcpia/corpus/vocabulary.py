@@ -177,10 +177,20 @@ CLINICAL_PURPOSES: Final[frozenset[str]] = frozenset(
 # ESPEN (ref-17); this build had no such role, nothing in the corpus, and a ledger that already
 # extracts `mna`, `albumin` and `protein`.
 #
-# `safety_reviewer` is deliberately **absent and unresolved**: `agents/safety_reviewer/` exists
-# and `poc_document_manifest.json` uses the value, but no chunk has ever carried it, so that
-# agent cannot filter for its own material. Adding it here without deciding what it routes to
-# would give the appearance of a fix. See `phase-6-corpus-build.md` §6.4.
+# `safety_reviewer` was **absent and unresolved** until the corpus fitness review, and the
+# objection recorded here was the right one: `agents/safety_reviewer/` existed and
+# `poc_document_manifest.json` used the value, but no chunk carried it, and adding it *"without
+# deciding what it routes to would give the appearance of a fix"*.
+#
+# It now has a decided referent, taken from section paths like every other routing decision:
+# the passages a guideline writes about **harm** — `8.2 Adverse effects of PCa therapies`,
+# `Contre-indications > Formelles`, `7.4.3.c BCG toxicity`, `Complications`. That is a real
+# slice of about 50 passages, not a document-level tag.
+#
+# **The curation's own `safety_reviewer` tag is still not used, and `build.py` still drops it.**
+# 84% of curation records carry it, so taking it from there would give the safety reviewer
+# almost the whole corpus and tell it nothing — the same overcoverage the fitness review found
+# on the five core oncology roles. A role earns its place by being sparse.
 AGENT_ROLES: Final[frozenset[str]] = frozenset(
     {
         "urology_oncology",
@@ -194,5 +204,6 @@ AGENT_ROLES: Final[frozenset[str]] = frozenset(
         "geriatric_frailty",
         "palliative_supportive",
         "nutrition",
+        "safety_reviewer",
     }
 )

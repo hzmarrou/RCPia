@@ -1,5 +1,12 @@
 # Harness runs on the pilot split, corpus v5.1
 
+> **The table below is the v5.1 run and is kept as the record that drove the repairs.** The live
+> corpus is now **v5.2**, which populated `renal_safety` (1 → 18) and added `safety_reviewer`
+> (0 → 49); see finding 4. On v5.2 the `routed` arm reads 0.83 rather than 0.88 — one boundary
+> question, `bl-006`, sits on a rank-10 tie and its loss is attributed to *ranking*, not to the
+> filter, so nothing became unreachable. The gain the change was made for shows up per question
+> rather than in the mean: `bl-004` went from one returned passage to seven.
+
 **These numbers are not a result and must not be quoted as one.** The pilot exists to build the
 harness, and §6.4 of the plan says it *"may be looked at freely; never reported"*. Twelve
 answerable questions cannot separate two arms that differ by 0.05. What the run *can* do — and
@@ -143,7 +150,19 @@ prevent. The claim needs re-labelling against a non-metastatic source, or droppi
 Finding 2 and finding 3 produce the *same* attribution string and have opposite repairs. That
 is worth stating plainly: the attribution names the stage, and a person still reads the passage.
 
-## 4. Two agent roles have almost no corpus behind them.
+## 4. Two agent roles had almost no corpus behind them — now fixed
+
+**Superseded by corpus v5.2.** The table below is the v5.1 state, kept because it is what the
+run measured. `renal_safety` now holds **18** passages and `safety_reviewer` — a role that did
+not exist in the vocabulary at all — holds **49**, both routed from section paths where a
+guideline writes about renal fitness, cisplatin eligibility, or harm. `bl-004` went from
+returning **one** passage to **seven**: AFU on cisplatin, EAU on comorbidity, frailty and
+anaesthetic risk, SIOG on fitness and anaesthesia management. Its remaining miss is the
+mislabelled gold claim in finding 3, not a corpus gap.
+
+`genetics_molecular` and `nuclear_medicine` remain at zero and are still a scope decision.
+
+### The v5.1 state that prompted it
 
 | role | passages |
 |---|---|

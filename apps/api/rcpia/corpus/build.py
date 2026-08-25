@@ -42,6 +42,9 @@ ROUTING = CORPUS / "routing"
 STRUCTURE = CORPUS / "structure"
 CURATION = Path("_prepared") / "poc_document_manifest.json"
 
+# Roles the curation applies at document level that must never reach a passage that way.
+CURATION_ONLY_ROLES = frozenset({"safety_reviewer", "rcp_synthesis"})
+
 
 class BuildError(Exception):
     """A release cannot be assembled from what is on disk."""
@@ -95,11 +98,20 @@ def read_curation(library: Path) -> dict[str, SourceRecord]:
                 else None
             ),
             source_files=tuple(dict.fromkeys(files)),
-            # Only roles retrieval can filter on. The curation also tags `safety_reviewer` and
-            # `rcp_synthesis`, which are agents that read outputs rather than passages -- 84% of
-            # records carry the first, so keeping it would say nothing about any chunk.
+            # Only roles retrieval can filter on, and never `safety_reviewer` -- 84% of
+            # curation records carry it, so a document-level tag would hand that agent almost
+            # the whole corpus and tell it nothing. It is now a real role (`vocabulary.py`) and
+            # is earned per section, in the rule files, from the headings where a guideline
+            # writes about harm. `rcp_synthesis` reads outputs rather than passages and has no
+            # role at all.
+            #
+            # **The exclusion has to be explicit now.** While `safety_reviewer` was absent from
+            # `AGENT_ROLES` the membership test dropped it for free; adding the value would
+            # have silently re-admitted it here and undone the sparsity that makes it useful.
             agent_roles=tuple(
-                r for r in (record.get("agent_roles") or []) if r in AGENT_ROLES
+                r
+                for r in (record.get("agent_roles") or [])
+                if r in AGENT_ROLES and r not in CURATION_ONLY_ROLES
             ),
         )
     return records

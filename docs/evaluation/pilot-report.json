@@ -1,5 +1,5 @@
 {
-  "corpus_release": "v5.1",
+  "corpus_release": "v5.2",
   "split": "pilot",
   "limit": 10,
   "questions": 13,
@@ -14,12 +14,12 @@
         "unanswerable": 1,
         "group_recall": 0.4166666666666667,
         "required_group_recall": 0.5,
-        "chunk_recall": 0.07684167684167685,
+        "chunk_recall": 0.08017501017501018,
         "precision_at_5": 0.2333333333333333,
-        "precision_at_10": 0.15833333333333333,
-        "irrelevant_context": 0.8416666666666667,
+        "precision_at_10": 0.16666666666666666,
+        "irrelevant_context": 0.8333333333333334,
         "mrr": 0.3333333333333333,
-        "ndcg_at_10": 0.17618955268086398,
+        "ndcg_at_10": 0.1814912850307766,
         "harmful_at_1": 0.0,
         "harmful_at_k": 0.0,
         "false_refusal": 0.0,
@@ -89,7 +89,7 @@
             "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107",
             "afu.bladder-geriatric-management.2019.cystectomie-totale-chez-le-sujet-age.01.0072",
             "afu.bladder-tvnim.2024-2026.modalites-d-administrations.01.0161",
-            "afu.bladder-tvnim.2024-2026.indication-de-l-instillation-postoperatoire-precoce-de-chimi.01.0159"
+            "esmo.bladder.2022.treatment-of-nmibc.01.2121"
           ],
           "widened": 0,
           "reranked": false,
@@ -128,8 +128,8 @@
             "afu.bladder-tvnim.2024-2026.tumeurs-de-risque-intermediaire.01.0152",
             "afu.bladder-tvnim.2024-2026.traitements-endovesicaux-adjuvants.01.0155",
             "afu.bladder-tvnim.2024-2026.indication-de-l-instillation-postoperatoire-precoce-de-chimi.01.0159",
-            "afu.bladder-tvnim.2024-2026.surveillance-active.01.0172",
             "afu.bladder-tvnim.2024-2026.tumeurs-de-haut-risque.01.0153",
+            "afu.bladder-tvnim.2024-2026.surveillance-active.01.0172",
             "afu.bladder-tvnim.2024-2026.recidive-apres-un-traitement-par-bcg.01.0175",
             "afu.bladder-tvnim.2024-2026.modalites-d-administrations.01.0161",
             "afu.bladder-tvnim.2024-2026.traitement-du-cis-isole.01.0176",
@@ -339,13 +339,13 @@
           "returned": [
             "afu.prostate.2024-2026.cap-localise-de-faible-risque-recommandation-15.01.0344",
             "afu.prostate-geriatric.2019.surveillance.01.0198",
-            "siog.prostate.2019.treatment-is-based-on-risk.02.3326",
             "afu.prostate-geriatric.2019.traitement.01.0196",
             "afu.prostate.2024-2026.abstention-surveillance-watchful-waiting.01.0297",
-            "afu.prostate-geriatric.2019.autres-modalites.01.0201",
-            "afu.prostate.2024-2026.cap-localise-de-risque-intermediaire-recommandation-16.01.0345",
+            "siog.prostate.2019.treatment-is-based-on-risk.02.3326",
             "afu.prostate-geriatric.2019.introduction.01.0191",
+            "afu.prostate.2024-2026.cap-localise-de-risque-intermediaire-recommandation-16.01.0345",
             "afu.prostate.2024-2026.rationnel.01.0298",
+            "afu.prostate-geriatric.2019.autres-modalites.01.0201",
             "siog.prostate.2019.treatment-is-based-on-risk.01.3325"
           ],
           "widened": 0,
@@ -391,8 +391,8 @@
             "afu.prostate-geriatric.2019.docetaxel.01.0204",
             "afu.prostate-geriatric.2019.enzalutamide.01.0206",
             "afu.prostate-geriatric.2019.cancer-de-la-prostate-resistant-a-la-castration-metastatique.02.0214",
-            "afu.prostate-geriatric.2019.radium-223.01.0219",
             "afu.prostate-geriatric.2019.lutetium-177-lie-a-un-anticorps-anti-psma.01.0220",
+            "afu.prostate-geriatric.2019.radium-223.01.0219",
             "esmo.prostate-advanced.2020.annals-of-oncology.01.2236",
             "afu.prostate-geriatric.2019.hormonotherapie-de-premiere-ligne.01.0203",
             "afu.prostate-geriatric.2019.cancer-de-la-prostate-resistant-a-la-castration-non-metastat.01.0209",
@@ -433,14 +433,14 @@
           "returned": [
             "who-iarc.urinary-male-genital.2022.intraductal-carcinoma-of-the-prostate.05.3478",
             "who-iarc.urinary-male-genital.2022.intraductal-carcinoma-of-the-prostate.04.3477",
-            "nccn.prostate.6.2026.effect-of-intraductal-cribriform-or-ductal-histology.01.2873",
             "who-iarc.urinary-male-genital.2022.intraductal-carcinoma-of-the-prostate.02.3475",
+            "nccn.prostate.6.2026.effect-of-intraductal-cribriform-or-ductal-histology.01.2873",
             "afu.prostate.2024-2026.score-de-gleason-modifie-grade-groupe-isup-ou-score-isup.01.0271",
             "who-iarc.urinary-male-genital.2022.tumour-invasion-and-spread.01.3511",
             "who-iarc.urinary-male-genital.2022.tumour-invasion-and-spread.02.3512",
             "who-iarc.urinary-male-genital.2022.intraductal-carcinoma-of-the-prostate.01.3474",
             "who-iarc.urinary-male-genital.2022.prostatic-ductal-adenocarcinoma.03.3509",
-            "who-iarc.urinary-male-genital.2022.prostatic-ductal-adenocarcinoma.01.3507"
+            "who-iarc.urinary-male-genital.2022.intraductal-carcinoma-of-the-prostate.03.3476"
           ],
           "widened": 0,
           "reranked": false,
@@ -469,15 +469,15 @@
           "query_id": "pr-004",
           "returned": [
             "afu.prostate.2024-2026.extension-locoregionale.01.0283",
-            "afu.prostate.2024-2026.tr.01.0244",
             "afu.prostate.2024-2026.scintigraphie-osseuse-avec-acquisition-tomoscintigraphique-c.01.0292",
+            "afu.prostate.2024-2026.tr.01.0244",
             "afu.prostate.2024-2026.rationnel.01.0298",
             "afu.prostate.2024-2026.tep-tdm-au-18-f-fluoro-2-deoxy-d-glucose-fdg.01.0287",
             "afu.prostate-geriatric.2019.introduction.01.0191",
             "afu.prostate.2024-2026.cap-localise-a-haut-risque-recommandation-17.01.0351",
-            "afu.prostate.2024-2026.technique.01.0250",
             "afu.prostate.2024-2026.tep-tdm-a-la-18-f-flurorocholine-fch.01.0288",
-            "afu.prostate.2024-2026.psa.01.0245"
+            "afu.prostate.2024-2026.technique.01.0250",
+            "afu.prostate.2024-2026.tomographie-par-emission-de-positons-couplee-a-l-irm-tep-irm.01.0256"
           ],
           "widened": 0,
           "reranked": false,
@@ -521,7 +521,7 @@
             "espen.nutrition-surgery.2021.1-principles-of-metabolic-and-nutritional-care.01.2377",
             "espen.nutrition-surgery.2021.recommendation-28.01.2407",
             "espen.nutrition-surgery.2021.5-3-when-is-preoperative-pn-indicated.01.2397",
-            "esmo.cancer-cachexia.2021.nutritional-interventions.01.2182"
+            "espen.nutrition-surgery.2021.5-2-when-is-preoperative-ons-en-indicated.01.2396"
           ],
           "widened": 0,
           "reranked": false,
@@ -533,12 +533,12 @@
             "returned": 10,
             "group_recall": 1.0,
             "required_group_recall": 1.0,
-            "chunk_recall": 0.2,
+            "chunk_recall": 0.24,
             "precision_at_5": 0.6,
-            "precision_at_10": 0.5,
-            "irrelevant_context": 0.5,
+            "precision_at_10": 0.6,
+            "irrelevant_context": 0.4,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.6136525857537392,
+            "ndcg_at_10": 0.6772733739526908,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -1127,8 +1127,8 @@
         "precision_at_5": 0.3666666666666667,
         "precision_at_10": 0.325,
         "irrelevant_context": 0.6749999999999999,
-        "mrr": 0.7222222222222222,
-        "ndcg_at_10": 0.39477435552106127,
+        "mrr": 0.7083333333333334,
+        "ndcg_at_10": 0.3926377253342174,
         "harmful_at_1": 0.0,
         "harmful_at_k": 0.0,
         "false_refusal": 0.0,
@@ -1220,8 +1220,8 @@
           "query_id": "bl-003",
           "returned": [
             "afu.bladder-tvnim.2024-2026.indication-de-l-instillation-postoperatoire-precoce-de-chimi.01.0159",
-            "afu.bladder-tvnim.2024-2026.surveillance-active.01.0172",
             "afu.bladder-tvnim.2024-2026.tumeurs-de-faible-risque-de-progression.01.0151",
+            "afu.bladder-tvnim.2024-2026.surveillance-active.01.0172",
             "afu.bladder-tvnim.2024-2026.tumeurs-de-risque-intermediaire.01.0152",
             "afu.bladder-tvnim.2024-2026.recidive-apres-un-traitement-par-bcg.01.0175",
             "aua.bladder-nmibc.2024.risk-adjusted-surveillance-and-follow-up-strategies.03.0562",
@@ -1302,8 +1302,8 @@
           "returned": [
             "nccn.bladder.3.2026.bladder-preservation.01.2601",
             "aua.bladder-mibc.2024.patient-selection.02.0447",
-            "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107",
             "eau.bladder-mibc.2026.6-8-1-a-patient-selection-and-treatment-paradigm.01.1197",
+            "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107",
             "afu.bladder-tvim.2024-2026.traitement-d-un-patient-ne-pouvant-pas-recevoir-un-traitemen.01.0126",
             "afu.bladder-tvim.2024-2026.suivi.01.0131",
             "aua.bladder-mibc.2024.patient-selection.01.0406",
@@ -1543,15 +1543,15 @@
           "query_id": "pr-004",
           "returned": [
             "aua.prostate-advanced.2026.prognosis.03.0649",
-            "nccn.prostate.6.2026.initial-clinical-assessment-and-staging-evaluation.01.2886",
             "aua.prostate-advanced.2026.prognosis.02.0648",
+            "nccn.prostate.6.2026.initial-clinical-assessment-and-staging-evaluation.01.2886",
             "esmo.prostate-local.2020.staging-and-risk-assessment.01.2291",
             "aua.prostate-localized.2026.staging.02.0844",
             "afu.prostate.2024-2026.extension-locoregionale.01.0283",
             "nccn.prostate.6.2026.principles-of-non-hormonal-systemic-therapy.06.2850",
-            "afu.prostate.2024-2026.tr.01.0244",
+            "afu.prostate.2024-2026.scintigraphie-osseuse-avec-acquisition-tomoscintigraphique-c.01.0292",
             "aua.prostate-early-detection.2026.psa-screening.03.0744",
-            "afu.prostate.2024-2026.scintigraphie-osseuse-avec-acquisition-tomoscintigraphique-c.01.0292"
+            "afu.prostate.2024-2026.tr.01.0244"
           ],
           "widened": 0,
           "reranked": false,
@@ -1567,8 +1567,8 @@
             "precision_at_5": 0.6,
             "precision_at_10": 0.3,
             "irrelevant_context": 0.7,
-            "reciprocal_rank": 0.5,
-            "ndcg_at_10": 0.3187939258847263,
+            "reciprocal_rank": 0.3333333333333333,
+            "ndcg_at_10": 0.28997736516021183,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -1586,8 +1586,8 @@
             "espen.nutrition-surgery.2021.1-1-evidence-of-nutritional-therapy.01.2378",
             "espen.nutrition-surgery.2021.recommendation-27.01.2406",
             "espen.nutrition-surgery.2021.b.01.2404",
-            "espen.nutrition-surgery.2021.recommendation-30.01.2409",
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.02.2350",
+            "espen.nutrition-surgery.2021.recommendation-30.01.2409",
             "siog.bladder.2020.5-1-1-2-nutritional-status-around-20-40-of-rc-patients-are-m.01.3129"
           ],
           "widened": 0,
@@ -1605,7 +1605,7 @@
             "precision_at_10": 0.6,
             "irrelevant_context": 0.4,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.7151857987862356,
+            "ndcg_at_10": 0.7183627972686238,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -1660,14 +1660,14 @@
         "questions": 13,
         "answerable": 12,
         "unanswerable": 1,
-        "group_recall": 0.875,
+        "group_recall": 0.8333333333333334,
         "required_group_recall": 0.9166666666666666,
         "chunk_recall": 0.2501258309591643,
-        "precision_at_5": 0.45,
-        "precision_at_10": 0.375,
-        "irrelevant_context": 0.625,
+        "precision_at_5": 0.39999999999999997,
+        "precision_at_10": 0.30357142857142855,
+        "irrelevant_context": 0.6964285714285715,
         "mrr": 0.8125,
-        "ndcg_at_10": 0.4006697868700517,
+        "ndcg_at_10": 0.4048032946560915,
         "harmful_at_1": 0.0,
         "harmful_at_k": 0.0,
         "false_refusal": 0.0,
@@ -1678,7 +1678,7 @@
         "filter": 1,
         "candidate set": 0,
         "relevance floor": 0,
-        "ranking": 2
+        "ranking": 3
       },
       "runs": [
         {
@@ -1729,8 +1729,8 @@
             "afu.bladder-geriatric-management.2019.conclusion.01.0084",
             "afu.bladder-tvnim.2024-2026.indication-de-la-rtuv-de-reevaluation-dite-de-second-look.01.0149",
             "aua.bladder-nmibc.2024.bcg-relapse-and-salvage-regimens.05.0554",
-            "afu.bladder-geriatric-management.2019.bcg-therapie.01.0069",
-            "afu.bladder-geriatric-management.2019.bcg-therapie.02.0070"
+            "afu.bladder-geriatric-management.2019.bcg-therapie.02.0070",
+            "afu.bladder-geriatric-management.2019.bcg-therapie.01.0069"
           ],
           "widened": 0,
           "reranked": false,
@@ -1795,22 +1795,28 @@
         {
           "query_id": "bl-004",
           "returned": [
-            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108"
+            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108",
+            "eau.bladder-mibc.2026.6-4-1-summary-of-evidence-and-recommendations-for-comorbidit.01.1148",
+            "siog.bladder.2020.5-1-1-3-fitness-even-limited-exercise-has-a-strong-cardiopro.01.3130",
+            "eau.bladder-mibc.2026.6-4-comorbidity-scales-anaesthetic-risk-classification-and-g.01.1147",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
+            "siog.bladder.2020.5-1-1-5-anaesthesia-management-changes-in-body-composition-r.01.3132",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.02.1146"
           ],
           "widened": 0,
           "reranked": false,
           "keyword_hits": 1,
-          "dense_hits": 0,
+          "dense_hits": 6,
           "below_floor": 0,
           "score": {
             "query_id": "bl-004",
-            "returned": 1,
+            "returned": 7,
             "group_recall": 0.5,
             "required_group_recall": 1.0,
             "chunk_recall": 0.037037037037037035,
-            "precision_at_5": 1.0,
-            "precision_at_10": 1.0,
-            "irrelevant_context": 0.0,
+            "precision_at_5": 0.2,
+            "precision_at_10": 0.14285714285714285,
+            "irrelevant_context": 0.8571428571428571,
             "reciprocal_rank": 1.0,
             "ndcg_at_10": 0.22009176629808017,
             "harmful_at_1": false,
@@ -1823,7 +1829,7 @@
               "chunk_id": "esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-not-eligible-for-cispl.01.2130",
               "claim": "Une alternative existe pour le patient in\u00e9ligible au cisplatine",
               "stage": "filter",
-              "detail": "refused by disease_setting, agent_role"
+              "detail": "refused by disease_setting"
             }
           ]
         },
@@ -1838,8 +1844,8 @@
             "aua.bladder-mibc.2024.patient-selection.03.0448",
             "eau-esmo.bladder-advanced-variant.2020.special-article.04.1036",
             "aua.bladder-mibc.2024.multi-modal-bladder-preserving-therapy.04.0453",
-            "aua.bladder-mibc.2024.patient-selection.01.0406",
-            "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107"
+            "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107",
+            "aua.bladder-mibc.2024.patient-selection.01.0406"
           ],
           "widened": 0,
           "reranked": false,
@@ -1869,14 +1875,14 @@
           "returned": [
             "afu.bladder-geriatric-management.2019.le-traitement-chirurgical-doit-il-etre-modifie-du-fait-de-l-.03.0080",
             "siog.bladder.2020.10-summary.02.3150",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
             "siog.geriatric-screening.2015.conclusion.01.3314",
-            "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.03.0047",
             "afu.bladder-geriatric-management.2019.resultats.01.0062",
             "siog.bladder.2020.5-1-1-1-anaesthesiologic-assessment-with-increased-age-funct.01.3128",
-            "afu.bladder-geriatric-management.2019.cystectomie-totale-chez-le-sujet-age.01.0072",
-            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124",
             "afu.bladder-geriatric-epidemiology.2019.conclusion.01.0049",
-            "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.04.0048"
+            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124",
+            "eau.bladder-mibc.2026.6-4-1-summary-of-evidence-and-recommendations-for-comorbidit.01.1148",
+            "siog.bladder.2020.management-of-bladder-cancer-in-older-patients-position-pape.01.3121"
           ],
           "widened": 0,
           "reranked": false,
@@ -1886,20 +1892,27 @@
           "score": {
             "query_id": "bl-006",
             "returned": 10,
-            "group_recall": 1.0,
+            "group_recall": 0.5,
             "required_group_recall": 1.0,
             "chunk_recall": 0.14814814814814814,
-            "precision_at_5": 0.2,
+            "precision_at_5": 0.4,
             "precision_at_10": 0.4,
             "irrelevant_context": 0.6,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.42333070005078094,
+            "ndcg_at_10": 0.4697557950008693,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
             "unanswerable": false
           },
-          "losses": []
+          "losses": [
+            {
+              "chunk_id": "afu.bladder-geriatric-management.2019.cystectomie-totale-chez-le-sujet-age.01.0072",
+              "claim": "La morbi-mortalit\u00e9 de la cystectomie est major\u00e9e chez le sujet \u00e2g\u00e9",
+              "stage": "ranking",
+              "detail": "a candidate, but outside the returned list"
+            }
+          ]
         },
         {
           "query_id": "bl-007",
@@ -1946,11 +1959,11 @@
             "nccn.prostate.6.2026.radical-prostatectomy.01.2908",
             "afu.prostate.2024-2026.cap-localise-de-risque-intermediaire-recommandation-16.01.0345",
             "eau.prostate.2026.6-3-2-f-recommendations-for-the-management-of-intermediate-r.01.1725",
-            "afu.prostate.2024-2026.complications-et-qualite-de-vie.01.0323",
             "esmo.prostate-local.2020.recommendations.01.2301",
-            "afu.prostate-geriatric.2019.prostatectomie-elargie.01.0199",
+            "afu.prostate.2024-2026.qualite-de-vie-des-traitements-de-reference-du-cap-localise.01.0325",
             "afu.prostate.2024-2026.dose-de-rt.01.0320",
-            "afu.prostate.2024-2026.qualite-de-vie-des-traitements-de-reference-du-cap-localise.01.0325"
+            "afu.prostate-geriatric.2019.prostatectomie-elargie.01.0199",
+            "afu.prostate.2024-2026.traitement-chirurgical.01.0347"
           ],
           "widened": 0,
           "reranked": false,
@@ -1997,8 +2010,8 @@
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.03.2231",
             "aua.prostate-advanced.2026.docetaxel.02.0659",
             "aua.prostate-advanced.2026.docetaxel.01.0658",
-            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.01.2229",
+            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.metastasis-directed-therapy-for-mcspc.01.2233",
             "esmo.prostate-advanced.2020.management-of-relapsed-mcspc-after-local-treatment.01.2237"
           ],
@@ -2070,8 +2083,8 @@
             "esmo.prostate-local.2020.recommendations.03.2290",
             "afu.prostate.2024-2026.psa.01.0245",
             "esmo.prostate-local.2020.diagnosis.01.2283",
-            "esmo.prostate-local.2020.recommendations.04.2305",
             "esmo.prostate-local.2020.recommendations.03.2304",
+            "esmo.prostate-local.2020.recommendations.04.2305",
             "afu.prostate.2024-2026.biopsies-initiales-biopsies-systematisees-et-ciblees.01.0265",
             "nccn.prostate.6.2026.initial-prostate-cancer-diagnosis.01.2865",
             "nccn.prostate.6.2026.initial-risk-stratification-and-staging-workup-for-clinicall.01.2725"
@@ -2109,8 +2122,8 @@
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.01.2349",
             "espen.nutrition-surgery.2021.5-3-when-is-preoperative-pn-indicated.01.2397",
             "espen.nutrition-surgery.2021.recommendation-28.01.2407",
-            "espen.nutrition-surgery.2021.recommendation-27.01.2406",
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.02.2350",
+            "espen.nutrition-surgery.2021.recommendation-27.01.2406",
             "espen.nutrition-surgery.2021.b.01.2404"
           ],
           "widened": 0,
@@ -2128,7 +2141,7 @@
             "precision_at_10": 0.7,
             "irrelevant_context": 0.3,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.7935840677649109,
+            "ndcg_at_10": 0.7967610662472991,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -2185,12 +2198,12 @@
         "unanswerable": 1,
         "group_recall": 0.75,
         "required_group_recall": 0.8333333333333334,
-        "chunk_recall": 0.22687186270519602,
-        "precision_at_5": 0.39999999999999997,
-        "precision_at_10": 0.375,
-        "irrelevant_context": 0.625,
+        "chunk_recall": 0.22995828245828245,
+        "precision_at_5": 0.4166666666666667,
+        "precision_at_10": 0.3833333333333333,
+        "irrelevant_context": 0.6166666666666667,
         "mrr": 0.6736111111111112,
-        "ndcg_at_10": 0.3735537105373535,
+        "ndcg_at_10": 0.38117317631895453,
         "harmful_at_1": 0.0,
         "harmful_at_k": 0.0,
         "false_refusal": 0.0,
@@ -2337,8 +2350,8 @@
           "widened": 0,
           "reranked": true,
           "keyword_hits": 1,
-          "dense_hits": 0,
-          "below_floor": 0,
+          "dense_hits": 6,
+          "below_floor": 6,
           "score": {
             "query_id": "bl-004",
             "returned": 1,
@@ -2360,7 +2373,7 @@
               "chunk_id": "esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-not-eligible-for-cispl.01.2130",
               "claim": "Une alternative existe pour le patient in\u00e9ligible au cisplatine",
               "stage": "filter",
-              "detail": "refused by disease_setting, agent_role"
+              "detail": "refused by disease_setting"
             }
           ]
         },
@@ -2406,14 +2419,14 @@
           "returned": [
             "afu.bladder-geriatric-management.2019.le-traitement-chirurgical-doit-il-etre-modifie-du-fait-de-l-.01.0078",
             "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.04.0048",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
             "afu.bladder-geriatric-management.2019.traitements-adjuvant-et-palliatif-par-chimiotherapie.01.0081",
             "afu.bladder-geriatric-epidemiology.2019.conclusion.01.0049",
             "afu.bladder-geriatric-management.2019.alternatives-a-la-chirurgie-a-visee-curative.01.0077",
             "afu.bladder-geriatric-management.2019.le-traitement-chirurgical-doit-il-etre-modifie-du-fait-de-l-.03.0080",
             "afu.bladder-geriatric-management.2019.resume.01.0057",
             "siog.bladder.2020.management-of-bladder-cancer-in-older-patients-position-pape.01.3121",
-            "afu.bladder-geriatric-management.2019.conclusion.01.0084",
-            "afu.bladder-geriatric-management.2019.optimisation-de-la-prise-en-charge-du-cancer-de-la-vessie-ch.01.0055"
+            "afu.bladder-geriatric-management.2019.conclusion.01.0084"
           ],
           "widened": 0,
           "reranked": true,
@@ -2425,12 +2438,12 @@
             "returned": 10,
             "group_recall": 0.5,
             "required_group_recall": 1.0,
-            "chunk_recall": 0.14814814814814814,
-            "precision_at_5": 0.4,
-            "precision_at_10": 0.4,
-            "irrelevant_context": 0.6,
+            "chunk_recall": 0.18518518518518517,
+            "precision_at_5": 0.6,
+            "precision_at_10": 0.5,
+            "irrelevant_context": 0.5,
             "reciprocal_rank": 0.5,
-            "ndcg_at_10": 0.38541299932114065,
+            "ndcg_at_10": 0.47684658870035296,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -2729,12 +2742,12 @@
         "unanswerable": 1,
         "group_recall": 0.875,
         "required_group_recall": 0.9166666666666666,
-        "chunk_recall": 0.2499104599104599,
+        "chunk_recall": 0.2622561389228056,
         "precision_at_5": 0.38333333333333336,
-        "precision_at_10": 0.3666666666666667,
-        "irrelevant_context": 0.6333333333333333,
+        "precision_at_10": 0.325,
+        "irrelevant_context": 0.6749999999999999,
         "mrr": 0.7916666666666666,
-        "ndcg_at_10": 0.3847933909533014,
+        "ndcg_at_10": 0.4164376728408387,
         "harmful_at_1": 0.0,
         "harmful_at_k": 0.0,
         "false_refusal": 0.0,
@@ -2742,10 +2755,10 @@
       },
       "losses_by_stage": {
         "stale label": 0,
-        "filter": 1,
+        "filter": 0,
         "candidate set": 0,
         "relevance floor": 0,
-        "ranking": 2
+        "ranking": 3
       },
       "runs": [
         {
@@ -2790,8 +2803,8 @@
           "returned": [
             "afu.bladder-tvnim.2024-2026.recidive-apres-un-traitement-par-bcg.01.0175",
             "afu.bladder-tvnim.2024-2026.tumeurs-de-tres-haut-risque.01.0154",
-            "nccn.bladder.3.2026.treatment-of-high-risk-nmibc.01.2587",
             "esmo.bladder.2022.treatment-of-nmibc.01.2121",
+            "nccn.bladder.3.2026.treatment-of-high-risk-nmibc.01.2587",
             "afu.bladder-tvnim.2024-2026.tumeurs-de-haut-risque.01.0153",
             "afu.bladder-tvnim.2024-2026.surveillance-active.01.0172",
             "aua.bladder-nmibc.2024.role-of-cystectomy-in-nmibc.02.0556",
@@ -2826,8 +2839,8 @@
           "query_id": "bl-003",
           "returned": [
             "afu.bladder-tvnim.2024-2026.indication-de-l-instillation-postoperatoire-precoce-de-chimi.01.0159",
-            "afu.bladder-tvnim.2024-2026.surveillance-active.01.0172",
             "afu.bladder-tvnim.2024-2026.tumeurs-de-faible-risque-de-progression.01.0151",
+            "afu.bladder-tvnim.2024-2026.surveillance-active.01.0172",
             "afu.bladder-tvnim.2024-2026.tumeurs-de-risque-intermediaire.01.0152",
             "afu.bladder-tvnim.2024-2026.recidive-apres-un-traitement-par-bcg.01.0175",
             "aua.bladder-nmibc.2024.risk-adjusted-surveillance-and-follow-up-strategies.03.0562",
@@ -2862,37 +2875,39 @@
         {
           "query_id": "bl-004",
           "returned": [
-            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108"
+            "eau.bladder-mibc.2026.9-4-2-b-patients-fit-for-carboplatin-but-unfit-for-cisplatin.01.1234",
+            "eau.bladder-mibc.2026.9-4-2-a-patients-fit-for-cisplatin.01.1232",
+            "eau.bladder-mibc.2026.9-5-first-line-therapy-in-patients-not-eligible-for-combinat.01.1235",
+            "esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-not-eligible-for-cispl.01.2130",
+            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108",
+            "eau.bladder-mibc.2026.9-4-2-a-patients-fit-for-cisplatin.02.1233",
+            "esmo.bladder.2022.treatment-of-advanced-or-metastatic-uc-in-patients-fit-enoug.01.2136",
+            "eau.bladder-mibc.2026.9-4-2-patients-eligible-for-combination-therapy-but-not-elig.01.1231",
+            "esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-not-eligible-for-cispl.02.2131",
+            "esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-fit-enough-to-tolerate.01.2129"
           ],
           "widened": 0,
           "reranked": false,
-          "keyword_hits": 1,
-          "dense_hits": 0,
+          "keyword_hits": 6,
+          "dense_hits": 16,
           "below_floor": 0,
           "score": {
             "query_id": "bl-004",
-            "returned": 1,
-            "group_recall": 0.5,
+            "returned": 10,
+            "group_recall": 1.0,
             "required_group_recall": 1.0,
-            "chunk_recall": 0.037037037037037035,
-            "precision_at_5": 1.0,
-            "precision_at_10": 1.0,
-            "irrelevant_context": 0.0,
+            "chunk_recall": 0.18518518518518517,
+            "precision_at_5": 0.8,
+            "precision_at_10": 0.5,
+            "irrelevant_context": 0.5,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.22009176629808017,
+            "ndcg_at_10": 0.576323354912681,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
             "unanswerable": false
           },
-          "losses": [
-            {
-              "chunk_id": "esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-not-eligible-for-cispl.01.2130",
-              "claim": "Une alternative existe pour le patient in\u00e9ligible au cisplatine",
-              "stage": "filter",
-              "detail": "refused by agent_role"
-            }
-          ]
+          "losses": []
         },
         {
           "query_id": "bl-005",
@@ -2903,8 +2918,8 @@
             "aua.bladder-mibc.2024.bladder-preserving-treatment-failure.02.0455",
             "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107",
             "afu.bladder-tvim.2024-2026.traitement-d-un-patient-ne-pouvant-pas-recevoir-un-traitemen.01.0126",
-            "aua.bladder-mibc.2024.patient-selection.01.0406",
             "afu.bladder-tvim.2024-2026.suivi.01.0131",
+            "aua.bladder-mibc.2024.patient-selection.01.0406",
             "aua.bladder-mibc.2024.patient-selection.03.0448",
             "aua.bladder-mibc.2024.multi-modal-bladder-preserving-therapy.04.0453"
           ],
@@ -2937,13 +2952,13 @@
             "afu.bladder-geriatric-management.2019.prevention-et-prise-en-charge-optimisee.02.0075",
             "afu.bladder-geriatric-management.2019.le-traitement-chirurgical-doit-il-etre-modifie-du-fait-de-l-.03.0080",
             "siog.bladder.2020.10-summary.02.3150",
-            "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.03.0047",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
             "afu.bladder-geriatric-management.2019.resultats.01.0062",
-            "afu.bladder-geriatric-management.2019.cystectomie-totale-chez-le-sujet-age.01.0072",
             "siog.bladder.2020.5-1-1-1-anaesthesiologic-assessment-with-increased-age-funct.01.3128",
             "afu.bladder-geriatric-epidemiology.2019.conclusion.01.0049",
-            "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.04.0048",
-            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124"
+            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124",
+            "eau.bladder-mibc.2026.6-4-1-summary-of-evidence-and-recommendations-for-comorbidit.01.1148",
+            "siog.bladder.2020.management-of-bladder-cancer-in-older-patients-position-pape.01.3121"
           ],
           "widened": 0,
           "reranked": false,
@@ -2953,20 +2968,27 @@
           "score": {
             "query_id": "bl-006",
             "returned": 10,
-            "group_recall": 1.0,
+            "group_recall": 0.5,
             "required_group_recall": 1.0,
             "chunk_recall": 0.18518518518518517,
-            "precision_at_5": 0.4,
+            "precision_at_5": 0.6,
             "precision_at_10": 0.5,
             "irrelevant_context": 0.5,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.5730379245414764,
+            "ndcg_at_10": 0.5933607200949346,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
             "unanswerable": false
           },
-          "losses": []
+          "losses": [
+            {
+              "chunk_id": "afu.bladder-geriatric-management.2019.cystectomie-totale-chez-le-sujet-age.01.0072",
+              "claim": "La morbi-mortalit\u00e9 de la cystectomie est major\u00e9e chez le sujet \u00e2g\u00e9",
+              "stage": "ranking",
+              "detail": "a candidate, but outside the returned list"
+            }
+          ]
         },
         {
           "query_id": "bl-007",
@@ -3014,9 +3036,9 @@
             "afu.prostate.2024-2026.radiohormonotherapie-longue.01.0352",
             "afu.prostate.2024-2026.cap-localise-de-risque-intermediaire-recommandation-16.01.0345",
             "eau.prostate.2026.6-3-2-f-recommendations-for-the-management-of-intermediate-r.01.1725",
+            "afu.prostate.2024-2026.qualite-de-vie-des-traitements-de-reference-du-cap-localise.01.0325",
             "afu.prostate-geriatric.2019.prostatectomie-elargie.01.0199",
             "esmo.prostate-local.2020.recommendations.01.2301",
-            "afu.prostate.2024-2026.qualite-de-vie-des-traitements-de-reference-du-cap-localise.01.0325",
             "afu.prostate.2024-2026.dose-de-rt.01.0320"
           ],
           "widened": 0,
@@ -3136,9 +3158,9 @@
             "esmo.prostate-local.2020.staging-and-risk-assessment.01.2291",
             "afu.prostate.2024-2026.extension-locoregionale.01.0283",
             "nccn.prostate.6.2026.principles-of-non-hormonal-systemic-therapy.06.2850",
-            "afu.prostate.2024-2026.tr.01.0244",
-            "eau.prostate.2026.5-2-2-prostate-specific-antigen.01.1561",
             "afu.prostate.2024-2026.scintigraphie-osseuse-avec-acquisition-tomoscintigraphique-c.01.0292",
+            "eau.prostate.2026.5-2-2-prostate-specific-antigen.01.1561",
+            "afu.prostate.2024-2026.tr.01.0244",
             "eau.prostate.2026.5-4-1-a-risk-calculators-assessing-the-risk-of-cspca.01.1593",
             "afu.prostate.2024-2026.tep-tdm-au-18-f-fluoro-2-deoxy-d-glucose-fdg.01.0287",
             "nccn.prostate.6.2026.bone-imaging.01.2768"
@@ -3176,8 +3198,8 @@
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.01.2349",
             "espen.nutrition-surgery.2021.5-3-when-is-preoperative-pn-indicated.01.2397",
             "espen.nutrition-surgery.2021.recommendation-28.01.2407",
-            "espen.nutrition-surgery.2021.recommendation-27.01.2406",
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.02.2350",
+            "espen.nutrition-surgery.2021.recommendation-27.01.2406",
             "espen.nutrition-surgery.2021.b.01.2404"
           ],
           "widened": 0,
@@ -3195,7 +3217,7 @@
             "precision_at_10": 0.7,
             "irrelevant_context": 0.3,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.7935840677649109,
+            "ndcg_at_10": 0.7967610662472991,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -3250,14 +3272,14 @@
         "questions": 13,
         "answerable": 12,
         "unanswerable": 1,
-        "group_recall": 0.875,
+        "group_recall": 0.8333333333333334,
         "required_group_recall": 0.9166666666666666,
         "chunk_recall": 0.2501258309591643,
-        "precision_at_5": 0.45,
-        "precision_at_10": 0.375,
-        "irrelevant_context": 0.625,
+        "precision_at_5": 0.39999999999999997,
+        "precision_at_10": 0.30357142857142855,
+        "irrelevant_context": 0.6964285714285715,
         "mrr": 0.8125,
-        "ndcg_at_10": 0.4006697868700517,
+        "ndcg_at_10": 0.4048032946560915,
         "harmful_at_1": 0.0,
         "harmful_at_k": 0.0,
         "false_refusal": 0.0,
@@ -3268,7 +3290,7 @@
         "filter": 1,
         "candidate set": 0,
         "relevance floor": 0,
-        "ranking": 2
+        "ranking": 3
       },
       "runs": [
         {
@@ -3319,8 +3341,8 @@
             "afu.bladder-geriatric-management.2019.conclusion.01.0084",
             "afu.bladder-tvnim.2024-2026.indication-de-la-rtuv-de-reevaluation-dite-de-second-look.01.0149",
             "aua.bladder-nmibc.2024.bcg-relapse-and-salvage-regimens.05.0554",
-            "afu.bladder-geriatric-management.2019.bcg-therapie.01.0069",
-            "afu.bladder-geriatric-management.2019.bcg-therapie.02.0070"
+            "afu.bladder-geriatric-management.2019.bcg-therapie.02.0070",
+            "afu.bladder-geriatric-management.2019.bcg-therapie.01.0069"
           ],
           "widened": 0,
           "reranked": false,
@@ -3385,22 +3407,28 @@
         {
           "query_id": "bl-004",
           "returned": [
-            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108"
+            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108",
+            "eau.bladder-mibc.2026.6-4-1-summary-of-evidence-and-recommendations-for-comorbidit.01.1148",
+            "siog.bladder.2020.5-1-1-3-fitness-even-limited-exercise-has-a-strong-cardiopro.01.3130",
+            "eau.bladder-mibc.2026.6-4-comorbidity-scales-anaesthetic-risk-classification-and-g.01.1147",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
+            "siog.bladder.2020.5-1-1-5-anaesthesia-management-changes-in-body-composition-r.01.3132",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.02.1146"
           ],
           "widened": 0,
           "reranked": false,
           "keyword_hits": 1,
-          "dense_hits": 0,
+          "dense_hits": 6,
           "below_floor": 0,
           "score": {
             "query_id": "bl-004",
-            "returned": 1,
+            "returned": 7,
             "group_recall": 0.5,
             "required_group_recall": 1.0,
             "chunk_recall": 0.037037037037037035,
-            "precision_at_5": 1.0,
-            "precision_at_10": 1.0,
-            "irrelevant_context": 0.0,
+            "precision_at_5": 0.2,
+            "precision_at_10": 0.14285714285714285,
+            "irrelevant_context": 0.8571428571428571,
             "reciprocal_rank": 1.0,
             "ndcg_at_10": 0.22009176629808017,
             "harmful_at_1": false,
@@ -3413,7 +3441,7 @@
               "chunk_id": "esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-not-eligible-for-cispl.01.2130",
               "claim": "Une alternative existe pour le patient in\u00e9ligible au cisplatine",
               "stage": "filter",
-              "detail": "refused by disease_setting, agent_role"
+              "detail": "refused by disease_setting"
             }
           ]
         },
@@ -3428,8 +3456,8 @@
             "aua.bladder-mibc.2024.patient-selection.03.0448",
             "eau-esmo.bladder-advanced-variant.2020.special-article.04.1036",
             "aua.bladder-mibc.2024.multi-modal-bladder-preserving-therapy.04.0453",
-            "aua.bladder-mibc.2024.patient-selection.01.0406",
-            "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107"
+            "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107",
+            "aua.bladder-mibc.2024.patient-selection.01.0406"
           ],
           "widened": 0,
           "reranked": false,
@@ -3459,14 +3487,14 @@
           "returned": [
             "afu.bladder-geriatric-management.2019.le-traitement-chirurgical-doit-il-etre-modifie-du-fait-de-l-.03.0080",
             "siog.bladder.2020.10-summary.02.3150",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
             "siog.geriatric-screening.2015.conclusion.01.3314",
-            "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.03.0047",
             "afu.bladder-geriatric-management.2019.resultats.01.0062",
             "siog.bladder.2020.5-1-1-1-anaesthesiologic-assessment-with-increased-age-funct.01.3128",
-            "afu.bladder-geriatric-management.2019.cystectomie-totale-chez-le-sujet-age.01.0072",
-            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124",
             "afu.bladder-geriatric-epidemiology.2019.conclusion.01.0049",
-            "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.04.0048"
+            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124",
+            "eau.bladder-mibc.2026.6-4-1-summary-of-evidence-and-recommendations-for-comorbidit.01.1148",
+            "siog.bladder.2020.management-of-bladder-cancer-in-older-patients-position-pape.01.3121"
           ],
           "widened": 0,
           "reranked": false,
@@ -3476,20 +3504,27 @@
           "score": {
             "query_id": "bl-006",
             "returned": 10,
-            "group_recall": 1.0,
+            "group_recall": 0.5,
             "required_group_recall": 1.0,
             "chunk_recall": 0.14814814814814814,
-            "precision_at_5": 0.2,
+            "precision_at_5": 0.4,
             "precision_at_10": 0.4,
             "irrelevant_context": 0.6,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.42333070005078094,
+            "ndcg_at_10": 0.4697557950008693,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
             "unanswerable": false
           },
-          "losses": []
+          "losses": [
+            {
+              "chunk_id": "afu.bladder-geriatric-management.2019.cystectomie-totale-chez-le-sujet-age.01.0072",
+              "claim": "La morbi-mortalit\u00e9 de la cystectomie est major\u00e9e chez le sujet \u00e2g\u00e9",
+              "stage": "ranking",
+              "detail": "a candidate, but outside the returned list"
+            }
+          ]
         },
         {
           "query_id": "bl-007",
@@ -3536,11 +3571,11 @@
             "nccn.prostate.6.2026.radical-prostatectomy.01.2908",
             "afu.prostate.2024-2026.cap-localise-de-risque-intermediaire-recommandation-16.01.0345",
             "eau.prostate.2026.6-3-2-f-recommendations-for-the-management-of-intermediate-r.01.1725",
-            "afu.prostate.2024-2026.complications-et-qualite-de-vie.01.0323",
             "esmo.prostate-local.2020.recommendations.01.2301",
-            "afu.prostate-geriatric.2019.prostatectomie-elargie.01.0199",
+            "afu.prostate.2024-2026.qualite-de-vie-des-traitements-de-reference-du-cap-localise.01.0325",
             "afu.prostate.2024-2026.dose-de-rt.01.0320",
-            "afu.prostate.2024-2026.qualite-de-vie-des-traitements-de-reference-du-cap-localise.01.0325"
+            "afu.prostate-geriatric.2019.prostatectomie-elargie.01.0199",
+            "afu.prostate.2024-2026.traitement-chirurgical.01.0347"
           ],
           "widened": 0,
           "reranked": false,
@@ -3587,8 +3622,8 @@
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.03.2231",
             "aua.prostate-advanced.2026.docetaxel.02.0659",
             "aua.prostate-advanced.2026.docetaxel.01.0658",
-            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.01.2229",
+            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.metastasis-directed-therapy-for-mcspc.01.2233",
             "esmo.prostate-advanced.2020.management-of-relapsed-mcspc-after-local-treatment.01.2237"
           ],
@@ -3660,8 +3695,8 @@
             "esmo.prostate-local.2020.recommendations.03.2290",
             "afu.prostate.2024-2026.psa.01.0245",
             "esmo.prostate-local.2020.diagnosis.01.2283",
-            "esmo.prostate-local.2020.recommendations.04.2305",
             "esmo.prostate-local.2020.recommendations.03.2304",
+            "esmo.prostate-local.2020.recommendations.04.2305",
             "afu.prostate.2024-2026.biopsies-initiales-biopsies-systematisees-et-ciblees.01.0265",
             "nccn.prostate.6.2026.initial-prostate-cancer-diagnosis.01.2865",
             "nccn.prostate.6.2026.initial-risk-stratification-and-staging-workup-for-clinicall.01.2725"
@@ -3699,8 +3734,8 @@
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.01.2349",
             "espen.nutrition-surgery.2021.5-3-when-is-preoperative-pn-indicated.01.2397",
             "espen.nutrition-surgery.2021.recommendation-28.01.2407",
-            "espen.nutrition-surgery.2021.recommendation-27.01.2406",
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.02.2350",
+            "espen.nutrition-surgery.2021.recommendation-27.01.2406",
             "espen.nutrition-surgery.2021.b.01.2404"
           ],
           "widened": 0,
@@ -3718,7 +3753,7 @@
             "precision_at_10": 0.7,
             "irrelevant_context": 0.3,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.7935840677649109,
+            "ndcg_at_10": 0.7967610662472991,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -3775,12 +3810,12 @@
         "unanswerable": 1,
         "group_recall": 0.875,
         "required_group_recall": 1.0,
-        "chunk_recall": 0.2463780355447022,
-        "precision_at_5": 0.4666666666666666,
-        "precision_at_10": 0.3666666666666667,
-        "irrelevant_context": 0.6333333333333333,
-        "mrr": 0.8244047619047619,
-        "ndcg_at_10": 0.394665846672878,
+        "chunk_recall": 0.2571805046805047,
+        "precision_at_5": 0.4166666666666667,
+        "precision_at_10": 0.32023809523809527,
+        "irrelevant_context": 0.6797619047619047,
+        "mrr": 0.78125,
+        "ndcg_at_10": 0.40607150652124013,
         "harmful_at_1": 0.0,
         "harmful_at_k": 0.0,
         "false_refusal": 0.0,
@@ -3843,7 +3878,7 @@
             "aua.bladder-nmibc.2024.bcg-relapse-and-salvage-regimens.05.0554",
             "afu.bladder-tvnim.2024-2026.indication-de-la-rtuv-de-reevaluation-dite-de-second-look.01.0149",
             "afu.bladder-geriatric-management.2019.bcg-therapie.01.0069",
-            "eau.bladder-nmibc.2026.7-7-1-primary-treatment-by-risk-category.01.1416"
+            "afu.bladder-geriatric-management.2019.bcg-therapie.02.0070"
           ],
           "widened": 0,
           "reranked": false,
@@ -3855,12 +3890,12 @@
             "returned": 10,
             "group_recall": 1.0,
             "required_group_recall": 1.0,
-            "chunk_recall": 0.16666666666666666,
+            "chunk_recall": 0.2222222222222222,
             "precision_at_5": 0.4,
-            "precision_at_10": 0.3,
-            "irrelevant_context": 0.7,
+            "precision_at_10": 0.4,
+            "irrelevant_context": 0.6,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.3714891073940902,
+            "ndcg_at_10": 0.4351098955930419,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -3908,22 +3943,28 @@
         {
           "query_id": "bl-004",
           "returned": [
-            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108"
+            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108",
+            "eau.bladder-mibc.2026.6-4-1-summary-of-evidence-and-recommendations-for-comorbidit.01.1148",
+            "siog.bladder.2020.5-1-1-3-fitness-even-limited-exercise-has-a-strong-cardiopro.01.3130",
+            "eau.bladder-mibc.2026.6-4-comorbidity-scales-anaesthetic-risk-classification-and-g.01.1147",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
+            "siog.bladder.2020.5-1-1-5-anaesthesia-management-changes-in-body-composition-r.01.3132",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.02.1146"
           ],
           "widened": 0,
           "reranked": false,
           "keyword_hits": 1,
-          "dense_hits": 0,
+          "dense_hits": 6,
           "below_floor": 0,
           "score": {
             "query_id": "bl-004",
-            "returned": 1,
+            "returned": 7,
             "group_recall": 0.5,
             "required_group_recall": 1.0,
             "chunk_recall": 0.037037037037037035,
-            "precision_at_5": 1.0,
-            "precision_at_10": 1.0,
-            "irrelevant_context": 0.0,
+            "precision_at_5": 0.2,
+            "precision_at_10": 0.14285714285714285,
+            "irrelevant_context": 0.8571428571428571,
             "reciprocal_rank": 1.0,
             "ndcg_at_10": 0.22009176629808017,
             "harmful_at_1": false,
@@ -3936,7 +3977,7 @@
               "chunk_id": "esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-not-eligible-for-cispl.01.2130",
               "claim": "Une alternative existe pour le patient in\u00e9ligible au cisplatine",
               "stage": "filter",
-              "detail": "refused by disease_setting, agent_role"
+              "detail": "refused by disease_setting"
             }
           ]
         },
@@ -3980,16 +4021,16 @@
         {
           "query_id": "bl-006",
           "returned": [
-            "afu.bladder-geriatric-management.2019.le-traitement-chirurgical-doit-il-etre-modifie-du-fait-de-l-.03.0080",
             "afu.bladder-geriatric-epidemiology.2019.pathologie-du-cancer-de-la-vessie-chez-les-patients-ages.01.0039",
+            "afu.bladder-geriatric-management.2019.le-traitement-chirurgical-doit-il-etre-modifie-du-fait-de-l-.03.0080",
             "siog.bladder.2020.10-summary.02.3150",
-            "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.03.0047",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
             "afu.bladder-geriatric-epidemiology.2019.la-biologie-du-cancer-de-la-vessie-serait-differente-chez-le.01.0041",
             "afu.bladder-geriatric-management.2019.resultats.01.0062",
             "siog.bladder.2020.5-1-1-1-anaesthesiologic-assessment-with-increased-age-funct.01.3128",
             "afu.bladder-geriatric-epidemiology.2019.conclusion.01.0049",
-            "afu.bladder-geriatric-epidemiology.2019.le-diagnostic-des-cancers-de-la-vessie-chez-les-patients-age.01.0042",
-            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124"
+            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124",
+            "eau.bladder-mibc.2026.6-4-1-summary-of-evidence-and-recommendations-for-comorbidit.01.1148"
           ],
           "widened": 0,
           "reranked": false,
@@ -4001,12 +4042,12 @@
             "returned": 10,
             "group_recall": 0.5,
             "required_group_recall": 1.0,
-            "chunk_recall": 0.1111111111111111,
-            "precision_at_5": 0.4,
-            "precision_at_10": 0.3,
-            "irrelevant_context": 0.7,
-            "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.3746661058764784,
+            "chunk_recall": 0.18518518518518517,
+            "precision_at_5": 0.6,
+            "precision_at_10": 0.5,
+            "irrelevant_context": 0.5,
+            "reciprocal_rank": 0.5,
+            "ndcg_at_10": 0.45184593602045525,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -4066,9 +4107,9 @@
             "siog.prostate.2019.treatment-is-based-on-risk.01.3325",
             "nccn.prostate.6.2026.radical-prostatectomy.01.2908",
             "afu.prostate.2024-2026.cap-localise-de-risque-intermediaire-recommandation-16.01.0345",
+            "afu.prostate.2024-2026.criteres-cliniques-biologiques-et-pathologiques.02.0301",
             "afu.prostate.2024-2026.intensification-systemique-de-la-surveillance-active.01.0307",
             "aua.prostate-localized.2026.risk-based-management.05.0851",
-            "afu.prostate.2024-2026.criteres-cliniques-biologiques-et-pathologiques.02.0301",
             "afu.prostate.2024-2026.criteres-cliniques-biologiques-et-pathologiques.01.0300",
             "afu.prostate.2024-2026.indications-de-traitement-differe.01.0306"
           ],
@@ -4086,8 +4127,8 @@
             "precision_at_5": 0.0,
             "precision_at_10": 0.1,
             "irrelevant_context": 0.9,
-            "reciprocal_rank": 0.14285714285714285,
-            "ndcg_at_10": 0.07336392209936005,
+            "reciprocal_rank": 0.125,
+            "ndcg_at_10": 0.06943122193677727,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
@@ -4111,8 +4152,8 @@
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.03.2231",
             "aua.prostate-advanced.2026.docetaxel.02.0659",
             "aua.prostate-advanced.2026.docetaxel.01.0658",
-            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.01.2229",
+            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.metastasis-directed-therapy-for-mcspc.01.2233",
             "esmo.prostate-advanced.2020.management-of-relapsed-mcspc-after-local-treatment.01.2237"
           ],
@@ -4366,8 +4407,8 @@
             "afu.bladder-geriatric-management.2019.conclusion.01.0084",
             "afu.bladder-tvnim.2024-2026.indication-de-la-rtuv-de-reevaluation-dite-de-second-look.01.0149",
             "aua.bladder-nmibc.2024.bcg-relapse-and-salvage-regimens.05.0554",
-            "afu.bladder-geriatric-management.2019.bcg-therapie.01.0069",
-            "afu.bladder-geriatric-management.2019.bcg-therapie.02.0070"
+            "afu.bladder-geriatric-management.2019.bcg-therapie.02.0070",
+            "afu.bladder-geriatric-management.2019.bcg-therapie.01.0069"
           ],
           "widened": 0,
           "reranked": false,
@@ -4445,7 +4486,7 @@
           ],
           "widened": 0,
           "reranked": false,
-          "keyword_hits": 40,
+          "keyword_hits": 41,
           "dense_hits": 50,
           "below_floor": 0,
           "score": {
@@ -4599,11 +4640,11 @@
             "nccn.prostate.6.2026.radical-prostatectomy.01.2908",
             "afu.prostate.2024-2026.cap-localise-de-risque-intermediaire-recommandation-16.01.0345",
             "eau.prostate.2026.6-3-2-f-recommendations-for-the-management-of-intermediate-r.01.1725",
-            "afu.prostate.2024-2026.complications-et-qualite-de-vie.01.0323",
             "esmo.prostate-local.2020.recommendations.01.2301",
-            "afu.prostate-geriatric.2019.prostatectomie-elargie.01.0199",
+            "afu.prostate.2024-2026.qualite-de-vie-des-traitements-de-reference-du-cap-localise.01.0325",
             "afu.prostate.2024-2026.dose-de-rt.01.0320",
-            "afu.prostate.2024-2026.qualite-de-vie-des-traitements-de-reference-du-cap-localise.01.0325"
+            "afu.prostate-geriatric.2019.prostatectomie-elargie.01.0199",
+            "afu.prostate.2024-2026.traitement-chirurgical.01.0347"
           ],
           "widened": 0,
           "reranked": false,
@@ -4650,8 +4691,8 @@
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.03.2231",
             "aua.prostate-advanced.2026.docetaxel.02.0659",
             "aua.prostate-advanced.2026.docetaxel.01.0658",
-            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.01.2229",
+            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.metastasis-directed-therapy-for-mcspc.01.2233",
             "esmo.prostate-advanced.2020.management-of-relapsed-mcspc-after-local-treatment.01.2237"
           ],
@@ -4764,7 +4805,7 @@
             "espen.nutrition-surgery.2021.5-3-when-is-preoperative-pn-indicated.01.2397",
             "espen.nutrition-surgery.2021.recommendation-28.01.2407",
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.02.2350",
-            "espen.nutrition-surgery.2021.recommendation-30.01.2409"
+            "espen.nutrition-surgery.2021.b.01.2404"
           ],
           "widened": 0,
           "reranked": false,
@@ -4836,14 +4877,14 @@
         "questions": 13,
         "answerable": 12,
         "unanswerable": 1,
-        "group_recall": 0.875,
+        "group_recall": 0.8333333333333334,
         "required_group_recall": 0.9166666666666666,
         "chunk_recall": 0.25409408492741825,
-        "precision_at_5": 0.45,
-        "precision_at_10": 0.3833333333333333,
-        "irrelevant_context": 0.6166666666666666,
+        "precision_at_5": 0.39999999999999997,
+        "precision_at_10": 0.3119047619047619,
+        "irrelevant_context": 0.688095238095238,
         "mrr": 0.8125,
-        "ndcg_at_10": 0.4064557220314498,
+        "ndcg_at_10": 0.4105892298174896,
         "harmful_at_1": 0.0,
         "harmful_at_k": 0.0,
         "false_refusal": 0.0,
@@ -4854,7 +4895,7 @@
         "filter": 2,
         "candidate set": 1,
         "relevance floor": 0,
-        "ranking": 0
+        "ranking": 1
       },
       "runs": [
         {
@@ -4905,8 +4946,8 @@
             "afu.bladder-geriatric-management.2019.conclusion.01.0084",
             "afu.bladder-tvnim.2024-2026.indication-de-la-rtuv-de-reevaluation-dite-de-second-look.01.0149",
             "aua.bladder-nmibc.2024.bcg-relapse-and-salvage-regimens.05.0554",
-            "afu.bladder-geriatric-management.2019.bcg-therapie.01.0069",
-            "afu.bladder-geriatric-management.2019.bcg-therapie.02.0070"
+            "afu.bladder-geriatric-management.2019.bcg-therapie.02.0070",
+            "afu.bladder-geriatric-management.2019.bcg-therapie.01.0069"
           ],
           "widened": 0,
           "reranked": false,
@@ -4971,22 +5012,28 @@
         {
           "query_id": "bl-004",
           "returned": [
-            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108"
+            "afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108",
+            "eau.bladder-mibc.2026.6-4-1-summary-of-evidence-and-recommendations-for-comorbidit.01.1148",
+            "siog.bladder.2020.5-1-1-3-fitness-even-limited-exercise-has-a-strong-cardiopro.01.3130",
+            "eau.bladder-mibc.2026.6-4-comorbidity-scales-anaesthetic-risk-classification-and-g.01.1147",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
+            "siog.bladder.2020.5-1-1-5-anaesthesia-management-changes-in-body-composition-r.01.3132",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.02.1146"
           ],
           "widened": 0,
           "reranked": false,
           "keyword_hits": 1,
-          "dense_hits": 0,
+          "dense_hits": 6,
           "below_floor": 0,
           "score": {
             "query_id": "bl-004",
-            "returned": 1,
+            "returned": 7,
             "group_recall": 0.5,
             "required_group_recall": 1.0,
             "chunk_recall": 0.037037037037037035,
-            "precision_at_5": 1.0,
-            "precision_at_10": 1.0,
-            "irrelevant_context": 0.0,
+            "precision_at_5": 0.2,
+            "precision_at_10": 0.14285714285714285,
+            "irrelevant_context": 0.8571428571428571,
             "reciprocal_rank": 1.0,
             "ndcg_at_10": 0.22009176629808017,
             "harmful_at_1": false,
@@ -4999,7 +5046,7 @@
               "chunk_id": "esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-not-eligible-for-cispl.01.2130",
               "claim": "Une alternative existe pour le patient in\u00e9ligible au cisplatine",
               "stage": "filter",
-              "detail": "refused by disease_setting, agent_role"
+              "detail": "refused by disease_setting"
             }
           ]
         },
@@ -5014,8 +5061,8 @@
             "aua.bladder-mibc.2024.patient-selection.03.0448",
             "eau-esmo.bladder-advanced-variant.2020.special-article.04.1036",
             "aua.bladder-mibc.2024.multi-modal-bladder-preserving-therapy.04.0453",
-            "aua.bladder-mibc.2024.patient-selection.01.0406",
-            "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107"
+            "afu.bladder-tvim.2024-2026.le-traitement-standard-des-tvim-non-metastatiques.01.0107",
+            "aua.bladder-mibc.2024.patient-selection.01.0406"
           ],
           "widened": 0,
           "reranked": false,
@@ -5045,14 +5092,14 @@
           "returned": [
             "afu.bladder-geriatric-management.2019.le-traitement-chirurgical-doit-il-etre-modifie-du-fait-de-l-.03.0080",
             "siog.bladder.2020.10-summary.02.3150",
+            "eau.bladder-mibc.2026.6-3-evaluation-of-comorbidity-frailty-and-cognition.01.1145",
             "siog.geriatric-screening.2015.conclusion.01.3314",
-            "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.03.0047",
             "afu.bladder-geriatric-management.2019.resultats.01.0062",
             "siog.bladder.2020.5-1-1-1-anaesthesiologic-assessment-with-increased-age-funct.01.3128",
-            "afu.bladder-geriatric-management.2019.cystectomie-totale-chez-le-sujet-age.01.0072",
-            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124",
             "afu.bladder-geriatric-epidemiology.2019.conclusion.01.0049",
-            "afu.bladder-geriatric-epidemiology.2019.tumeur-de-vessie-infiltrant-le-muscle-tvim.04.0048"
+            "siog.bladder.2020.3-geriatric-assessment-general-approach.01.3124",
+            "eau.bladder-mibc.2026.6-4-1-summary-of-evidence-and-recommendations-for-comorbidit.01.1148",
+            "siog.bladder.2020.management-of-bladder-cancer-in-older-patients-position-pape.01.3121"
           ],
           "widened": 0,
           "reranked": false,
@@ -5062,20 +5109,27 @@
           "score": {
             "query_id": "bl-006",
             "returned": 10,
-            "group_recall": 1.0,
+            "group_recall": 0.5,
             "required_group_recall": 1.0,
             "chunk_recall": 0.14814814814814814,
-            "precision_at_5": 0.2,
+            "precision_at_5": 0.4,
             "precision_at_10": 0.4,
             "irrelevant_context": 0.6,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.42333070005078094,
+            "ndcg_at_10": 0.4697557950008693,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,
             "unanswerable": false
           },
-          "losses": []
+          "losses": [
+            {
+              "chunk_id": "afu.bladder-geriatric-management.2019.cystectomie-totale-chez-le-sujet-age.01.0072",
+              "claim": "La morbi-mortalit\u00e9 de la cystectomie est major\u00e9e chez le sujet \u00e2g\u00e9",
+              "stage": "ranking",
+              "detail": "a candidate, but outside the returned list"
+            }
+          ]
         },
         {
           "query_id": "bl-007",
@@ -5126,7 +5180,7 @@
             "nccn.prostate.6.2026.comparison-of-treatment-options-for-localized-disease.01.2927",
             "afu.prostate.2024-2026.surveillance-active.01.0346",
             "nccn.prostate.6.2026.radical-prostatectomy.02.2909",
-            "nccn.prostate.6.2026.considerations-for-treatment-of-patients-on-active-surveilla.02.2907"
+            "nccn.prostate.6.2026.active-surveillance.03.2899"
           ],
           "widened": 0,
           "reranked": false,
@@ -5173,8 +5227,8 @@
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.03.2231",
             "aua.prostate-advanced.2026.docetaxel.02.0659",
             "aua.prostate-advanced.2026.docetaxel.01.0658",
-            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.treatment-of-the-primary-tumour-in-de-novo-mcspc.01.2229",
+            "aua.prostate-advanced.2026.treatment.01.0653",
             "esmo.prostate-advanced.2020.metastasis-directed-therapy-for-mcspc.01.2233",
             "esmo.prostate-advanced.2020.management-of-relapsed-mcspc-after-local-treatment.01.2237"
           ],
@@ -5246,8 +5300,8 @@
             "esmo.prostate-local.2020.recommendations.03.2290",
             "afu.prostate.2024-2026.psa.01.0245",
             "esmo.prostate-local.2020.diagnosis.01.2283",
-            "esmo.prostate-local.2020.recommendations.04.2305",
             "esmo.prostate-local.2020.recommendations.03.2304",
+            "esmo.prostate-local.2020.recommendations.04.2305",
             "afu.prostate.2024-2026.biopsies-initiales-biopsies-systematisees-et-ciblees.01.0265",
             "nccn.prostate.6.2026.initial-prostate-cancer-diagnosis.01.2865",
             "nccn.prostate.6.2026.initial-risk-stratification-and-staging-workup-for-clinicall.01.2725"
@@ -5285,8 +5339,8 @@
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.01.2349",
             "espen.nutrition-surgery.2021.5-3-when-is-preoperative-pn-indicated.01.2397",
             "espen.nutrition-surgery.2021.recommendation-28.01.2407",
-            "espen.nutrition-surgery.2021.recommendation-27.01.2406",
             "espen.nutrition-cancer.2021.5-1-surgery-fig-5.02.2350",
+            "espen.nutrition-surgery.2021.recommendation-27.01.2406",
             "espen.nutrition-surgery.2021.b.01.2404"
           ],
           "widened": 0,
@@ -5304,7 +5358,7 @@
             "precision_at_10": 0.7,
             "irrelevant_context": 0.3,
             "reciprocal_rank": 1.0,
-            "ndcg_at_10": 0.7935840677649109,
+            "ndcg_at_10": 0.7967610662472991,
             "harmful_at_1": false,
             "harmful_at_k": false,
             "refused": false,

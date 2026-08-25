@@ -7,6 +7,23 @@
   },
   "rules": [
     {
+      "match_section": "Contre-indications",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety"
+      ],
+      "every_occurrence": true,
+      "note": "Named `safety_reviewer` because this is a section about harm -- what a treatment costs the patient -- which is what that agent reads for. Its role was absent from the vocabulary until the fitness review; it is earned here, per section, rather than taken from the curation's document-level tag which 84% of records carry. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing."
+    },
+    {
       "match_section": "tres haut risque",
       "setting": "bladder_nmibc_very_high_risk",
       "note": "MUST precede 'haut risque', which is a substring of it. Reversing these two lines silently routes every very-high-risk passage to high risk."
