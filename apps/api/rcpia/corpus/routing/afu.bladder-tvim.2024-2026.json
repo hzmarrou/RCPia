@@ -13,6 +13,17 @@
       "note": "Plural 'Traitements'. 'Traitement des TVIM non metastatiques' is the other chapter and does not contain this needle, which is why the two never cross."
     },
     {
+      "match_section": "Chimiothérapie néoadjuvante à base de cisplatine",
+      "setting": "bladder_mibc_non_metastatic",
+      "roles": [
+        "renal_safety",
+        "medical_oncology",
+        "urology_oncology"
+      ],
+      "every_occurrence": true,
+      "note": "Names `renal_safety` because eligibility for cisplatin is a renal question before it is an oncological one, and the section is where the guideline says so. Corpus v4 carried that role here by reading the passage body; document-level roles lost it, and the probe `Sécurité rénale avant cisplatine` caught the loss -- its note says dossier 2 turns on it, an 85-year-old with a clearance of 30. Stated before the chapter rule below, which claims the same passages for the whole chapter."
+    },
+    {
       "match_section": "traitement des tvim non metastatiques",
       "setting": "bladder_mibc_non_metastatic"
     },

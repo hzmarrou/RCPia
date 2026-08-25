@@ -166,6 +166,7 @@ def route_document(
                 # retrieval's `admit_universal_purpose` exists to admit. A passage claiming
                 # every purpose its document covers would match every question and filter none.
                 clinical_purpose=decision.rule.purposes or ("general",),
+                agent_roles=decision.rule.roles,
                 page_first=span.first,
                 page_last=span.last,
                 page_confidence=span.confidence,
@@ -271,6 +272,11 @@ def build(
         documents=documents,
         folders=declared_folders(library, claimed),
         generated_at=datetime.now(UTC).isoformat(),
+        # Every document the corpus says is out of scope, named so that any of them a previous
+        # release loaded is removed. Most were never loaded and the loader does nothing with
+        # them; the one that matters is the kind that was, like `siog.prostate.2010`, dropped
+        # as superseded and left answering questions because v5 simply did not mention it.
+        withdrawn=[claim.document_id for claim in coverage.excluded],
     )
 
 
@@ -299,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"documents {report.documents}")
     print(f"passages  {report.chunks}  ({report.excluded} kept but never returned)")
     print(f"omitted   {report.out_of_scope}  (another disease, left out of the release)")
+    print(f"withdrawn {report.withdrawn}  (declared out of scope, removed if previously loaded)")
     return 0
 
 

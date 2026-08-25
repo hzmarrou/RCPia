@@ -19,6 +19,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -138,6 +139,9 @@ class RoutedPassage:
     # the second.
     exclude: bool = False
     exclusion_reason: str | None = None
+    # Roles this passage serves, where a rule names them. Empty means the document's own roles
+    # apply, which is the usual case: a guideline is read by the same specialists throughout.
+    agent_roles: tuple[str, ...] = ()
 
 
 @dataclass
@@ -148,6 +152,7 @@ class EmitReport:
     chunks: int = 0
     excluded: int = 0
     out_of_scope: int = 0
+    withdrawn: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -202,7 +207,12 @@ def build_chunk(
         "cancer_types": list(spec.cancer_types),
         "disease_setting": routed.disease_setting,
         "therapy_line": routed.therapy_line,
-        "agent_roles": list(spec.agent_roles),
+        # A rule may name roles for the passages it claims. Corpus v4 assigned roles per chunk
+        # by reading the body text -- the method this rebuild rejects -- and moving to
+        # document-level roles lost a real distinction: AFU's cisplatin chapter stopped
+        # carrying `renal_safety`, so a question about renal function before cisplatin no
+        # longer reached it. A rule naming the section is the honest way to say the same thing.
+        "agent_roles": list(routed.agent_roles or spec.agent_roles),
         "clinical_purpose": list(routed.clinical_purpose),
         "unit_type": unit_type,
         "recommendation_number": None,
@@ -400,8 +410,21 @@ def emit_release(
     documents: list[tuple[DocumentSpec, list[RoutedPassage]]],
     folders: dict[str, str],
     generated_at: str,
+    withdrawn: Sequence[str] = (),
 ) -> EmitReport:
-    """Write a release and refuse it here if the loader would refuse it there."""
+    """Write a release and refuse it here if the loader would refuse it there.
+
+    `withdrawn` names documents this release says are *not* in the corpus. They are written to
+    `documents.jsonl` carrying `clinical_status: excluded` and nothing else, which is how a
+    release removes what an earlier one loaded -- the loader deletes them and their passages go
+    with them by cascade.
+
+    Without this a release only ever adds and updates. Corpus v5 dropped `siog.prostate.2010`
+    as superseded by Boyle 2019, and loading v5 left it in place: four answerable passages of
+    2010 guidance, still citable, from a release that no longer claimed it. `verify_against_release`
+    already expected this shape -- "every document id in documents.jsonl that the release did
+    not itself mark excluded" -- so the contract was there and emit never used it.
+    """
     if not documents:
         raise EmitError("a release with no documents proves nothing and loads nothing")
 
@@ -439,7 +462,16 @@ def emit_release(
         # more chunks than it delivers -- which is the coverage proof failing to prove itself.
         counts.setdefault(spec.document_id, 0)
 
-    _write_jsonl(directory / DOCUMENTS_FILENAME, document_rows)
+    delivered = {row["document_id"] for row in document_rows}
+    # Nothing but the id and the verdict: a withdrawal says a document is not here, and any
+    # other field would be describing content the release does not carry.
+    withdrawal_rows = [
+        {"document_id": document_id, "clinical_status": "excluded"}
+        for document_id in sorted(set(withdrawn) - delivered)
+    ]
+    report.withdrawn = len(withdrawal_rows)
+
+    _write_jsonl(directory / DOCUMENTS_FILENAME, document_rows + withdrawal_rows)
     _write_jsonl(directory / CHUNKS_FILENAME, chunk_rows)
     _write_json(directory / SCHEMA_FILENAME, build_schema())
 
