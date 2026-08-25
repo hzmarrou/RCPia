@@ -72,6 +72,26 @@ def test_every_spec_says_which_of_its_fields_are_unconfirmed() -> None:
     assert not silent, f"claims every field is confirmed: {', '.join(silent)}"
 
 
+def test_every_document_records_who_attested_its_licence() -> None:
+    # `permission_user_attested` names a person making a claim. A licence value with no evidence
+    # behind it is how `open_access_copy` came to sit on four SIOG papers that were not.
+    silent = sorted(
+        s.document_id for s in SPECS.values()
+        if s.licence_status == "permission_user_attested" and not s.licence_evidence
+    )
+    assert not silent, f"attested with no attestation recorded: {', '.join(silent)}"
+
+
+def test_only_recist_holds_a_position_on_treatment_response() -> None:
+    # A guideline applying RECIST is using the criteria, not proposing rival ones. One voice.
+    holders = {
+        s.source_family
+        for s in SPECS.values()
+        if "treatment_response" in s.position_domains
+    }
+    assert holders == {"recist"}, holders
+
+
 def test_a_source_family_is_never_derived_from_the_document_id() -> None:
     # Not a rule against them agreeing -- most do. It checks the field carries its own value,
     # so a document renamed tomorrow does not silently change family.

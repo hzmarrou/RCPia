@@ -18,13 +18,13 @@
       "cancer_types": [
         "prostate"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "afu.bladder-geriatric-epidemiology.2019",
@@ -47,9 +47,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "afu.bladder-geriatric-management.2019",
@@ -72,9 +72,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "afu.bladder-tvim.2024-2026",
@@ -89,6 +89,7 @@
         "diagnosis",
         "follow_up",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -102,9 +103,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "afu.bladder-tvnim.2024-2026",
@@ -119,6 +120,7 @@
         "diagnosis",
         "follow_up",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -132,9 +134,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "afu.prostate-geriatric.2019",
@@ -157,9 +159,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "afu.prostate.2024-2026",
@@ -174,6 +176,7 @@
         "diagnosis",
         "follow_up",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -187,9 +190,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "aspen.adult-patient-with-cancer-nutrition",
@@ -209,13 +212,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "aspen.malnutrition-risk-screening-oncology",
@@ -235,13 +238,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "aspen.nutrition-for-oncology-patients-practice-tool",
@@ -261,13 +264,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "aua.bladder-mibc.2024",
@@ -282,6 +285,7 @@
         "diagnosis",
         "follow_up",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -291,13 +295,13 @@
       "cancer_types": [
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "aua.bladder-nmibc.2024",
@@ -311,7 +315,9 @@
       "position_domains": [
         "diagnosis",
         "follow_up",
+        "genetics",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -321,13 +327,13 @@
       "cancer_types": [
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "aua.prostate-advanced.2026",
@@ -341,23 +347,25 @@
       "position_domains": [
         "diagnosis",
         "follow_up",
+        "genetics",
         "modality_selection",
         "risk_stratification",
         "safety",
         "staging",
+        "supportive_care",
         "therapy_indication",
         "treatment_delivery"
       ],
       "cancer_types": [
         "prostate"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "aua.prostate-early-detection.2026",
@@ -376,13 +384,13 @@
       "cancer_types": [
         "prostate"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "aua.prostate-localized.2026",
@@ -397,6 +405,7 @@
         "diagnosis",
         "follow_up",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -406,13 +415,13 @@
       "cancer_types": [
         "prostate"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "aua.prostate-salvage.2024",
@@ -436,13 +445,13 @@
       "cancer_types": [
         "prostate"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "eau-esmo.bladder-advanced-variant.2020",
@@ -462,13 +471,13 @@
       "cancer_types": [
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "eau.bladder-mibc.2026",
@@ -483,22 +492,24 @@
         "diagnosis",
         "follow_up",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
+        "supportive_care",
         "therapy_indication",
         "treatment_delivery"
       ],
       "cancer_types": [
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "eau.bladder-nmibc.2026",
@@ -513,6 +524,7 @@
         "diagnosis",
         "follow_up",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -522,13 +534,13 @@
       "cancer_types": [
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "eau.prostate.2026",
@@ -542,23 +554,27 @@
       "position_domains": [
         "diagnosis",
         "follow_up",
+        "genetics",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
+        "screening",
         "staging",
+        "supportive_care",
         "therapy_indication",
         "treatment_delivery"
       ],
       "cancer_types": [
         "prostate"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "esmo-siog.geriatric-assessment.2024",
@@ -578,13 +594,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "esmo.bladder.2022",
@@ -598,7 +614,9 @@
       "position_domains": [
         "diagnosis",
         "follow_up",
+        "genetics",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -608,13 +626,13 @@
       "cancer_types": [
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "esmo.cancer-cachexia.2021",
@@ -638,9 +656,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "esmo.prostate-advanced.2020",
@@ -654,23 +672,25 @@
       "position_domains": [
         "diagnosis",
         "follow_up",
+        "genetics",
         "modality_selection",
         "risk_stratification",
         "safety",
         "staging",
+        "supportive_care",
         "therapy_indication",
         "treatment_delivery"
       ],
       "cancer_types": [
         "prostate"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "esmo.prostate-local.2020",
@@ -685,6 +705,7 @@
         "diagnosis",
         "follow_up",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -694,13 +715,13 @@
       "cancer_types": [
         "prostate"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "espen.nutrition-cancer.2021",
@@ -724,9 +745,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "espen.nutrition-surgery.2021",
@@ -750,9 +771,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "nccn.bladder.3.2026",
@@ -766,7 +787,9 @@
       "position_domains": [
         "diagnosis",
         "follow_up",
+        "genetics",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
@@ -780,9 +803,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "nccn.prostate.6.2026",
@@ -796,10 +819,13 @@
       "position_domains": [
         "diagnosis",
         "follow_up",
+        "genetics",
         "modality_selection",
+        "pathology",
         "risk_stratification",
         "safety",
         "staging",
+        "supportive_care",
         "therapy_indication",
         "treatment_delivery"
       ],
@@ -810,9 +836,9 @@
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "recist.criteria-1-1.fr",
@@ -830,13 +856,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "recist.review-fr.2024",
@@ -854,13 +880,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "sfap.pallia10",
@@ -878,13 +904,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "siog.bladder.2020",
@@ -903,13 +929,13 @@
       "cancer_types": [
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "siog.geriatric-assessment.2014",
@@ -929,13 +955,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "siog.geriatric-screening.2015",
@@ -955,13 +981,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "siog.prostate.2019",
@@ -980,13 +1006,13 @@
       "cancer_types": [
         "prostate"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     },
     {
       "document_id": "who-iarc.urinary-male-genital.2022",
@@ -1005,13 +1031,13 @@
         "prostate",
         "bladder"
       ],
-      "licence_status": "unknown",
+      "licence_status": "permission_user_attested",
       "clinical_status": "poc_unreviewed",
       "confirm": [
         "position_domains",
-        "licence_status",
         "version_label"
-      ]
+      ],
+      "licence_evidence": "The user attested on 25 August 2026 that permission is held for every document in the corpus. Recorded as `permission_user_attested`, which names who attested rather than claiming a licence nobody has read: the corpus previously carried `open_access_copy` on four SIOG papers on evidence that did not support it, and that is the failure this value exists to avoid."
     }
   ]
 }

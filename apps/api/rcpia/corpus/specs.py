@@ -22,10 +22,22 @@ So the roles separate three things that look alike in a search result: seventeen
 guidelines that may argue with each other, fifteen specialist references that answer a
 neighbouring question, and four standards that hold no treatment position at all.
 
+**The domains were decided here, on evidence, and the record says so.** Nobody clinical wanted
+the question, so each guideline was checked for what it actually contains: `pathology` is
+claimed only where a document has a pathology-management chapter -- how many cores, when to
+repeat a resection, how to report a variant -- because that is a thing AUA and EAU can disagree
+about. Naming the tumour is not; that is WHO's, and no guideline is arguing with it. Likewise
+`treatment_response` belongs to RECIST alone: a guideline applying the criteria is using them,
+not offering a rival definition.
+
 **`confirm` is part of the record.** Publisher and authority are read off a title page and are
-not guesses. Position domains, licence status and version labels are drafted here and nobody
-has checked them, so each record says so rather than presenting all its fields with equal
-confidence.
+not guesses. `position_domains` and `version_label` stay listed, because the first was an
+engineer's call a clinician may want back and the second is transcription.
+
+**Licence is attested, not assumed.** Every document carries `permission_user_attested` with the
+attestation named in `licence_evidence`. That value says *who* claims permission rather than
+asserting a licence nobody has read -- the corpus previously carried `open_access_copy` on four
+SIOG papers on evidence that did not support it, and this is the shape that avoids repeating it.
 """
 
 import json
@@ -67,6 +79,7 @@ class Spec:
     cancer_types: tuple[str, ...]
     licence_status: str
     clinical_status: str
+    licence_evidence: str = ""
     confirm: tuple[str, ...] = ()
 
     @property
@@ -160,6 +173,7 @@ def parse_specs(body: object, *, source: str = SPECS_FILENAME) -> dict[str, Spec
             position_domains=tuple(sorted(domains)),
             cancer_types=cancers,
             licence_status=_require(record, "licence_status", where),
+            licence_evidence=str(record.get("licence_evidence") or ""),
             clinical_status=status,
             confirm=_require_list(record, "confirm", where) if "confirm" in record else (),
         )
