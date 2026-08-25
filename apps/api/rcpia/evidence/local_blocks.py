@@ -54,12 +54,22 @@ class Block:
 # filter then excludes them correctly rather than universally. Those entries are gone.
 #
 # These two still claim to apply to every patient.
+# **Re-pointed for corpus v5, not retired.** Both passages still exist and still carry
+# `not_specified` with `spans_settings`, which the filter reads as applying to every patient.
+# v5 did not repair them and could not: NCCN's PRINCIPLES chapters genuinely do span settings,
+# so there is no honest rule that narrows them. Re-chunking changed their ids, so they were
+# found again by their text.
+#
+# One of them moved in a way an id-only update would have got wrong. The blocked table is
+# *High-Risk and Very-High-Risk*, which was `...biomarkers.05` in v4; in v5 `.05` is the
+# *Intermediate-Risk* table and `.06` is the one meant.
 _MISLABELLED_SETTING = {
-    # "Optimal ADT: medical castration ..." — androgen deprivation is not indicated in
-    # low-risk localized disease at all, so offering how best to deliver it is misleading.
-    "nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.08.0085",
+    # "**Optimal ADT:** Medical castration (ie, LHRH agonist or antagonist) and surgical
+    # castration ... are equally effective." Androgen deprivation is not indicated in low-risk
+    # localized disease at all, so offering how best to deliver it is misleading.
+    "nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.08.2792",
     # "Table 1. Advanced Prognostic Tools — High-Risk and Very-High-Risk".
-    "nccn.prostate.6.2026.principles-of-risk-stratification-and-biomarkers.05.0091",
+    "nccn.prostate.6.2026.principles-of-risk-stratification-and-biomarkers.06.2798",
 }
 
 # Reference-list entries, statistical methods and appendix fragments chunked as retrievable
@@ -72,41 +82,28 @@ _MISLABELLED_SETTING = {
 # why Part 1 of the corpus request asks for them to be excluded at source.
 #
 # Retired by: docs/reviews/corpus-v4-change-request.md, Part 1.
-_NOT_GUIDANCE = {
-    # NCCN version changelogs: "Updates in Version 1.2026 ... from Version 2.2025 include:".
-    # A record of what changed between editions, not advice. One of these surfaced for a
-    # low-risk localized question describing salvage options after radiation toxicity --
-    # correct for radiorecurrent disease, wrong for this patient, and framed as a list of
-    # edits rather than a recommendation.
-    "nccn.prostate.6.2026.prostate-cancer.02.0002",
-    "nccn.prostate.6.2026.prostate-cancer.03.0007",
-    "nccn.prostate.6.2026.prostate-cancer.05.0009",
-    "nccn.prostate.6.2026.prostate-cancer.07.0011",
-    "nccn.prostate.6.2026.prostate-cancer.09.0013",
-    # Corpus v4 blocked 179 bibliography-shaped chunks and 8 appendix chunks, which caught
-    # three of the six listed here. These three have a heading its rule does not match — a
-    # sentence fragment, and two statistical-methods lines — so they remain.
-    "siog.geriatric-assessment.2014.12-some-studies-found-no-predic.p004.0017",
-    "siog.geriatric-assessment.2014.2011-cox-regression-analysis-log-rank.p014.0105",
-    "siog.geriatric-assessment.2014.2013-cox-regression-analysis-log-rank.p015.0109",
-}
+# **Empty at corpus v5, and that is the list working as intended.** Eight entries retired, none
+# re-pointed.
+#
+# The five NCCN version changelogs — "Updates in Version 1.2026 ... from Version 2.2025
+# include:", a record of what changed between editions rather than advice — are excluded at
+# source by a routing rule. All seventeen such passages in v5 carry `appendix_content` and none
+# is answerable. That is the better repair, and the one Part 1 asked for: the corpus says why,
+# so a list of ids here does not have to.
+#
+# The three SIOG fragments — a sentence fragment and two statistical-methods lines — do not
+# exist in v5 at all. Stage 1 recognises a bibliography by its shape now, and the headings that
+# produced them are gone.
+#
+# Retired by: docs/reviews/corpus-v4-change-request.md, Part 1, delivered in v5.
+_NOT_GUIDANCE: set[str] = set()
 
 # The document each block belongs to, declared once. Every blocked id below is a passage of
 # one of these, and the loader uses the mapping to decide whether a release is responsible.
 _OWNERS = {
     "nccn.prostate.6.2026": (
-        "nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.08.0085",
-        "nccn.prostate.6.2026.principles-of-risk-stratification-and-biomarkers.05.0091",
-        "nccn.prostate.6.2026.prostate-cancer.02.0002",
-        "nccn.prostate.6.2026.prostate-cancer.03.0007",
-        "nccn.prostate.6.2026.prostate-cancer.05.0009",
-        "nccn.prostate.6.2026.prostate-cancer.07.0011",
-        "nccn.prostate.6.2026.prostate-cancer.09.0013",
-    ),
-    "siog.geriatric-assessment.2014": (
-        "siog.geriatric-assessment.2014.12-some-studies-found-no-predic.p004.0017",
-        "siog.geriatric-assessment.2014.2011-cox-regression-analysis-log-rank.p014.0105",
-        "siog.geriatric-assessment.2014.2013-cox-regression-analysis-log-rank.p015.0109",
+        "nccn.prostate.6.2026.principles-of-androgen-deprivation-therapy.08.2792",
+        "nccn.prostate.6.2026.principles-of-risk-stratification-and-biomarkers.06.2798",
     ),
 }
 

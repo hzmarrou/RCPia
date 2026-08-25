@@ -16,6 +16,7 @@ from rcpia.corpus.emit import (
     DocumentSpec,
     EmitError,
     RoutedPassage,
+    build_document,
     build_schema,
     emit_release,
     self_check,
@@ -123,6 +124,46 @@ def test_a_table_is_marked_so_retrieval_can_treat_it_differently(tmp_path: Path)
     assert any(c["unit_type"] == "decision_table" for c in chunks)
 
 
+def test_a_chunk_carries_only_fields_the_loader_implements(tmp_path: Path) -> None:
+    """The other half of the same contract. `citation` was a bare string for four versions and
+    the loader reads `citation.label`; nothing caught it because no release was built by this
+    module until v5."""
+    from rcpia.evidence.ingestion import KNOWN_CHUNK_FIELDS, _chunk_row
+
+    chunks = rows(write(tmp_path), CHUNKS_FILENAME)
+    assert not set(chunks[0]) - KNOWN_CHUNK_FIELDS
+    # And it survives the loader's own reader, which is where the string failed.
+    row = _chunk_row(chunks[0])
+    assert row["citation_label"]
+
+
+def test_a_document_carries_only_fields_the_loader_implements() -> None:
+    """The release and the loader are two halves of one contract, and nothing checked that
+    they agreed until a release was actually built. `source_path` was emitted for four
+    versions and the loader refuses it: a local filesystem path means nothing to a loader
+    anywhere else."""
+    from rcpia.evidence.ingestion import _NESTED_DOCUMENT_FIELDS, KNOWN_DOCUMENT_FIELDS
+
+    document = build_document(
+        DocumentSpec(
+            document_id="x.y.2026",
+            ref_id="ref-01",
+            title="A guideline",
+            publisher="Someone",
+            authority="international",
+            document_type="guideline",
+            language="fr",
+            version_label="2026",
+        )
+    )
+
+    assert not set(document) - KNOWN_DOCUMENT_FIELDS
+    for field, allowed in _NESTED_DOCUMENT_FIELDS.items():
+        nested = document.get(field)
+        if isinstance(nested, dict):
+            assert not set(nested) - allowed, f"{field} carries {set(nested) - allowed}"
+
+
 def test_a_decision_table_is_never_embedded(tmp_path: Path) -> None:
     # The vocabulary defines `decision_table` as a unit kept out of the embedding leg: its
     # numbers are exact tokens, and a vector cannot tell `PSA < 10` from `PSA > 20`. Until v5
@@ -141,6 +182,15 @@ def test_a_decision_table_still_answers_questions(tmp_path: Path) -> None:
     assert all(c["retrieval_eligible"] is True for c in tables)
 
 
+def test_a_passage_that_can_never_be_returned_is_never_embedded(tmp_path: Path) -> None:
+    """Spend with no possible use, and it failed loudly: three AFU reference tables of 87k, 44k
+    and 37k characters went to an embedder with an 8,192-token limit and it refused the batch."""
+    chunks = rows(write(tmp_path), CHUNKS_FILENAME)
+    blocked = [c for c in chunks if not c["retrieval_eligible"]]
+    assert blocked, "the fixture should contain an excluded passage"
+    assert all(c["embedding_eligible"] is False for c in blocked)
+
+
 def test_prose_is_embedded(tmp_path: Path) -> None:
     chunks = rows(write(tmp_path), CHUNKS_FILENAME)
     prose = [c for c in chunks if c["unit_type"] == "general_principle"]
@@ -151,12 +201,12 @@ def test_prose_is_embedded(tmp_path: Path) -> None:
 def test_a_citation_names_pages_only_when_they_were_found(tmp_path: Path) -> None:
     chunks = rows(write(tmp_path), CHUNKS_FILENAME)
     located = next(c for c in chunks if c["section_path"][-1] == "Tumeurs de haut risque")
-    assert "pp. 3-4" in located["citation"]
+    assert "pp. 3-4" in located["citation"]["label"]
 
     unlocated = next(c for c in chunks if c["unit_type"] == "decision_table")
     # A citation carrying a page nobody located is worse than one carrying none.
-    assert "p." not in unlocated["citation"]
-    assert "Annexes et tableaux" in unlocated["citation"]
+    assert "p." not in unlocated["citation"]["label"]
+    assert "Annexes et tableaux" in unlocated["citation"]["label"]
 
 
 def test_the_embedded_text_carries_the_path_it_sits_under(tmp_path: Path) -> None:

@@ -35,6 +35,7 @@ from rcpia.corpus.prepare import Section, outline
 from rcpia.corpus.rules import RoutingRules, flatten, load_rules, route
 from rcpia.corpus.specs import SPECS_FILENAME, Spec, load_specs
 from rcpia.corpus.split import passages
+from rcpia.corpus.vocabulary import AGENT_ROLES
 
 CORPUS = Path(__file__).resolve().parent
 ROUTING = CORPUS / "routing"
@@ -57,6 +58,7 @@ class SourceRecord:
     blocks_path: Path | None
     pdf_path: Path | None
     source_files: tuple[str, ...]
+    agent_roles: tuple[str, ...] = ()
 
 
 def read_curation(library: Path) -> dict[str, SourceRecord]:
@@ -93,6 +95,12 @@ def read_curation(library: Path) -> dict[str, SourceRecord]:
                 else None
             ),
             source_files=tuple(dict.fromkeys(files)),
+            # Only roles retrieval can filter on. The curation also tags `safety_reviewer` and
+            # `rcp_synthesis`, which are agents that read outputs rather than passages -- 84% of
+            # records carry the first, so keeping it would say nothing about any chunk.
+            agent_roles=tuple(
+                r for r in (record.get("agent_roles") or []) if r in AGENT_ROLES
+            ),
         )
     return records
 
@@ -154,6 +162,10 @@ def route_document(
                     if decision.rule.exclude
                     else ("bibliography_entry" if is_reference else None)
                 ),
+                # `general` where no rule narrows it: v4.0's largest bucket by far, and what
+                # retrieval's `admit_universal_purpose` exists to admit. A passage claiming
+                # every purpose its document covers would match every question and filter none.
+                clinical_purpose=decision.rule.purposes or ("general",),
                 page_first=span.first,
                 page_last=span.last,
                 page_confidence=span.confidence,
@@ -197,6 +209,7 @@ def build_spec(spec: Spec, source: SourceRecord) -> DocumentSpec:
         licence_status=spec.licence_status,
         position_domains=spec.position_domains,
         cancer_types=spec.cancer_types,
+        agent_roles=source.agent_roles,
         clinical_status=spec.clinical_status,
     )
 
@@ -241,6 +254,11 @@ def build(
         rules = load_rules(rule_file)
         source = curation[document_id]
 
+        if not source.agent_roles:
+            raise BuildError(
+                f"{document_id} names no agent role retrieval can filter on, so no agent would "
+                "ever see it"
+            )
         routed = route_document(source, rules, locate_pages=locate_pages)
         if not routed:
             raise BuildError(f"{document_id} produced no passages, which cannot be right")
@@ -280,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"directory {report.directory}")
     print(f"documents {report.documents}")
     print(f"passages  {report.chunks}  ({report.excluded} kept but never returned)")
+    print(f"omitted   {report.out_of_scope}  (another disease, left out of the release)")
     return 0
 
 

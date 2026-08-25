@@ -51,6 +51,15 @@
       "exclusion_reason": "out_of_scope_disease"
     },
     {
+      "match_section": "Upper Tract Tumors",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "out_of_scope_disease",
+      "every_occurrence": true,
+      "note": "`Intrapelvic and Intravesical Therapy for Upper Tract Tumors`, which the two rules above miss: it says neither `Upper GU Tract` nor `Upper Tract Urothelial`. Found by the loader, whose own out-of-scope list is defence in depth and says so -- \"the corpus agent is excluding these sections at source, where the document structure is still available; we only have the flattened path\". It was right and this file was wrong."
+    },
+    {
       "match_section": "Renal Pelvis",
       "setting": "not_specified",
       "every_occurrence": true,

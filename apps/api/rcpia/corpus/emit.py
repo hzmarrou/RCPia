@@ -147,6 +147,7 @@ class EmitReport:
     documents: int = 0
     chunks: int = 0
     excluded: int = 0
+    out_of_scope: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -196,7 +197,7 @@ def build_chunk(
             "locator_method": "pdf_token_overlap" if routed.page_first else "unavailable",
             "locator_confidence": round(routed.page_confidence, 3),
         },
-        "citation": _citation(spec, routed),
+        "citation": {"label": _citation(spec, routed), "source_url": spec.source_url},
         "language": spec.language,
         "cancer_types": list(spec.cancer_types),
         "disease_setting": routed.disease_setting,
@@ -210,9 +211,17 @@ def build_chunk(
         "clinical_status": spec.clinical_status,
         "not_specified_reason": routed.not_specified_reason,
         "embedding_sha256": None,
-        # False means: store it, index its text, never give it a vector. Distinct from
-        # `retrieval_eligible`, which means the passage never answers at all.
-        "embedding_eligible": unit_type not in KEYWORD_ONLY_UNIT_TYPES,
+        # False means: store it, index its text, never give it a vector.
+        #
+        # Two ways to earn that. A decision table is answerable but not embeddable -- its
+        # numbers are exact tokens and a vector cannot tell `PSA < 10` from `PSA > 20`. A
+        # passage that is not retrieval-eligible at all is a stronger case: it can never be
+        # returned, so a vector for it is spend with no possible use. That second rule was
+        # missing, and three AFU reference tables of 87,000, 44,000 and 37,000 characters were
+        # sent to an embedder with an 8,192-token limit, which refused the whole batch.
+        "embedding_eligible": (
+            not excluded and unit_type not in KEYWORD_ONLY_UNIT_TYPES
+        ),
         "retrieval_eligible": not excluded,
         "retrieval_exclusion_reason": exclusion_reason if excluded else None,
     }
@@ -223,6 +232,11 @@ def _citation(spec: DocumentSpec, routed: RoutedPassage) -> str:
 
     Names the section rather than the page when the page is unknown, and never both when only
     one is true -- a citation carrying a page nobody located is worse than one carrying none.
+
+    Returned as the label alone; `build_chunk` wraps it with the source URL, because the loader
+    stores the two separately as `citation_label` and `source_url`. Emitting a bare string here
+    was wrong for four versions and nothing noticed, because no release had been built by this
+    module until v5.
     """
     where = " > ".join(routed.section_path) if routed.section_path else "sans section"
     if routed.page_first:
@@ -246,7 +260,11 @@ def build_document(spec: DocumentSpec) -> dict[str, Any]:
         "document_type": spec.document_type,
         "language": spec.language,
         "version": {"label": spec.version_label},
-        "source": {"source_url": spec.source_url, "source_path": spec.source_path},
+        # `source_url` only. `source_path` is where the file sat on the machine that built
+        # the release, which means nothing to a loader anywhere else -- and the loader refuses
+        # it, correctly. Provenance travels in the manifest's `files`, which is checked and
+        # claimed exactly once across the release.
+        "source": {"source_url": spec.source_url},
         "licence": {"status": spec.licence_status},
         "clinical_status": spec.clinical_status,
         "source_family": spec.source_family,
@@ -283,7 +301,7 @@ def build_schema() -> dict[str, Any]:
             "contextual_text": {"type": "string"},
             "section_path": {"type": "array", "items": {"type": "string"}},
             "source_location": {"type": "object"},
-            "citation": {"type": "string"},
+            "citation": {"type": "object"},
             "language": enum(LANGUAGES),
             "cancer_types": enum_array(CANCER_TYPES),
             "disease_setting": enum(DISEASE_SETTINGS),
@@ -398,6 +416,16 @@ def emit_release(
         document_rows.append(build_document(spec))
         within: dict[tuple[str, ...], int] = {}
         for routed in routed_passages:
+            # **A passage about another disease is left out, not flagged.** Every other
+            # exclusion keeps the passage: it is written, hashed and traceable, and simply
+            # never answers. This one is different because the passage is not ours -- the
+            # loader refuses an out-of-scope section outright and says why: "the corpus agent
+            # is excluding these sections at source, where the document structure is still
+            # available; we only have the flattened path". Emitting them flagged would leave
+            # the loader to catch what this stage already knows.
+            if routed.exclusion_reason == "out_of_scope_disease":
+                report.out_of_scope += 1
+                continue
             key = routed.section_path
             within[key] = within.get(key, 0) + 1
             running += 1
@@ -405,7 +433,11 @@ def emit_release(
             chunk_rows.append(row)
             if not row["retrieval_eligible"]:
                 report.excluded += 1
-        counts[spec.document_id] = len(routed_passages)
+            counts[spec.document_id] = counts.get(spec.document_id, 0) + 1
+        # Counted from what was written, not from what was offered. A passage dropped as
+        # another disease is not in the release, and a manifest that counted it would declare
+        # more chunks than it delivers -- which is the coverage proof failing to prove itself.
+        counts.setdefault(spec.document_id, 0)
 
     _write_jsonl(directory / DOCUMENTS_FILENAME, document_rows)
     _write_jsonl(directory / CHUNKS_FILENAME, chunk_rows)
