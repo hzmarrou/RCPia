@@ -68,6 +68,15 @@ in the loaded guidelines is a clinical call.
 
 They are written from the dossiers in French. Phrasing that rings false is worth saying so.
 
+## The first run
+
+`pilot-findings.md` records what the harness found the first time it ran, with the caveat that
+governs the whole pilot: it is for building the harness, and its numbers are not a result. Four
+of its findings are defects rather than scores -- a routing gap that makes the AUA localised
+guideline unreachable for an intermediate-risk question, a mislabelled group here in the gold
+set, two agent roles with one passage and none, and every arm answering the question the corpus
+has no answer to.
+
 ## What this is not
 
 **Not scored against the human fiches.** Their own key says a difference between RCPia and the
