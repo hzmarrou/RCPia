@@ -79,6 +79,26 @@
       "match_leaf": true,
       "every_occurrence": true,
       "note": "Reaches only what the nmCRPC rule above did not claim: biomarker testing, management with and without known genetic alterations, sequencing and combination treatment, aggressive variants, molecularly defined subgroups, metastasis-directed therapy, supportive care and follow-up."
+    },
+    {
+      "match_section": "DIAGNOSIS, PATHOLOGY AND MOLECULAR BIOLOGY",
+      "setting": "not_specified",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
+    },
+    {
+      "match_section": "STAGING AND RISK ASSESSMENT",
+      "setting": "not_specified",
+      "purposes": [
+        "staging"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `staging` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
     }
   ]
 }

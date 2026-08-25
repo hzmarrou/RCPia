@@ -4,7 +4,10 @@
   "default": {
     "setting": "not_specified",
     "reason": "general_principle",
-    "note": "Feeding route follows the symptom and the gut, not the tumour setting."
+    "note": "Feeding route follows the symptom and the gut, not the tumour setting. Serves supportive_care throughout: Choosing a feeding route given the symptom in the way.",
+    "purposes": [
+      "supportive_care"
+    ]
   },
   "rules": [
     {

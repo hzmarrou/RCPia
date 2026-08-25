@@ -71,6 +71,24 @@
       "exclusion_reason": "appendix_content",
       "every_occurrence": true,
       "note": "Substring, so it claims both the front-matter `Methodology` and the `METHODOLOGY` chapter with its systematic-review and data-extraction subsections."
+    },
+    {
+      "match_section": "INITIAL PATIENT EVALUATION AND COUNSELING",
+      "setting": "bladder_mibc_non_metastatic",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 7 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "VARIANT HISTOLOGY",
+      "setting": "bladder_mibc_non_metastatic",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for."
     }
   ]
 }

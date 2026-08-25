@@ -4,7 +4,11 @@
   "default": {
     "setting": "not_specified",
     "reason": "general_principle",
-    "note": "Perioperative nutritional care, which applies to the operation rather than to the tumour stage."
+    "note": "Perioperative nutritional care, which applies to the operation rather than to the tumour stage. Serves supportive_care, safety throughout: Perioperative nutrition. `safety` as well, because its subject is what goes wrong when a malnourished patient is operated on.",
+    "purposes": [
+      "supportive_care",
+      "safety"
+    ]
   },
   "rules": [
     {

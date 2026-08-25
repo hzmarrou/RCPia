@@ -51,6 +51,42 @@
       "setting": "not_specified",
       "reason": "spans_settings",
       "note": "Quality of life is reported for neoadjuvant therapy, cystectomy, trimodality therapy and metastatic disease alike, and supportive care applies throughout. `spans_settings` rather than the default, so it is admitted for a metastatic question as well as a non-metastatic one."
+    },
+    {
+      "match_section": "4. PATHOLOGY AND CLASSIFICATION SYSTEMS",
+      "setting": "bladder_mibc_non_metastatic",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 26 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "5. DIAGNOSIS",
+      "setting": "bladder_mibc_non_metastatic",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 13 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "7. FOLLOW-UP AND SURVEILLANCE",
+      "setting": "bladder_mibc_non_metastatic",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 7 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "6.7.10 Palliative cystectomy",
+      "setting": "bladder_mibc_non_metastatic",
+      "purposes": [
+        "supportive_care"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `supportive_care` is taken from the heading, which names what the section is for."
     }
   ]
 }

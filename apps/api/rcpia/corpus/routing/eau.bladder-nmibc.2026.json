@@ -49,13 +49,43 @@
     {
       "match_section": "7.7.2 Treatment of carcinoma in situ",
       "setting": "bladder_nmibc_cis",
-      "note": "The treatment chapter for CIS, including the prostatic urethra and upper tract. The one place in this guideline where a disease type has its own treatment section rather than appearing inside a recommendation table."
+      "note": "The treatment chapter for CIS, including the prostatic urethra and upper tract. The one place in this guideline where a disease type has its own treatment section rather than appearing inside a recommendation table. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
     },
     {
       "match_section": "9. PATIENT REPORTED OUTCOME MEASURES",
       "setting": "not_specified",
       "reason": "spans_settings",
       "note": "Outcome and quality measures are reported across risk groups."
+    },
+    {
+      "match_section": "5. DIAGNOSIS",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 34 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "4. PATHOLOGICAL STAGING, GRADING AND CLASSIFICATION SYSTEMS",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 11 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "8. FOLLOW-UP OF PATIENTS WITH NMIBC",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 11 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for."
     }
   ]
 }

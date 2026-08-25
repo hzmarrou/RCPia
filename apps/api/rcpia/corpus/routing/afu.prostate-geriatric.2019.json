@@ -69,7 +69,10 @@
     {
       "match_section": "Traitement > Surveillance",
       "setting": "prostate_nonmetastatic_unspecified_risk",
-      "note": "Surveillance rather than treatment, offered across low and favourable-intermediate risk without separating them."
+      "note": "Surveillance rather than treatment, offered across low and favourable-intermediate risk without separating them. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `follow_up` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "follow_up"
+      ]
     }
   ]
 }

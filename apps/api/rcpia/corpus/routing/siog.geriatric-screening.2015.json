@@ -4,7 +4,11 @@
   "default": {
     "setting": "not_specified",
     "reason": "general_principle",
-    "note": "Which instrument, at what cutoff, for whom. True at every stage of every cancer."
+    "note": "Which instrument, at what cutoff, for whom. True at every stage of every cancer. Serves screening, risk_stratification throughout: Which geriatric screening instrument to use and at what cutoff -- screening in order to stratify, which is why it carries both.",
+    "purposes": [
+      "screening",
+      "risk_stratification"
+    ]
   },
   "rules": []
 }

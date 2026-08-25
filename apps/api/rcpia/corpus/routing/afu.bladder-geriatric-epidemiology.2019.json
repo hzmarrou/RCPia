@@ -39,6 +39,16 @@
     {
       "match_section": "Tumeur de vessie infiltrant le muscle",
       "setting": "bladder_mibc_non_metastatic"
+    },
+    {
+      "match_section": "Pathologie du cancer de la vessie chez les patients âgés",
+      "setting": "not_specified",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 4 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for.",
+      "reason": "general_principle"
     }
   ]
 }

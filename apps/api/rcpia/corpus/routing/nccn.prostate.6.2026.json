@@ -104,6 +104,26 @@
       "setting": "prostate_biochemical_recurrence",
       "every_occurrence": true,
       "note": "Covers both the first recurrence after radical prostatectomy and the section on a second biochemical recurrence."
+    },
+    {
+      "match_section": "BONE HEALTH IN PROSTATE CANCER",
+      "setting": "not_specified",
+      "purposes": [
+        "supportive_care"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 5 passages that were already falling through. `supportive_care` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
+    },
+    {
+      "match_section": "PRINCIPLES OF QUALITY OF LIFE AND SHARED DECISION-MAKING",
+      "setting": "not_specified",
+      "purposes": [
+        "supportive_care"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `supportive_care` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
     }
   ]
 }

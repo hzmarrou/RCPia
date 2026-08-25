@@ -56,7 +56,10 @@
       "match_leaf": true,
       "every_occurrence": true,
       "reason": "spans_settings",
-      "note": "Very high-risk localised disease and node-positive disease are two settings, and the chapter deliberately treats them together -- its title says `and/or`. Routing it to either one would hide it from the other half of the patients it is written about, so it is left spanning them."
+      "note": "Very high-risk localised disease and node-positive disease are two settings, and the chapter deliberately treats them together -- its title says `and/or`. Routing it to either one would hide it from the other half of the patients it is written about, so it is left spanning them. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
     }
   ]
 }

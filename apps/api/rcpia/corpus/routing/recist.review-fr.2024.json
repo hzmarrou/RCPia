@@ -4,7 +4,10 @@
   "default": {
     "setting": "not_specified",
     "reason": "general_principle",
-    "note": "Response evaluation applies to any measurable solid tumour under treatment, whatever the disease setting. Routing it to one would hide it from the others."
+    "note": "Response evaluation applies to any measurable solid tumour under treatment, whatever the disease setting. Routing it to one would hide it from the others. Serves treatment_response throughout: A review of those criteria -- their history, application and adaptation.",
+    "purposes": [
+      "treatment_response"
+    ]
   },
   "rules": [
     {

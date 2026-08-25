@@ -116,7 +116,11 @@
     {
       "match_section": "Bladder Preservation",
       "setting": "bladder_mibc_non_metastatic",
-      "every_occurrence": true
+      "every_occurrence": true,
+      "purposes": [
+        "modality_selection"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `modality_selection` is what the section is for, taken from its own heading."
     },
     {
       "match_section": "Cystectomy",
@@ -133,6 +137,36 @@
       "setting": "bladder_metastatic",
       "every_occurrence": true,
       "note": "Offered in the metastatic setting."
+    },
+    {
+      "match_section": "FOLLOW-UP",
+      "setting": "not_specified",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 6 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
+    },
+    {
+      "match_section": "Pathology and Staging",
+      "setting": "not_specified",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 3 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
+    },
+    {
+      "match_section": "Histology",
+      "setting": "not_specified",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
     }
   ]
 }

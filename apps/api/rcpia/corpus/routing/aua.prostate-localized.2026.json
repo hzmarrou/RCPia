@@ -123,7 +123,28 @@
       "match_section": "TREATMENT INTENSIFICATION FOR HIGH-RISK DISEASE",
       "setting": "prostate_localized_high_risk",
       "every_occurrence": true,
-      "note": "The one chapter that names its risk group. Everything else in this guideline spans the three groups and stays on the default."
+      "note": "The one chapter that names its risk group. Everything else in this guideline spans the three groups and stays on the default. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
+    },
+    {
+      "match_section": "STAGING",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "staging"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 13 passages that were already falling through. `staging` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "FOLLOW-UP AFTER TREATMENT",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for."
     }
   ]
 }

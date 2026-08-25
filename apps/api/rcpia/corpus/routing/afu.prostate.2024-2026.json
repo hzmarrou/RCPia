@@ -44,6 +44,51 @@
     {
       "match_section": "metastases",
       "setting": "prostate_metastatic_hormone_sensitive"
+    },
+    {
+      "match_section": "Biopsies",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 13 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Diagnostic",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 13 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Stadification",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "staging"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 12 passages that were already falling through. `staging` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Surveillance active",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 10 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Génétique",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "genetics"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 4 passages that were already falling through. `genetics` is taken from the heading, which names what the section is for."
     }
   ]
 }

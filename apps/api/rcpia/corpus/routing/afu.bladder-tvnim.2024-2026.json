@@ -36,6 +36,33 @@
     {
       "match_section": "cis isole",
       "setting": "bladder_nmibc_cis"
+    },
+    {
+      "match_section": "Anatomopathologie",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 6 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Suivi des TVNIM",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 4 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Bilan diagnostique initial",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 4 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
     }
   ]
 }

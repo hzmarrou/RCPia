@@ -6,7 +6,11 @@
     "reason": "general_principle",
     "exclude": true,
     "exclusion_reason": "out_of_scope_disease",
-    "note": "Kidney, testis, penis, scrotum, adrenal, the genetic tumour syndromes, the mesenchymal and haematolymphoid chapters, the 212 passages of references and the front matter. Anything not explicitly admitted below."
+    "note": "Kidney, testis, penis, scrotum, adrenal, the genetic tumour syndromes, the mesenchymal and haematolymphoid chapters, the 212 passages of references and the front matter. Anything not explicitly admitted below. Serves pathology, staging throughout: A tumour classification. It says what a diagnosis *is* and carries the TNM tables; it holds no view on treatment.",
+    "purposes": [
+      "pathology",
+      "staging"
+    ]
   },
   "rules": [
     {

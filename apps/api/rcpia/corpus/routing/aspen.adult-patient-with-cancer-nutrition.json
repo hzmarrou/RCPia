@@ -4,7 +4,10 @@
   "default": {
     "setting": "not_specified",
     "reason": "general_principle",
-    "note": "Nutritional risk and the response to it apply across the disease course."
+    "note": "Nutritional risk and the response to it apply across the disease course. Serves supportive_care throughout: Why nutrition matters in cancer, and what a positive screen should lead to.",
+    "purposes": [
+      "supportive_care"
+    ]
   },
   "rules": [
     {

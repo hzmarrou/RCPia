@@ -111,11 +111,19 @@
     },
     {
       "match_section": "6.4 Management of PSA-only recurrence",
-      "setting": "prostate_biochemical_recurrence"
+      "setting": "prostate_biochemical_recurrence",
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
     },
     {
       "match_section": "6.6 Management of metastatic prostate cancer",
-      "setting": "prostate_metastatic_hormone_sensitive"
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
     },
     {
       "match_section": "6.7.15",
@@ -124,13 +132,20 @@
     },
     {
       "match_section": "6.7 Treatment: Castration-resistant",
-      "setting": "prostate_metastatic_castration_resistant"
+      "setting": "prostate_metastatic_castration_resistant",
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
     },
     {
       "match_section": "6.2 Treatment modalities",
       "setting": "not_specified",
       "reason": "spans_settings",
-      "note": "How a treatment is delivered -- surgical technique, radiotherapy dose, complications -- rather than who should receive it. It applies wherever the modality is indicated. Stated rather than left to the default because `spans_settings` is admitted by retrieval and `not_determinable` is not: leaving these on the default makes 100+ passages about operative technique unreachable by every question."
+      "note": "How a treatment is delivered -- surgical technique, radiotherapy dose, complications -- rather than who should receive it. It applies wherever the modality is indicated. Stated rather than left to the default because `spans_settings` is admitted by retrieval and `not_determinable` is not: leaving these on the default makes 100+ passages about operative technique unreachable by every question. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
     },
     {
       "match_section": "6.5 Systemic treatments",
@@ -143,6 +158,36 @@
       "setting": "not_specified",
       "reason": "spans_settings",
       "note": "Quality-of-life outcomes are reported across stages. Placed after the exclusion rules so the stray contents entry carrying a page number is excluded rather than routed here."
+    },
+    {
+      "match_section": "5. DIAGNOSTIC EVALUATION",
+      "setting": "not_specified",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 50 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for.",
+      "reason": "not_determinable"
+    },
+    {
+      "match_section": "7. FOLLOW-UP",
+      "setting": "not_specified",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 29 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for.",
+      "reason": "not_determinable"
+    },
+    {
+      "match_section": "3.2.1.b Germline mutations",
+      "setting": "not_specified",
+      "purposes": [
+        "genetics"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `genetics` is taken from the heading, which names what the section is for.",
+      "reason": "not_determinable"
     }
   ]
 }

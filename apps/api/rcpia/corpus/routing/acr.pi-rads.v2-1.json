@@ -3,7 +3,11 @@
   "note": "PI-RADS v2.1: how a multiparametric prostate MRI is reported and scored. A web capture, small and cleanly structured.\n\nIt earns its place the way the ASPEN screening tool does: the corpus can say what a PI-RADS category *means* and what should follow from it, while the score itself arrives in the dossier already assigned by the radiologist. The corpus is not being asked to compute it.",
   "default": {
     "setting": "prostate_nonmetastatic_unspecified_risk",
-    "note": "Detection and local staging of prostate cancer by MRI. Non-metastatic by construction -- this is the scan that finds the tumour in the gland -- and the risk group is not something an MRI report assigns."
+    "note": "Detection and local staging of prostate cancer by MRI. Non-metastatic by construction -- this is the scan that finds the tumour in the gland -- and the risk group is not something an MRI report assigns. Serves diagnosis, staging throughout: Every passage is about acquiring, reporting and scoring a prostate MRI: finding the tumour and saying where it sits in the gland.",
+    "purposes": [
+      "diagnosis",
+      "staging"
+    ]
   },
   "rules": []
 }

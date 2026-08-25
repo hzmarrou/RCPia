@@ -76,6 +76,42 @@
       "match_leaf": true,
       "every_occurrence": true,
       "note": "Statement 17, on a six-week induction course of intravesical chemotherapy or immunotherapy. Five passages, the longest single statement in the document."
+    },
+    {
+      "match_section": "Risk Stratification",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "risk_stratification"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 4 passages that were already falling through. `risk_stratification` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Staging and Grading",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "staging"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `staging` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Diagnosis",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Variant Histologies",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for."
     }
   ]
 }

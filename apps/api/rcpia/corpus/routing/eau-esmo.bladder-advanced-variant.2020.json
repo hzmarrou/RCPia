@@ -77,7 +77,10 @@
       "setting": "bladder_mibc_non_metastatic",
       "match_leaf": true,
       "every_occurrence": true,
-      "note": "The variant-histology statement this paper exists for."
+      "note": "The variant-histology statement this paper exists for. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
     },
     {
       "match_section": "adjuvant radiotherapy for the treatment of MIBC",

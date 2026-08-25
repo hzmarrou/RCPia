@@ -4,7 +4,10 @@
   "default": {
     "setting": "not_specified",
     "reason": "general_principle",
-    "note": "Nothing in this document is about a disease stage. Whether to involve a palliative team is decided from the patient's trajectory and symptom burden, and the criteria read the same for a newly diagnosed metastatic patient and for one at the end of third-line treatment. Absent here is a statement, not a failure to route -- the same shape the SIOG geriatric-assessment papers already carry, at 114 of 114 and 81 of 81 passages."
+    "note": "Nothing in this document is about a disease stage. Whether to involve a palliative team is decided from the patient's trajectory and symptom burden, and the criteria read the same for a newly diagnosed metastatic patient and for one at the end of third-line treatment. Absent here is a statement, not a failure to route -- the same shape the SIOG geriatric-assessment papers already carry, at 114 of 114 and 81 of 81 passages. Serves supportive_care throughout: When to involve palliative care. It says nothing about which treatment to give.",
+    "purposes": [
+      "supportive_care"
+    ]
   },
   "rules": []
 }

@@ -4,7 +4,10 @@
   "default": {
     "setting": "not_specified",
     "reason": "general_principle",
-    "note": "Screening applies on entry to an oncology pathway, before the tumour setting is known. That is the point of screening."
+    "note": "Screening applies on entry to an oncology pathway, before the tumour setting is known. That is the point of screening. Serves screening throughout: Which instrument to screen with, and which are validated for ambulatory cancer patients. Screening is the whole subject.",
+    "purposes": [
+      "screening"
+    ]
   },
   "rules": [
     {

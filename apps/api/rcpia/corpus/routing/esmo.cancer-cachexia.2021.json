@@ -4,7 +4,10 @@
   "default": {
     "setting": "not_specified",
     "reason": "general_principle",
-    "note": "Cachexia is defined by the patient's metabolic state rather than by the tumour's stage. A patient with metastatic bladder cancer and one with locally advanced prostate cancer are the same question here."
+    "note": "Cachexia is defined by the patient's metabolic state rather than by the tumour's stage. A patient with metastatic bladder cancer and one with locally advanced prostate cancer are the same question here. Serves supportive_care throughout: Recognising and managing cachexia.",
+    "purposes": [
+      "supportive_care"
+    ]
   },
   "rules": [
     {

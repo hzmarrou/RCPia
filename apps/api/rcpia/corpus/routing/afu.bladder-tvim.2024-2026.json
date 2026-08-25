@@ -10,7 +10,10 @@
     {
       "match_section": "traitements des tvim metastatiques",
       "setting": "bladder_metastatic",
-      "note": "Plural 'Traitements'. 'Traitement des TVIM non metastatiques' is the other chapter and does not contain this needle, which is why the two never cross."
+      "note": "Plural 'Traitements'. 'Traitement des TVIM non metastatiques' is the other chapter and does not contain this needle, which is why the two never cross. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
     },
     {
       "match_section": "Chimiothérapie néoadjuvante à base de cisplatine",
@@ -25,11 +28,19 @@
     },
     {
       "match_section": "traitement des tvim non metastatiques",
-      "setting": "bladder_mibc_non_metastatic"
+      "setting": "bladder_mibc_non_metastatic",
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
     },
     {
       "match_section": "strategies possibles de preservation vesicale",
-      "setting": "bladder_mibc_non_metastatic"
+      "setting": "bladder_mibc_non_metastatic",
+      "purposes": [
+        "modality_selection"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `modality_selection` is what the section is for, taken from its own heading."
     },
     {
       "match_section": "ne pouvant pas recevoir un traitement optimal",
@@ -38,7 +49,11 @@
     },
     {
       "match_section": "traitement adjuvant",
-      "setting": "bladder_mibc_non_metastatic"
+      "setting": "bladder_mibc_non_metastatic",
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
     },
     {
       "match_section": "suivi",
@@ -47,7 +62,31 @@
     },
     {
       "match_section": "traitement symptomatique",
-      "setting": "bladder_locally_advanced_non_metastatic"
+      "setting": "bladder_locally_advanced_non_metastatic",
+      "purposes": [
+        "supportive_care"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `supportive_care` is what the section is for, taken from its own heading."
+    },
+    {
+      "match_section": "Stadification, spécificités anatomopathologiques et biomarqueurs",
+      "setting": "not_specified",
+      "purposes": [
+        "staging"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 6 passages that were already falling through. `staging` is taken from the heading, which names what the section is for.",
+      "reason": "not_determinable"
+    },
+    {
+      "match_section": "Bilan diagnostique",
+      "setting": "not_specified",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 5 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for.",
+      "reason": "not_determinable"
     }
   ]
 }

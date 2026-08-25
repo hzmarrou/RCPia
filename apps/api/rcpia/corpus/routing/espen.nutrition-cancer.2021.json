@@ -4,7 +4,10 @@
   "default": {
     "setting": "not_specified",
     "reason": "general_principle",
-    "note": "Screening, requirements, oral and enteral and parenteral support, and the interventions that go with surgery, radiotherapy and systemic treatment. None of it is about a disease stage, and all of it is about a patient at any stage."
+    "note": "Screening, requirements, oral and enteral and parenteral support, and the interventions that go with surgery, radiotherapy and systemic treatment. None of it is about a disease stage, and all of it is about a patient at any stage. Serves supportive_care throughout: Nutritional care during cancer treatment, which accompanies every disease setting.",
+    "purposes": [
+      "supportive_care"
+    ]
   },
   "rules": [
     {

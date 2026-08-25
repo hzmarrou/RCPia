@@ -72,20 +72,31 @@
       "match_section": "Treatment of NMIBC",
       "setting": "bladder_nmibc_unspecified_risk",
       "match_leaf": true,
-      "every_occurrence": true
+      "every_occurrence": true,
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
     },
     {
       "match_section": "Treatment after failure of BCG therapy",
       "setting": "bladder_nmibc_unspecified_risk",
       "match_leaf": true,
       "every_occurrence": true,
-      "note": "BCG failure is a non-muscle-invasive problem: BCG is the NMIBC treatment whose failure this section addresses."
+      "note": "BCG failure is a non-muscle-invasive problem: BCG is the NMIBC treatment whose failure this section addresses. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
     },
     {
       "match_section": "Treatment of MIBC",
       "setting": "bladder_mibc_non_metastatic",
       "match_leaf": true,
-      "every_occurrence": true
+      "every_occurrence": true,
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
     },
     {
       "match_section": "Neoadjuvant and adjuvant therapy",
@@ -124,7 +135,10 @@
       "setting": "bladder_metastatic",
       "match_leaf": true,
       "every_occurrence": true,
-      "note": "The caption the conversion promoted. Its own passages really are about metastatic disease; what it must not do is lend that meaning to the NMIBC and MIBC sections filed beneath it, which leaf matching prevents."
+      "note": "The caption the conversion promoted. Its own passages really are about metastatic disease; what it must not do is lend that meaning to the NMIBC and MIBC sections filed beneath it, which leaf matching prevents. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
     },
     {
       "match_section": "Advanced/metastatic disease",
@@ -146,6 +160,16 @@
       "match_leaf": true,
       "every_occurrence": true,
       "note": "The follow-up section, as above."
+    },
+    {
+      "match_section": "DIAGNOSIS AND PATHOLOGY/MOLECULAR BIOLOGY",
+      "setting": "not_specified",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
     }
   ]
 }
