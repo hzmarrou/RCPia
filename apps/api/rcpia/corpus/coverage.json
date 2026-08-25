@@ -1,0 +1,903 @@
+{
+  "note": "Exported from the curation manifest by `python -m rcpia.corpus.coverage`. What the corpus claims about scope, committed so it can be reviewed in a diff and checked in CI. Not the curation itself: titles, checksums, paths and licence evidence stay there.",
+  "source": "poc_document_manifest.json",
+  "amended_at": "2026-08-24T21:24:51.787632+00:00",
+  "documents": [
+    {
+      "document_id": "eau.bladder-mibc.2026",
+      "ref_id": "ref-01",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "eau.bladder-nmibc.2026",
+      "ref_id": "ref-01",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "eau.prostate.2026",
+      "ref_id": "ref-01",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aua.bladder-mibc.2024",
+      "ref_id": "ref-02",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aua.bladder-nmibc.2024",
+      "ref_id": "ref-02",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aua.prostate-advanced.2026",
+      "ref_id": "ref-02",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aua.prostate-early-detection.2026",
+      "ref_id": "ref-02",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aua.prostate-localized.2026",
+      "ref_id": "ref-02",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aua.prostate-salvage.2024",
+      "ref_id": "ref-02",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-02.ref.02.aua.2026.apc.amendment.summary.final",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "not_corpus_material",
+      "exclusion_note": "A change log, not guidance: its table says things like 'Text updated with new search dates and results'. It documents what changed between editions, which is a fact about the document rather than about a patient.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-02.ref.02.aua.2026.apc.guideline.algorithm.final",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "duplicate_of_routed_document",
+      "exclusion_note": "The decision tree of the advanced prostate guideline, restating its statements in terser form. It converts well -- clean SHOULD / MAY / SHOULD NOT prose under chapters that name all four settings -- and was originally proposed for routing on that basis. It is excluded because the recommendations are the same ones the unabridged already carries, and 19 more passages restating them would compete for the same retrieval slots. If the retrieval evaluation later shows the unabridged prose answers 'what should I do' questions poorly, this is the first thing to add back.",
+      "duplicate_of": "aua.prostate-advanced.2026"
+    },
+    {
+      "document_id": "ref-02.ref.02.aua.edpc.guideline.2026.amendment.summary",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "not_corpus_material",
+      "exclusion_note": "A change log, as above.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-02.ref.02.aua.gui.23.8404.edpc.flow.diagram",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "not_corpus_material",
+      "exclusion_note": "Three mermaid figures. The early detection guideline carries the same pathway as prose.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-02.ref.02.aua.rcc.eval.rx.algorithm",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "out_of_scope",
+      "exclusion_note": "Renal cell carcinoma. The corpus vocabulary is CANCER_TYPES = {prostate, bladder}; kidney is not in scope for v5 and there is no setting that could hold it.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-02.ref.02.aua.salvage.therapy.for.prostate.cancer.journal.part.i",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "duplicate_of_routed_document",
+      "exclusion_note": "The unabridged guideline is already routed and is the superset. Checked rather than assumed: every distinctive probe -- RTOG 9601, SPPORT, GETUG-AFU 16, bicalutamide 150 mg, the 0.7 ng/mL threshold -- appears in the unabridged, and sampled sentences match it verbatim once journal rewording and citation markers are normalised. Loading both would return the same recommendation from two documents and read as two sources agreeing.",
+      "duplicate_of": "aua.prostate-salvage.2024"
+    },
+    {
+      "document_id": "ref-02.ref.02.aua.salvage.therapy.for.prostate.cancer.journal.part.ii",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "duplicate_of_routed_document",
+      "exclusion_note": "The unabridged guideline is already routed and is the superset. Checked rather than assumed: every distinctive probe -- RTOG 9601, SPPORT, GETUG-AFU 16, bicalutamide 150 mg, the 0.7 ng/mL threshold -- appears in the unabridged, and sampled sentences match it verbatim once journal rewording and citation markers are normalised. Loading both would return the same recommendation from two documents and read as two sources agreeing.",
+      "duplicate_of": "aua.prostate-salvage.2024"
+    },
+    {
+      "document_id": "ref-02.ref.02.aua.webpage.document",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-02.ref.02.vessie.gui.24.0075.mibc.algorithm",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "not_corpus_material",
+      "exclusion_note": "A mermaid graph, as above.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-02.ref.02.vessie.muscle.invasive.bladder.cancer.algorithm.2020",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "not_corpus_material",
+      "exclusion_note": "A mermaid graph, as above; the MIBC guideline carries the same guidance as prose.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-02.ref.02.vessie.non.muscle.invasive.bladder.cancer.algorithm",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "not_corpus_material",
+      "exclusion_note": "The conversion is a mermaid graph. A retrieved chunk would read 'TURBT[TURBT] --> LowRisk[Low Risk]' -- node labels and arrows, with no sentence a clinician could be shown. The same guidance is in the routed NMIBC guideline as prose.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-02.ref.02.vessie.webpage.document",
+      "ref_id": "ref-02",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "afu.bladder-geriatric-epidemiology.2019",
+      "ref_id": "ref-03",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "afu.bladder-geriatric-management.2019",
+      "ref_id": "ref-03",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "afu.bladder-tvim.2024-2026",
+      "ref_id": "ref-03",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "afu.bladder-tvnim.2024-2026",
+      "ref_id": "ref-03",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "afu.prostate-geriatric.2019",
+      "ref_id": "ref-03",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "afu.prostate.2024-2026",
+      "ref_id": "ref-03",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-04.ref.04.briganti.document",
+      "ref_id": "ref-04",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-05.ref.05.mskcc.document",
+      "ref_id": "ref-05",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-06.ref.06.score.iief5",
+      "ref_id": "ref-06",
+      "included": false,
+      "exclusion_reason": "score_arrives_completed_on_the_dossier",
+      "exclusion_note": "IIEF-5 is a patient questionnaire. The dossier records `État de l'érection (score IIEF5)` and the ledger field `iief5` already holds it, so the agent is handed the score and never administers or computes it.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-07.ref.07.score.ipss",
+      "ref_id": "ref-07",
+      "included": false,
+      "exclusion_reason": "score_arrives_completed_on_the_dossier",
+      "exclusion_note": "IPSS is a blank questionnaire -- `Nom : Prénom : Date :` and a grid. The dossier records `État de la miction (score IPSS)` into the ledger field `ipss`.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-08.ref.08.oms.performance.status.document",
+      "ref_id": "ref-08",
+      "included": false,
+      "exclusion_reason": "lookup_table_from_a_patient_information_site",
+      "exclusion_note": "Karnofsky and WHO performance status as tables of definitions, captured from arcagy.org, a patient-information website. The scale is authoritative; this copy of it is not, and a citation resolving to a patient site is not provenance a clinician would accept. `who_status` already holds the value; EAU and NCCN carry the scale where a citation is needed.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-09.ref.09.g8.document",
+      "ref_id": "ref-09",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-09.ref.09.questionnaire.g8",
+      "ref_id": "ref-09",
+      "included": false,
+      "exclusion_reason": "score_arrives_completed_on_the_dossier",
+      "exclusion_note": "The G8 questionnaire. The dossier records `Score G8 (si ≥ 75 ans)` into `g8_score`. Deriving it when absent is not possible either: dossiers record the total, never the seven individual answers.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-10.ref.10.iarc.who.tumour.classification.document",
+      "ref_id": "ref-10",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "who-iarc.urinary-male-genital.2022",
+      "ref_id": "ref-10",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "nccn.bladder.3.2026",
+      "ref_id": "ref-11",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "nccn.prostate.6.2026",
+      "ref_id": "ref-11",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-11.ref.11.nccn.guidelines.document",
+      "ref_id": "ref-11",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-11.ref.11.prostate.document",
+      "ref_id": "ref-11",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-11.ref.11.vessie.document",
+      "ref_id": "ref-11",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-12.ref.12.mna.document",
+      "ref_id": "ref-12",
+      "included": false,
+      "exclusion_reason": "broken_capture_encoding_damaged",
+      "exclusion_note": "Captured from medicalcul.free.fr as a JavaScript calculator page: `**Field (input):** vItem1` repeated 49 times, with UTF-8 read as Latin-1 throughout (`rÃ©aliser`). Not a document. Re-source from ESPEN or the MNA publisher if the guidance is wanted; the `mna` value itself already arrives on the dossier.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-13.ref.13.adl.katz.document",
+      "ref_id": "ref-13",
+      "included": false,
+      "exclusion_reason": "broken_capture_encoding_damaged",
+      "exclusion_note": "Same source and same damage as ref-12 (`HygiÃ¨ne Corporelle`, `GÃ©riatrie`). The `adl` value already arrives on the dossier.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-14.ref.14.fried.document",
+      "ref_id": "ref-14",
+      "included": false,
+      "exclusion_reason": "lookup_table_from_a_third_party_calculator",
+      "exclusion_note": "Fried frailty, captured from guideline.care, an online calculator. Its content is a band lookup -- 0 robust, 1-2 pre-frail, 3+ frail -- which by §4.4 is executed rather than retrieved. It cites the Cardiovascular Health Study as its source; that paper, not this page, would be the citable authority. No ledger field holds a Fried score.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-15.ref.15.mini.gds.4.items",
+      "ref_id": "ref-15",
+      "included": false,
+      "exclusion_reason": "questionnaire_this_build_does_not_administer",
+      "exclusion_note": "Mini-GDS is four questions to put to the patient. No ledger field holds it and the dossier does not record it, so nothing in this build reads or produces it.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aspen.adult-patient-with-cancer-nutrition",
+      "ref_id": "ref-16",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aspen.guidelines-landing-page",
+      "ref_id": "ref-16",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": "A snapshot of ASPEN's guidelines landing page, and it says so itself: 'a navigation and discovery page, not a clinical document with patient-level recommendations'. Captured after the curation ran and declared nowhere until now.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aspen.head-neck-cancer-guidelines",
+      "ref_id": "ref-16",
+      "included": false,
+      "exclusion_reason": "cancer_type_outside_prostate_and_bladder_scope",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aspen.head-neck-enteral-nutrition",
+      "ref_id": "ref-16",
+      "included": false,
+      "exclusion_reason": "cancer_type_outside_prostate_and_bladder_scope",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aspen.malnutrition-risk-screening-oncology",
+      "ref_id": "ref-16",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "aspen.nutrition-for-oncology-patients-practice-tool",
+      "ref_id": "ref-16",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-16.ref.16.aspen.document",
+      "ref_id": "ref-16",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "espen.nutrition-cancer.2021",
+      "ref_id": "ref-17",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "espen.nutrition-surgery.2021",
+      "ref_id": "ref-17",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-17.ref.17.espen.document",
+      "ref_id": "ref-17",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "acr.pi-rads.v2-1",
+      "ref_id": "ref-18",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "radiopaedia.bladder-staging",
+      "ref_id": "ref-19",
+      "included": false,
+      "exclusion_reason": "secondary_explanatory_reference",
+      "exclusion_note": "Captured 23 August 2026 and declared nowhere until now. Radiopaedia is a radiology teaching resource; the capture says so itself, recording 'Authority: secondary explanatory reference'. TNM staging is carried by the guidelines themselves and by ref-19's AJCC/CAP rules, both of which a clinician can check. A citation resolving to a teaching site is not.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "radiopaedia.prostate-staging",
+      "ref_id": "ref-19",
+      "included": false,
+      "exclusion_reason": "secondary_explanatory_reference",
+      "exclusion_note": "Captured 23 August 2026 and declared nowhere until now. Radiopaedia is a radiology teaching resource; the capture says so itself, recording 'Authority: secondary explanatory reference'. TNM staging is carried by the guidelines themselves and by ref-19's AJCC/CAP rules, both of which a clinician can check. A citation resolving to a teaching site is not.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-19.ref.19.official.tnm.uicc.document",
+      "ref_id": "ref-19",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-19.ref.19.prostate.document",
+      "ref_id": "ref-19",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-19.ref.19.provisional.ajcc8.cap.tnm.document",
+      "ref_id": "ref-19",
+      "included": false,
+      "exclusion_reason": "not_corpus_material",
+      "exclusion_note": "Not the TNM rules -- a README describing them. Its own frontmatter says intended_use: 'PoC deterministic TNM lookup and pipeline testing'. The rules themselves are Provisional_AJCC8_CAP_TNM/raw_source.json, with validation_cases.json beside them, and staging is arithmetic: mapping T, N, M, PSA and grade group to a stage is a calculation, not a passage to retrieve. It belongs in rcpia/rules/ on the same line as MNA_MALNOURISHED, and TNM is already handled as structured data in cases/ledger.py and cases/fact_schema.py.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-19.ref.19.vessie.document",
+      "ref_id": "ref-19",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "recist.criteria-1-1.fr",
+      "ref_id": "ref-20",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "recist.review-fr.2024",
+      "ref_id": "ref-20",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-21.ref.21.ggpo.psycho.oncology.longversion.2.0",
+      "ref_id": "ref-21",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-22.ref.22.ggpo.psycho.oncology.longversion.2.0",
+      "ref_id": "ref-22",
+      "included": false,
+      "exclusion_reason": "duplicate",
+      "exclusion_note": null,
+      "duplicate_of": "ref-21.ref.21.ggpo.psycho.oncology.longversion.2.0"
+    },
+    {
+      "document_id": "ref-22.ref.22.mini.gds.ou.gds.4.items",
+      "ref_id": "ref-22",
+      "included": false,
+      "exclusion_reason": "duplicate",
+      "exclusion_note": null,
+      "duplicate_of": "ref-15.ref.15.mini.gds.4.items"
+    },
+    {
+      "document_id": "ref-22.ref.22.psycho.oncology.preview.9780190097660",
+      "ref_id": "ref-22",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.a.pan.canadian.practice.guideline.screening.assessment.and.care.of.psychosocial.distres",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.anxiete",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.apres.cancer",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.clinical.practice.guidelines.in.oncology.distress.management",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.comment.accompagner.vers.prise.en.charge.psychologique",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.confusion.mentale",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.confusion.mentale.1.md",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "duplicate",
+      "exclusion_note": null,
+      "duplicate_of": "ref-23.ref.23.sffpo.confusion.mentale"
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.depression",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.determining.optimal.measures.of.health.related.quality.of.life.anxiety.and.depression",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.deuil",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.document",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "portal_or_metadata_only",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.document.d.orientation.pancanadien.sur.l.organisation.et.la.prestation.des.services.de",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.enquete.sur.l.organisation.de.la.prise.en.charge.psychologique.au.sein.des.etablissemen",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.epuisement.professionnel.soignants",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.etat.des.lieux.des.organisations.de.la.prise.en.charge.psychologique.dans.les.reseaux.e",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.fin.de.vie",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.formation.psycho.oncologie",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.orientation.psychologue.psychiatre",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.orienter.accompagnement.psychologique",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.parents.cancer.enfants",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.prise.en.charge.psychologique.apres.cancer.presentation",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.refus.de.soins",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.sedation.soins.psychiques",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.souffrance.psychique",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.souffrance.refractaire.fin.vie",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.standards.of.psychosocial.services.for.persons.with.cancer.and.their.families",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.syndrome.d.epuisement.professionnel.des.soignants",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.transmission.informations",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-23.ref.23.sffpo.troubles.psychotiques",
+      "ref_id": "ref-23",
+      "included": false,
+      "exclusion_reason": "deferred_to_later_version",
+      "exclusion_note": "Psycho-oncology, excluded from v5 by the treating clinician on 24 August 2026: the psycho-oncologist is not on the panel for this version. Deferred, not discarded -- the documents stay curated, converted and checksummed so the tranche can be routed if the agent is added later. `preparation_status` stays `ready_for_chunking` because that is true of the documents; what changed is the scope of the release, not their readiness.",
+      "duplicate_of": null
+    },
+    {
+      "document_id": "sfap.pallia10",
+      "ref_id": "ref-24",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "eau-esmo.bladder-advanced-variant.2020",
+      "ref_id": "ref-25",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "esmo.bladder.2022",
+      "ref_id": "ref-25",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "esmo.cancer-cachexia.2021",
+      "ref_id": "ref-25",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "esmo.prostate-advanced.2020",
+      "ref_id": "ref-25",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "esmo.prostate-local.2020",
+      "ref_id": "ref-25",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-25.ref.25.esmo.blader.esmo.clinical.practice.guideline",
+      "ref_id": "ref-25",
+      "included": false,
+      "exclusion_reason": "duplicate_of_routed_document",
+      "exclusion_note": "Byte-identical to ESMO_Bladder_Cancer_Guideline.pdf -- same SHA-256, same size. A second download under a different filename.",
+      "duplicate_of": "esmo.bladder.2022"
+    },
+    {
+      "document_id": "esmo-siog.geriatric-assessment.2024",
+      "ref_id": "ref-27",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-27.invalid.03_siog_prostate_cancer_older_men_recommendations_2014",
+      "ref_id": "ref-27",
+      "included": false,
+      "exclusion_reason": "paywalled_lancet_oncol_no_lawful_free_copy",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "ref-27.invalid.04_siog_bladder_cancer_older_patients_position_paper_2017",
+      "ref_id": "ref-27",
+      "included": false,
+      "exclusion_reason": "document_does_not_exist",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "siog.bladder.2020",
+      "ref_id": "ref-27",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "siog.geriatric-assessment.2014",
+      "ref_id": "ref-27",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "siog.geriatric-screening.2015",
+      "ref_id": "ref-27",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "siog.prostate.2010",
+      "ref_id": "ref-27",
+      "included": false,
+      "exclusion_reason": "superseded_by_boyle_2019",
+      "exclusion_note": null,
+      "duplicate_of": null
+    },
+    {
+      "document_id": "siog.prostate.2019",
+      "ref_id": "ref-27",
+      "included": true,
+      "exclusion_reason": null,
+      "exclusion_note": null,
+      "duplicate_of": null
+    }
+  ]
+}
