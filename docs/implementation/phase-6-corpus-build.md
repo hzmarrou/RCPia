@@ -642,8 +642,8 @@ Both fixed, and the result is the number step 11 needs to be able to prove:
 | included but unrouted | **0** |
 | rule files with no curation record | **0** |
 
-| 11 | Build, load, run probes → **v5.0** | 7, 8, 10, 10b; 10c if acquired in time |
-| 12 | CI job for rule-file validation | 2 |
+| 11 | ~~Build, load, run probes → **v5.0**~~ — **done 25 August**: 37 documents, 3,532 passages, 2,612 answerable, 2,512 embedded; 12 of 12 probes pass | 7, 8, 10, 10b, 10c |
+| 12 | ~~CI job for rule-file validation~~ — **done 25 August**: a `Corpus` job with no database service, so the claim that these checks need none is enforced rather than stated. 388 tests in 8 seconds | 2 |
 | 13 | ~~Stage 0: PDF conversion as a pipeline step~~ — **done 24 August**: `rcpia.corpus.convert`, reusing the dossier LlamaParse client; verifies its own output against stage 1 and caches on the source digest | 3 |
 
 ~~Three corrections to the source inventory must land before step 5~~ — **all three done,
