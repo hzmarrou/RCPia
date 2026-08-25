@@ -353,7 +353,15 @@ we could not act on. It runs after v5 lands, against the corpus we keep.
 | `rcpia.evidence.load` CLI | still the only path into the database | **no** |
 | retrieval + reranker | stage 4 probes | **no** |
 
-**Nothing in `rcpia/evidence/` changes.** The builder is a new producer for a contract that
+**Nothing in `rcpia/evidence/` changes** — *amended 25 August: one thing did.* §4.4 requires a
+decision table to be kept out of the embedding leg, and nothing in the loader could express
+that: `ingest_release` embedded every passage whose text had changed, with no per-chunk opt-out.
+The two sections contradicted each other, and the contradiction was found by review rather than
+by us. `embedding_eligible` is now a chunk field the release declares and the loader honours.
+The rest of the statement holds: the builder is a second producer for a contract that already
+exists.
+
+The original claim was: The builder is a new producer for a contract that
 already exists and is already enforced. That is the point of having spent three review rounds
 on the contract: it is now strong enough that a second producer can be written against it
 without touching it.

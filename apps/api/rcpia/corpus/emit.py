@@ -54,10 +54,22 @@ CHUNKS_FILENAME = "chunks.jsonl"
 # the only place that opinion turns into a value the retrieval reads.
 _UNIT_TYPE_BY_KIND = {
     "table": "decision_table",
-    "mixed": "decision_table",
+    # **A mixed passage is prose that happens to contain a table, and it is not a decision
+    # table.** It used to claim that value, which mattered once `decision_table` began to mean
+    # something: the vocabulary defines it as a unit kept out of the embedding leg, and there are
+    # 224 mixed passages against 65 pure tables. Marking them all keyword-only would have taken
+    # dense retrieval away from 224 passages of real prose -- 79 in the EAU prostate guideline
+    # alone -- to protect the numbers in a table they merely contain.
+    "mixed": "general_principle",
     "references": "reference_list",
     "prose": "general_principle",
 }
+
+# Units that are retrieved by keyword and never embedded. A table of bands and cutoffs is exact
+# tokens, which full-text search is good at and a vector destroys: `PSA < 10` and `PSA > 20`
+# embed to nearly the same place. Declared in the release rather than decided by the loader, so
+# a reader of `chunks.jsonl` can see which passages have no vector and why.
+KEYWORD_ONLY_UNIT_TYPES = frozenset({"decision_table"})
 
 # A reference list is kept and never retrieved. The reason is one the schema already carries and
 # that corpus v4.0 already uses for 179 passages.
@@ -166,6 +178,7 @@ def build_chunk(
     spec: DocumentSpec, routed: RoutedPassage, *, within: int, running: int
 ) -> dict[str, Any]:
     kind = routed.passage.kind
+    unit_type = _UNIT_TYPE_BY_KIND[kind]
     excluded = routed.exclude or kind == "references"
     exclusion_reason = routed.exclusion_reason or (_REFERENCE_EXCLUSION if excluded else None)
     body = routed.passage.text
@@ -190,13 +203,16 @@ def build_chunk(
         "therapy_line": routed.therapy_line,
         "agent_roles": list(spec.agent_roles),
         "clinical_purpose": list(routed.clinical_purpose),
-        "unit_type": _UNIT_TYPE_BY_KIND[kind],
+        "unit_type": unit_type,
         "recommendation_number": None,
         "retrieval": {"eligible": not excluded},
         "content_sha256": sha256_text(body),
         "clinical_status": spec.clinical_status,
         "not_specified_reason": routed.not_specified_reason,
         "embedding_sha256": None,
+        # False means: store it, index its text, never give it a vector. Distinct from
+        # `retrieval_eligible`, which means the passage never answers at all.
+        "embedding_eligible": unit_type not in KEYWORD_ONLY_UNIT_TYPES,
         "retrieval_eligible": not excluded,
         "retrieval_exclusion_reason": exclusion_reason if excluded else None,
     }
@@ -284,6 +300,7 @@ def build_schema() -> dict[str, Any]:
                 "enum": [*sorted(NOT_SPECIFIED_REASONS), None],
             },
             "embedding_sha256": {"type": ["string", "null"]},
+            "embedding_eligible": {"type": "boolean"},
             "retrieval_eligible": {"type": "boolean"},
             "retrieval_exclusion_reason": {"type": ["string", "null"]},
         },

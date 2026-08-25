@@ -180,6 +180,7 @@ KNOWN_CHUNK_FIELDS = frozenset(
         "therapy_line",
         "title",
         "unit_type",
+        "embedding_eligible",
     }
 )
 
@@ -605,6 +606,8 @@ def _chunk_row(record: dict[str, Any]) -> dict[str, Any]:
         "not_specified_reason": record.get("not_specified_reason"),
         # Absent means retrievable, which is how every release before v3.1 behaved.
         "retrieval_eligible": record.get("retrieval_eligible", True),
+        # Absent means embed it, which is how every release before v5.0 behaved.
+        "embedding_eligible": record.get("embedding_eligible", True),
         "retrieval_exclusion_reason": record.get("retrieval_exclusion_reason"),
     }
 
@@ -742,6 +745,7 @@ async def ingest_release(
 
     pending: list[tuple[dict[str, Any], bool]] = []
     metadata_only: list[dict[str, Any]] = []
+    keyword_only: list[tuple[dict[str, Any], bool]] = []
     for record in chunks:
         problem = validate_chunk(record, schema)
         if problem is not None:
@@ -761,6 +765,20 @@ async def ingest_release(
             row["chunk_id"], (None, None, False)
         )
         exists = row["chunk_id"] in stored
+
+        # **A decision table is stored and indexed, and never embedded.** Its numbers are exact
+        # tokens: full-text search matches `PSA < 10`, and a vector cannot tell it from
+        # `PSA > 20`. Decided before freshness, because a passage with no vector is never fresh
+        # by the test below -- it would be sent to the embedder on every single ingest.
+        #
+        # The vector is cleared rather than left alone, so a passage that was embedded under an
+        # earlier release and is keyword-only now does not keep answering the dense leg.
+        if not row.pop("embedding_eligible", True):
+            keyword_only.append(
+                ({**row, "embedding": None, "embedding_model": None, "embedding_sha256": None},
+                 exists)
+            )
+            continue
         # Re-embed when the embedded text changed, when the model changed, or when there is
         # no vector to keep.
         #
@@ -801,6 +819,20 @@ async def ingest_release(
         )
         report.metadata_updated += 1
     if metadata_only:
+        await session.flush()
+
+    for row, is_update in keyword_only:
+        if is_update:
+            await session.execute(
+                sa.update(EvidenceChunk)
+                .where(EvidenceChunk.chunk_id == row["chunk_id"])
+                .values(**row)
+            )
+            report.chunks_updated += 1
+        else:
+            session.add(EvidenceChunk(**row))
+            report.chunks_inserted += 1
+    if keyword_only:
         await session.flush()
 
     for start in range(0, len(pending), BATCH_SIZE):

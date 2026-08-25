@@ -575,6 +575,56 @@ unambiguous and the id is the thing in question.
 documents included, 37 rule files, no included document unrouted, no rule file without a
 curation record. Step 11 can now assert that rather than hope it.
 
+## 2026-08-25 — Decision tables are stored, indexed, and never embedded
+
+Two reviewers read the corpus before it was built. Both findings were real, and the second one
+is the more interesting.
+
+**A note is not a rule.** `who-iarc.urinary-male-genital.2022` said in prose that the urethra was
+out of scope, and left it to the default. A default only decides what no rule claimed, and the
+broad `urotheli` admission claimed one passage first: `TNM staging of carcinomas of the urethra >
+TNM clinical classification > urothelial (transitional cell) carcinoma of the prostate` — which
+is one of the three diseases `out_of_scope_disease` was created for. An explicit `urethra`
+exclusion now leads the file. One passage, and a habit worth breaking: anything a rule file means
+to keep out has to be stated as a rule.
+
+**The plan contradicted itself, and the contradiction had shipped.** §4.4 says a table chunk
+"is excluded from the embedding leg, and is retrieved by keyword only — its numbers are exact
+tokens, which is what full-text search is good at and what a vector destroys". `VOCABULARY`
+repeats it: `decision_table` is "kept out of the embedding leg, which cannot tell `PSA < 10` from
+`PSA > 20`". And §5 says "Nothing in `rcpia/evidence/` changes".
+
+Both could not be true. `emit` assigned the `unit_type` and stopped; `ingest_release` embedded
+every passage whose text had changed, with no way for a release to say otherwise. So the value
+was assigned and nothing acted on it, for four releases.
+
+**The literal fix would have been worse than the bug.** `_UNIT_TYPE_BY_KIND` sent both `table`
+and `mixed` to `decision_table`, and a mixed passage is prose that happens to contain a table.
+Across the 37 documents: 65 pure tables, 224 mixed, 3,942 prose. Marking all 289 keyword-only
+would have taken dense retrieval away from 224 passages of real prose — 79 in the EAU prostate
+guideline alone — to protect the numbers in a table they merely contain. So `mixed` now maps to
+`general_principle`, which is how it is treated, and `decision_table` means what the vocabulary
+says it means.
+
+**`embedding_eligible` is a third state, and the distinction matters.** `retrieval_eligible:
+false` means the passage never answers. `embedding_eligible: false` means it answers by keyword
+and never by vector. A bibliography is the first; a table of cutoffs is the second, and
+collapsing them would have deleted 65 passages a tumour board would want quoted exactly.
+
+Three details that had to be right:
+
+- The decision is taken **before** freshness. A passage with no vector is never fresh by the
+  usual test, so deciding it afterwards would send every decision table to the embedder on
+  every ingest, forever.
+- The vector is **cleared**, not left. A table embedded under an earlier release would
+  otherwise keep answering the dense leg after being declared keyword-only.
+- The field **defaults to true** when absent, because every release before v5.0 omits it and
+  omitting it must not silently strip the corpus of its vectors.
+
+No retrieval change was needed: the dense leg already excludes passages with no vector, and says
+why — "Passages with no embedding are excluded rather than sorted last: pgvector orders NULL
+first."
+
 ## Open
 
 - Which of the two reference PPS examples is human-written and which is machine-generated

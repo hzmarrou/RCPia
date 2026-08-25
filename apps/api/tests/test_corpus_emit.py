@@ -123,6 +123,31 @@ def test_a_table_is_marked_so_retrieval_can_treat_it_differently(tmp_path: Path)
     assert any(c["unit_type"] == "decision_table" for c in chunks)
 
 
+def test_a_decision_table_is_never_embedded(tmp_path: Path) -> None:
+    # The vocabulary defines `decision_table` as a unit kept out of the embedding leg: its
+    # numbers are exact tokens, and a vector cannot tell `PSA < 10` from `PSA > 20`. Until v5
+    # the value was assigned and nothing acted on it.
+    chunks = rows(write(tmp_path), CHUNKS_FILENAME)
+    tables = [c for c in chunks if c["unit_type"] == "decision_table"]
+    assert tables, "the fixture should contain a table"
+    assert all(c["embedding_eligible"] is False for c in tables)
+
+
+def test_a_decision_table_still_answers_questions(tmp_path: Path) -> None:
+    # Keyword-only is not exclusion. `retrieval_eligible` stays true, and the full-text leg is
+    # exactly where a table of bands and cutoffs belongs.
+    chunks = rows(write(tmp_path), CHUNKS_FILENAME)
+    tables = [c for c in chunks if c["unit_type"] == "decision_table"]
+    assert all(c["retrieval_eligible"] is True for c in tables)
+
+
+def test_prose_is_embedded(tmp_path: Path) -> None:
+    chunks = rows(write(tmp_path), CHUNKS_FILENAME)
+    prose = [c for c in chunks if c["unit_type"] == "general_principle"]
+    assert prose
+    assert all(c["embedding_eligible"] is True for c in prose)
+
+
 def test_a_citation_names_pages_only_when_they_were_found(tmp_path: Path) -> None:
     chunks = rows(write(tmp_path), CHUNKS_FILENAME)
     located = next(c for c in chunks if c["section_path"][-1] == "Tumeurs de haut risque")
