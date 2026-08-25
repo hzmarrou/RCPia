@@ -1,0 +1,1017 @@
+{
+  "note": "Everything about a document that is not in its text and not in the curation: who published it, what kind of source it is, and what it may hold a position on. Written out rather than derived -- `document_id` starts with the family by convention, and deriving the family from it would work by accident of the naming, which is the reason `source_family` was asked for as a field. `confirm` lists the fields on each record that nobody has verified yet.",
+  "source_roles_version": "2.0",
+  "documents": [
+    {
+      "document_id": "acr.pi-rads.v2-1",
+      "publisher": "American College of Radiology",
+      "authority": "professional_society",
+      "document_type": "classification",
+      "version_label": "v2.1",
+      "language": "en",
+      "source_family": "acr",
+      "source_role": "classification_standard",
+      "position_domains": [
+        "diagnosis",
+        "staging"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "afu.bladder-geriatric-epidemiology.2019",
+      "publisher": "Association française d'urologie",
+      "authority": "professional_society",
+      "document_type": "review",
+      "version_label": "2019",
+      "language": "fr",
+      "source_family": "afu",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "risk_stratification",
+        "safety",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "afu.bladder-geriatric-management.2019",
+      "publisher": "Association française d'urologie",
+      "authority": "professional_society",
+      "document_type": "review",
+      "version_label": "2019",
+      "language": "fr",
+      "source_family": "afu",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "risk_stratification",
+        "safety",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "afu.bladder-tvim.2024-2026",
+      "publisher": "Association française d'urologie",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "2024-2026",
+      "language": "fr",
+      "source_family": "afu",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "afu.bladder-tvnim.2024-2026",
+      "publisher": "Association française d'urologie",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "2024-2026",
+      "language": "fr",
+      "source_family": "afu",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "afu.prostate-geriatric.2019",
+      "publisher": "Association française d'urologie",
+      "authority": "professional_society",
+      "document_type": "review",
+      "version_label": "2019",
+      "language": "fr",
+      "source_family": "afu",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "risk_stratification",
+        "safety",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "afu.prostate.2024-2026",
+      "publisher": "Association française d'urologie",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "2024-2026",
+      "language": "fr",
+      "source_family": "afu",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "aspen.adult-patient-with-cancer-nutrition",
+      "publisher": "American Society for Parenteral and Enteral Nutrition",
+      "authority": "professional_society",
+      "document_type": "practice_tool",
+      "version_label": "undated",
+      "language": "en",
+      "source_family": "aspen",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "safety",
+        "screening",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "aspen.malnutrition-risk-screening-oncology",
+      "publisher": "American Society for Parenteral and Enteral Nutrition",
+      "authority": "professional_society",
+      "document_type": "practice_tool",
+      "version_label": "2024",
+      "language": "en",
+      "source_family": "aspen",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "safety",
+        "screening",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "aspen.nutrition-for-oncology-patients-practice-tool",
+      "publisher": "American Society for Parenteral and Enteral Nutrition",
+      "authority": "professional_society",
+      "document_type": "practice_tool",
+      "version_label": "undated",
+      "language": "en",
+      "source_family": "aspen",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "safety",
+        "screening",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "aua.bladder-mibc.2024",
+      "publisher": "American Urological Association",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "2017, amended 2024",
+      "language": "en",
+      "source_family": "aua",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "aua.bladder-nmibc.2024",
+      "publisher": "American Urological Association",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "2016, amended 2024",
+      "language": "en",
+      "source_family": "aua",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "aua.prostate-advanced.2026",
+      "publisher": "American Urological Association",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "2023, amended 2026",
+      "language": "en",
+      "source_family": "aua",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "aua.prostate-early-detection.2026",
+      "publisher": "American Urological Association",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "2023, amended 2026",
+      "language": "en",
+      "source_family": "aua",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "risk_stratification",
+        "screening"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "aua.prostate-localized.2026",
+      "publisher": "American Urological Association",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "2022, amended 2026",
+      "language": "en",
+      "source_family": "aua",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "aua.prostate-salvage.2024",
+      "publisher": "American Urological Association",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "2024",
+      "language": "en",
+      "source_family": "aua",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "eau-esmo.bladder-advanced-variant.2020",
+      "publisher": "European Association of Urology; European Society for Medical Oncology",
+      "authority": "international",
+      "document_type": "consensus_statement",
+      "version_label": "2020",
+      "language": "en",
+      "source_family": "eau-esmo",
+      "source_role": "treatment_consensus",
+      "position_domains": [
+        "follow_up",
+        "modality_selection",
+        "pathology",
+        "therapy_indication"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "eau.bladder-mibc.2026",
+      "publisher": "European Association of Urology",
+      "authority": "international",
+      "document_type": "guideline",
+      "version_label": "2026",
+      "language": "en",
+      "source_family": "eau",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "eau.bladder-nmibc.2026",
+      "publisher": "European Association of Urology",
+      "authority": "international",
+      "document_type": "guideline",
+      "version_label": "2026",
+      "language": "en",
+      "source_family": "eau",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "eau.prostate.2026",
+      "publisher": "European Association of Urology",
+      "authority": "international",
+      "document_type": "guideline",
+      "version_label": "2026",
+      "language": "en",
+      "source_family": "eau",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "esmo-siog.geriatric-assessment.2024",
+      "publisher": "European Society for Medical Oncology; International Society of Geriatric Oncology",
+      "authority": "international",
+      "document_type": "consensus_guidance",
+      "version_label": "2024",
+      "language": "en",
+      "source_family": "esmo-siog",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "risk_stratification",
+        "safety",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "esmo.bladder.2022",
+      "publisher": "European Society for Medical Oncology",
+      "authority": "international",
+      "document_type": "guideline",
+      "version_label": "2022",
+      "language": "en",
+      "source_family": "esmo",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "esmo.cancer-cachexia.2021",
+      "publisher": "European Society for Medical Oncology",
+      "authority": "international",
+      "document_type": "guideline",
+      "version_label": "2021",
+      "language": "en",
+      "source_family": "esmo",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "safety",
+        "screening",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "esmo.prostate-advanced.2020",
+      "publisher": "European Society for Medical Oncology",
+      "authority": "international",
+      "document_type": "guideline",
+      "version_label": "2020",
+      "language": "en",
+      "source_family": "esmo",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "esmo.prostate-local.2020",
+      "publisher": "European Society for Medical Oncology",
+      "authority": "international",
+      "document_type": "guideline",
+      "version_label": "2020",
+      "language": "en",
+      "source_family": "esmo",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "espen.nutrition-cancer.2021",
+      "publisher": "European Society for Clinical Nutrition and Metabolism",
+      "authority": "international",
+      "document_type": "guideline",
+      "version_label": "2021",
+      "language": "en",
+      "source_family": "espen",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "safety",
+        "screening",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "espen.nutrition-surgery.2021",
+      "publisher": "European Society for Clinical Nutrition and Metabolism",
+      "authority": "international",
+      "document_type": "guideline",
+      "version_label": "2021",
+      "language": "en",
+      "source_family": "espen",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "safety",
+        "screening",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "nccn.bladder.3.2026",
+      "publisher": "National Comprehensive Cancer Network",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "3.2026",
+      "language": "en",
+      "source_family": "nccn",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "nccn.prostate.6.2026",
+      "publisher": "National Comprehensive Cancer Network",
+      "authority": "professional_society",
+      "document_type": "guideline",
+      "version_label": "6.2026",
+      "language": "en",
+      "source_family": "nccn",
+      "source_role": "treatment_guideline",
+      "position_domains": [
+        "diagnosis",
+        "follow_up",
+        "modality_selection",
+        "risk_stratification",
+        "safety",
+        "staging",
+        "therapy_indication",
+        "treatment_delivery"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "permission_user_attested",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "recist.criteria-1-1.fr",
+      "publisher": "European Organisation for Research and Treatment of Cancer",
+      "authority": "international",
+      "document_type": "criteria",
+      "version_label": "1.1",
+      "language": "fr",
+      "source_family": "recist",
+      "source_role": "measurement_standard",
+      "position_domains": [
+        "treatment_response"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "recist.review-fr.2024",
+      "publisher": "Société française de médecine nucléaire",
+      "authority": "professional_society",
+      "document_type": "review",
+      "version_label": "2024",
+      "language": "fr",
+      "source_family": "recist",
+      "source_role": "measurement_standard",
+      "position_domains": [
+        "treatment_response"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "sfap.pallia10",
+      "publisher": "Société française d'accompagnement et de soins palliatifs",
+      "authority": "professional_society",
+      "document_type": "practice_tool",
+      "version_label": "undated",
+      "language": "fr",
+      "source_family": "sfap",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "siog.bladder.2020",
+      "publisher": "International Society of Geriatric Oncology",
+      "authority": "professional_society",
+      "document_type": "position_paper",
+      "version_label": "2020",
+      "language": "en",
+      "source_family": "siog",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "risk_stratification",
+        "safety",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "siog.geriatric-assessment.2014",
+      "publisher": "International Society of Geriatric Oncology",
+      "authority": "professional_society",
+      "document_type": "consensus_guidance",
+      "version_label": "2014",
+      "language": "en",
+      "source_family": "siog",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "risk_stratification",
+        "safety",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "siog.geriatric-screening.2015",
+      "publisher": "International Society of Geriatric Oncology",
+      "authority": "professional_society",
+      "document_type": "consensus_guidance",
+      "version_label": "2015",
+      "language": "en",
+      "source_family": "siog",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "risk_stratification",
+        "safety",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "siog.prostate.2019",
+      "publisher": "International Society of Geriatric Oncology",
+      "authority": "professional_society",
+      "document_type": "consensus_guidance",
+      "version_label": "2019",
+      "language": "en",
+      "source_family": "siog",
+      "source_role": "specialist_guidance",
+      "position_domains": [
+        "risk_stratification",
+        "safety",
+        "supportive_care"
+      ],
+      "cancer_types": [
+        "prostate"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    },
+    {
+      "document_id": "who-iarc.urinary-male-genital.2022",
+      "publisher": "World Health Organization / International Agency for Research on Cancer",
+      "authority": "international",
+      "document_type": "classification",
+      "version_label": "5th edition, 2022",
+      "language": "en",
+      "source_family": "who-iarc",
+      "source_role": "classification_standard",
+      "position_domains": [
+        "pathology",
+        "staging"
+      ],
+      "cancer_types": [
+        "prostate",
+        "bladder"
+      ],
+      "licence_status": "unknown",
+      "clinical_status": "poc_unreviewed",
+      "confirm": [
+        "position_domains",
+        "licence_status",
+        "version_label"
+      ]
+    }
+  ]
+}
