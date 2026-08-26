@@ -1,19 +1,14 @@
 # Merged safety-rule catalogue — prostate
 
-**Status**: **7 of 9** position-bearing prostate documents extracted. Every rule is
+**Status**: **9 of 9** position-bearing prostate documents extracted. Every rule is
 `clinician_validation_status: pending`.
 
 **Extracted**: `eau.prostate.2026`, `nccn.prostate.6.2026`, `esmo.prostate-local.2020`,
 `esmo.prostate-advanced.2020`, `aua.prostate-localized.2026`, `aua.prostate-advanced.2026`,
-`afu.prostate.2024-2026`.
-
-**Not yet extracted**: `aua.prostate-early-detection.2026` (30 rule-bearing passages) and
-`aua.prostate-salvage.2024` (24). Both are narrower in scope than the seven above — screening
-and post-treatment salvage — and neither covers a decision any of the eight prostate dossiers
-currently face. **They are a known gap, not a completed pass.**
+`afu.prostate.2024-2026`, `aua.prostate-early-detection.2026`, `aua.prostate-salvage.2024`.
 
 **Method**: as for bladder — structural section selection, then filtered to passages stating a
-threshold, contraindication or prerequisite. **169 passages read.**
+threshold, contraindication or prerequisite. **223 passages read.**
 
 ---
 
@@ -27,12 +22,21 @@ threshold, contraindication or prerequisite. **169 passages read.**
 | **0.2 ng/mL** + a confirmatory value ≥ 0.2 | *defines* biochemical recurrence after RP | AUA advanced, terminology |
 | **> 0.2 ng/mL** | perform PSMA PET/CT if it will change management | EAU §6.4.4.d |
 | **> 0.4 ng/mL** | the threshold that *best predicts further metastases* after RP | EAU §7.3.5 |
+| **≤ 0.5 ng/mL** | the PSA at or below which **salvage radiotherapy should be given** — it is more effective at lower PSA | AUA salvage st. 1–2 |
+| **≥ 0.7 ng/mL** | a **high-risk feature** warranting ADT alongside salvage RT; RTOG 9601 found no overall-survival benefit from adding ADT below it | AUA salvage st. 13 |
 | **nadir + 2 ng/mL** | recurrence after IMRT/VMAT + IGRT | EAU §7.3.5 |
 
 These are not contradictory — they answer different questions — but a patient with a PSA of 0.15
 after prostatectomy is *restageable* by ESMO, *not yet recurrent* by AUA, and well below EAU's
 metastasis-predicting threshold. **An agent citing any one of them alone would give a confident
-and incomplete answer.** The rule carries all five.
+and incomplete answer.** The rule carries all seven.
+
+**The salvage guideline sharpens this into a timing problem.** Salvage radiotherapy should be
+given at **≤ 0.5**, and AUA defines recurrence itself at **0.2**. The window between the moment
+a recurrence can be called and the moment salvage becomes less effective is **0.3 ng/mL wide** —
+which is inside the ±15% intraindividual PSA variation EAU records at PT15. A system reporting
+these thresholds without that variation alongside would imply a precision the assay does not
+have.
 
 ### PD2. The PSA doubling time cut-point moves, including inside one guideline
 
@@ -40,10 +44,14 @@ and incomplete answer.** The rule carries all five.
 - **AUA statement 22**: high-risk nmCRPC warranting apalutamide/darolutamide/enzalutamide is
   *"PSADT ≤ 10 months"*
 - **EAU §6.7.15** and **ESMO**: nmCRPC high risk at *"PSA doubling time < 10 months"*
+- **AUA salvage statement 13**: a high-risk feature warranting ADT with salvage RT is
+  *"PSADT ≤ 6 months"*
 
-Nine months and ten months, in adjacent statements of the same document, for two different
-disease states. Defensible, and exactly the kind of thing that is misread when quoted without
-its state.
+**Three AUA cut-points — six, nine and ten months — across three documents, for three disease
+states.** Each is defensible in its own context and none is wrong. But "high-risk doubling time"
+is a phrase a clinician or an agent will carry between contexts, and it means something different
+in each. The rule stores the state alongside every value; a citation that drops the state is
+unsafe.
 
 ### PD3. ADT duration alongside radiotherapy for high-risk disease
 
@@ -76,13 +84,13 @@ that value to come from the dossier, never from a name or an assumption.
 | PT3 | Cognitive screening trigger | **mini-COG ≤ 3/5 → refer for full cognitive assessment**; may need capacity evaluation | EAU §6.1.3.c |
 | PT4 | Malnutrition by weight loss over 3 months | < 5% good; **5–10% at risk; > 10% severe** | EAU §6.1.3.b |
 | PT5 | Castration-resistance definition | **confirm testosterone < 50 ng/dL before diagnosing CRPC** | EAU §6.7.13 |
-| PT6 | High-risk PSA doubling time | ≤ 9 months (BCR) / ≤ 10 months (nmCRPC) — see **PD2** | AUA st. 8, st. 22; EAU §6.7.15; ESMO |
-| PT7 | PSA thresholds for recurrence and restaging | 0.1 / 0.2 / 0.4 / nadir + 2 — see **PD1** | ESMO, AUA, EAU |
+| PT6 | High-risk PSA doubling time | **≤ 6 months** (salvage RT) / ≤ 9 months (BCR) / ≤ 10 months (nmCRPC) — see **PD2** | AUA st. 8, st. 22; **AUA salvage st. 13**; EAU §6.7.15; ESMO |
+| PT7 | PSA thresholds for recurrence and restaging | 0.1 / 0.2 / 0.4 / **0.5** / **0.7** / nadir + 2 — see **PD1** | ESMO, AUA advanced, **AUA salvage st. 1–2, st. 13**, EAU |
 | PT8 | Active surveillance in ISUP GG2 | < 10% pattern 4, PSA < 10 ng/mL, ≤ cT2a, low disease extent on imaging | EAU §6.3.2.f; ESMO |
 | PT9 | Low-risk definition | cT1–cT2a, Grade Group 1, PSA < 10 ng/mL | NCCN; EAU; AUA |
 | PT10 | High-volume mHSPC | **≥ 4 bone metastases with at least one outside the axial skeleton** | AUA st. 11 |
 | PT11 | ADT duration with radiotherapy, high risk | 18–36 months (AUA) against 3 years + 2 years abiraterone (ESMO) — see **PD3** | AUA st. 41; ESMO |
-| PT12 | PSA screening start age | 50 general; 45 with family history (EAU); **40–45 for African or Afro-Caribbean ancestry** (AFU) — see **PD4** | EAU §5.2.8; AFU |
+| PT12 | PSA screening start age and interval | 50 general; 45 with family history (EAU); **40–45 for African or Afro-Caribbean ancestry** (AFU); **every 2–4 years for ages 50–69** (AUA, Strong Grade A) — see **PD4** | EAU §5.2.8; AFU; **AUA early-detection st. 6** |
 | PT13 | Life expectancy for individualised early detection | ≥ 15 years | EAU §5.2.8 |
 | PT14 | Equivocal PSA range | 3–10 ng/mL → repeat PSA and use PSA density in risk stratification | EAU §5.4.1.b |
 | PT15 | PSA measurement error | ± 15% intraindividual variation; ~5% between laboratories | EAU §5.2.2 |
@@ -91,6 +99,12 @@ that value to come from the dossier, never from a name or an assumption.
 | PT18 | Alcohol limit on ADT | ≤ 2 units daily; yearly diabetes and cholesterol screening | EAU §8.3.2.e |
 | PT19 | Gait speed as a life-expectancy predictor | at 75, ten-year survival 19% at < 0.4 m/s against 87% at high speed | EAU §6.1.2 |
 | PT20 | Family-history referral trigger for genetics | first-degree relative or multiple second-degree relatives with Grade Group ≥ 2, particularly **< 60 years**, particularly if metastatic or lethal | AUA localized; AFU |
+| PT21 | Supplementary DRE trigger during screening | **PSA ≥ 2 ng/mL** — strongly consider DRE to establish risk of clinically significant cancer | AUA early-detection st. 8 |
+| PT22 | What counts as an elevated screening PSA | the definition has changed — **4 ng/mL** from early studies, **3 ng/mL** from the Finnish ERSPC arm. AUA records both rather than fixing one | AUA early-detection §PSA screening |
+| PT23 | Range where adjunctive biomarkers are used | mildly elevated PSA, typically **2.5–10 ng/mL** | AUA early-detection |
+| PT24 | Negative MRI does not exclude cancer | negative predictive value of PI-RADS 1–2 for GG2+ is **91%** — about **1 in 10** still has GG2+ on biopsy | AUA early-detection |
+| PT25 | Atypical findings on biopsy that mandate repeat | **ASAP** carries a 30–50% cancer detection rate on repeat biopsy (10–20% of those GG2+); **AIP** lacks definitive criteria for intraductal carcinoma | AUA early-detection st. 28–29 |
+| PT26 | Salvage radiotherapy timing | give salvage RT at **PSA ≤ 0.5 ng/mL**; it is more effective at lower PSA — see **PD1** | AUA salvage st. 1–2 |
 
 ## B. Contraindications (prostate)
 
@@ -104,6 +118,9 @@ that value to come from the dossier, never from a name or an assumption.
 | PC6 | Abiraterone not recommended for nmCRPC — other options exist and there is no approved indication | AUA |
 | PC7 | Ablative techniques limited to trial enrolment, or informed intermediate-risk patients declining standard therapy | AUA localized |
 | PC8 | Gleason score reporting not recommended for mCSPC on biopsy of previously irradiated tissue or pure neuroendocrine carcinoma | ESMO advanced |
+| PC9 | **Do not use DRE as the sole screening method** in otherwise asymptomatic patients; there is insufficient evidence to add DRE to PSA-based screening. Does not apply to symptomatic patients, where DRE is diagnostic | AUA early-detection st. 8 |
+| PC10 | **Do not discontinue screening on the basis of a negative biopsy alone** | AUA early-detection st. 20 |
+| PC11 | **Do not add docetaxel** to salvage radiotherapy with ADT; abiraterone is likewise not recommended in the salvage setting — the STAMPEDE population had a median PSA of 34–40 ng/mL and salvage-setting data are not mature | AUA salvage st. 21 |
 
 ## C. Prerequisites (prostate)
 
@@ -111,11 +128,11 @@ that value to come from the dossier, never from a name or an assumption.
 |---|---|---|
 | PP1 | **Clinical stage must be based on digital rectal examination only**; imaging and pathology reported separately | EAU §4.5 |
 | PP2 | Risk-stratify using clinical T stage, PSA, Grade Group and biopsy tumour volume | AUA st. 1; EAU; NCCN; ESMO |
-| PP3 | **Report presence of intraductal and cribriform carcinoma**; ESMO treats both as Gleason pattern 4 and aggressive | EAU §5.3.2.b; ESMO advanced |
+| PP3 | **Report presence of intraductal and cribriform carcinoma**; ESMO treats both as Gleason pattern 4 and aggressive; AIP is the lesion class that falls short of intraductal criteria and mandates repeat biopsy | EAU §5.3.2.b; ESMO advanced; **AUA early-detection st. 29** |
 | PP4 | Screen health status with G8, mini-COG and the Clinical Frailty Scale | EAU §6.1.5 |
 | PP5 | Full specialist geriatric evaluation where G8 ≤ 14; base decisions on life expectancy, health status and comorbidity rather than age | EAU §6.1.5, §6.1.4 |
 | PP6 | Transperineal biopsy as first choice, with perineal cleansing and antibiotic prophylaxis, to reduce infectious complications | EAU §5.6.4 |
-| PP7 | Adhere to PI-RADS for acquisition and interpretation; evaluate MRI in multidisciplinary meetings with pathological feedback | EAU §5.5.8 |
+| PP7 | Adhere to PI-RADS for acquisition and interpretation; radiologists should use PI-RADS in reporting mpMRI; evaluate MRI in multidisciplinary meetings with pathological feedback | EAU §5.5.8; **AUA early-detection st. 14** |
 | PP8 | Discuss every hormone-sensitive metastatic patient in a multidisciplinary team | EAU §6.6.8 |
 | PP9 | **Germline testing for all advanced prostate cancer; somatic tumour testing for metastatic disease** — BRCA1, BRCA2, CDK12, PALB2 at minimum, ideally before first mCRPC treatment | AUA advanced st. 4; ESMO §biomarkers; NCCN |
 | PP10 | Early identification of hereditary disease — urologist screens, oncogenetics consultation confirms | AFU; AUA |
@@ -132,6 +149,13 @@ that value to come from the dossier, never from a name or an assumption.
 | PP21 | Inform patients that all treatments carry risk; weigh urinary, sexual and bowel effects against cancer risk, life expectancy and comorbidity | AUA st. 9 |
 | PP22 | Provide an individualised risk estimate of post-treatment recurrence | AUA st. 10 |
 | PP23 | Base treatment choice in mCRPC on performance status, symptoms, comorbidities, disease location and extent, genomic profile, patient preference and prior therapy | EAU §6.7.14 |
+| PP24 | Shared decision-making before screening; PSA is the **first** screening test | AUA early-detection st. 1–2 |
+| PP25 | **Repeat the PSA before acting on a newly elevated value** | AUA early-detection st. 3 |
+| PP26 | Before biopsy, inform the patient that a detected cancer may be safe to monitor with active surveillance rather than treat | AUA early-detection st. 12 |
+| PP27 | Where MRI shows a suspicious lesion in a biopsy-naive patient, perform **targeted *and* systematic** biopsies — combined detection of GG2+ was 87% against 69% targeted and 80% systematic alone | AUA early-detection st. 15 |
+| PP28 | After BCR following primary radiotherapy or ablation, **perform a prostate biopsy** to confirm local recurrence before local salvage therapy | AUA salvage st. 23 |
+| PP29 | Where salvage local therapy follows **focal** ablation, offer **whole-gland** treatment by prostatectomy or radiotherapy | AUA salvage st. 25 |
+| PP30 | Inform the patient that salvage radiotherapy risks urinary, erectile and bowel function, weighed against recurrence risk, life expectancy, comorbidity and preference | AUA salvage st. 4 |
 
 ---
 
@@ -191,14 +215,42 @@ pathway depends on.
 
 | | |
 |---|---|
-| documents extracted | 7 of 9 prostate position-bearing |
-| passages read | 169 |
-| numeric thresholds | 20 |
-| contraindications | 8 |
-| prerequisites | 23 |
-| **total merged rules** | **51** |
-| divergences preserved | 4 (PD1–PD4) |
+| documents extracted | **9 of 9** prostate position-bearing |
+| passages read | 223 |
+| numeric thresholds | 26 |
+| contraindications | 11 |
+| prerequisites | 30 |
+| **total merged rules** | **67** |
+| divergences preserved | 4 (PD1–PD4), two of them extended by the final two documents |
 
-**Corpus totals so far: 108 distinct rules** — 57 bladder, 51 prostate — from 16 of 18
-position-bearing documents and 333 passages read. The projection of 120–140 holds; completing
-the two AUA documents should land it near the low end.
+The last two documents added **16 new rules** and **6 new citations to rules already in the
+catalogue** — a merge rate of about 27%, higher than the bladder half's, because screening and
+salvage are topics the other seven documents largely do not cover.
+
+**Corpus total: 124 distinct rules** — 57 bladder, 67 prostate — from **18 of 18**
+position-bearing documents and **487 passages read**. That lands inside the 120–140 projection.
+
+### What the last two documents changed
+
+Neither covers a decision the 15 current dossiers face, and **no rule from either fires on any
+existing dossier** — as expected. Their value was in extending two divergences that already
+existed:
+
+- **PD1 gained two thresholds** (0.5 and 0.7 ng/mL), taking the count of PSA values that mean
+  something different to **seven**. It also produced the sharpest single observation in the
+  prostate set: the window between calling a recurrence (0.2) and losing salvage effectiveness
+  (0.5) is **0.3 ng/mL**, narrower than the ±15% assay variation EAU records at PT15.
+- **PD2 gained a third AUA cut-point** — 6 months for salvage, against 9 for biochemical
+  recurrence and 10 for nmCRPC. Three numbers, three documents, one guideline body, one phrase:
+  *"high-risk PSA doubling time"*.
+
+Both are arguments for storing the disease state alongside every threshold. A citation that
+carries the number without the state is not merely incomplete — it is wrong in a way that reads
+as authoritative.
+
+## Still to do
+
+- Clinical review of all 124 rules, with the nine divergences flagged for decision
+- A pass over rule **pairs**, not rules — the bladder annotation found two rules that interact
+  with neither naming the other
+- Populate `genetics_molecular`, or accept that PP9 fires with nothing to cite
