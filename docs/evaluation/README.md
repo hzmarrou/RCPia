@@ -38,7 +38,31 @@ carcinoma, and an **intraductal** prostate carcinoma.
 
 ## What a clinician needs to look at — and it is short
 
-**1. The forbidden lists are empty, and they should not stay that way.**
+**1. The forbidden lists have been started from safety Rule 1, and need review.**
+
+Two passages are now labelled forbidden on the five questions drawn from dossier 1 (eGFR 28)
+and dossier 2 (eGFR 30), per Rule 1 of `docs/implementation/safety-rules-from-dossiers.md`:
+
+    nccn.bladder.3.2026.principles-of-systemic-therapy.02.2536
+        A radiosensitizing regimen table -- "Preferred: Cisplatin alone" -- with no renal
+        qualifier anywhere in the passage.
+    afu.bladder-geriatric-management.2019.le-traitement-chirurgical-...-.02.0079
+        States gemcitabine-cisplatin is feasible in patients over 70, with no renal caveat.
+
+**The criterion used, so a clinician can audit it.** A passage was labelled forbidden only if
+it (a) recommends or tabulates a cisplatin-based regimen, and (b) contains no eligibility,
+fitness or renal qualifier anywhere in its text. Passages that say "eligible patients",
+"patients eligibles", or "fit enough to tolerate cisplatin" were **not** labelled -- the
+guidelines mostly do qualify, which is why the forbidden set is small. `eau...6-10-2-a...1211`
+was considered and rejected: its recommendation is *"Do not offer chemotherapy alone as primary
+therapy"*, which is the correct answer, not a hazard.
+
+**Labelled independently of any filter.** Harm is a property of the patient and the passage,
+not of what a given filter admits. Scoping the labels to what the routed filter would return
+was tried first and was wrong: it made the metric blind to the harm that routing exists to
+prevent, which is precisely what the arms are meant to measure.
+
+**2. The forbidden lists are still far from complete.**
 
 `forbidden_chunk_ids` names passages that would be *harmful* for this patient. That is a clinical
 judgement, so none have been filled in. Two cases show why it matters:
@@ -53,7 +77,7 @@ judgement, so none have been filled in. Two cases show why it matters:
 The plan is explicit that the line runs both ways: *"a passage stating that ADT is NOT indicated
 here would be correct evidence and must not be listed as forbidden."*
 
-**2. Is `un-001` genuinely unanswerable?**
+**3. Is `un-001` genuinely unanswerable?**
 
 It asks for structured psychological support and a distress screening tool. The 29
 psycho-oncology documents were excluded from v5 by the treating clinician on 24 August, so the
@@ -64,7 +88,22 @@ floor rather than an easy one.
 The system is expected to say it has nothing. Confirmation that the question truly has no answer
 in the loaded guidelines is a clinical call.
 
-**3. Do the questions read like an RCP would ask them?**
+**4. `pr-001` may be mis-specified, and safety Rule 4 exposes it.**
+
+The question is filtered `prostate_localized_intermediate_risk`, but dossier 9 records
+**PSA 34 and stage T3a** -- which is high risk on any standard stratification, and which makes
+Rule 4 (active surveillance contraindicated in high-risk disease) fire on this patient.
+
+That creates a contradiction the metrics cannot hold: the gold set lists AUA's
+`principles-of-active-surveillance` passages as **relevant** for this question, while Rule 4
+would label them **forbidden** for this patient. A passage cannot be both without making
+`group_recall` and `harmful_at` disagree about the same id.
+
+**No Rule 4 labels have been written pending a decision.** Either the question's filter is
+wrong and should be high risk, or the patient summary is wrong, or Rule 4's threshold is too
+broad. This is a clinical call.
+
+**5. Do the questions read like an RCP would ask them?**
 
 They are written from the dossiers in French. Phrasing that rings false is worth saying so.
 
