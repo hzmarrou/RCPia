@@ -87,14 +87,57 @@ Each rule has: a condition (patient state), a passage pattern (what text matters
 Rules 1–6 are derived from stated guideline thresholds. Rules U1–U3 are in the unsourced
 list below.
 
-#### Rule 1: Cisplatin contraindicated by renal function
+#### Rule 1a: Cisplatin contraindicated, carboplatin available
 
-- **Condition**: `cancer_type = bladder AND disease_setting = bladder_mibc_non_metastatic AND eGFR < 60`
+- **Condition**: `cancer_type = bladder AND 30 <= eGFR <= 60 AND performance_status <= 2`
 - **Passage pattern**: text recommends cisplatin-based chemotherapy AND does not address renal eligibility
-- **Action**: **flag** (default for v1; may be promoted to exclude after measurement)
-- **Reason**: "Cisplatin-based chemotherapy is contraindicated when eGFR < 60 mL/min. Patient eGFR: {value}. Consider carboplatin-based or non-cisplatin alternatives."
-- **Source**: EAU MIBC 2026, NCCN bladder 3.2026 — verify exact threshold in source text
-- **Test dossiers**: 1 (GFR 28 — must fire), 2 (GFR 30 — must fire), 13 (GFR 85 — must NOT fire)
+- **Action**: **flag**
+- **Reason**: "Cisplatin-based chemotherapy is contraindicated when eGFR is 60 mL/min or below. Patient eGFR: {value}. Carboplatin-based or split-dose cisplatin regimens are alternatives."
+- **Source**: EAU MIBC 2026 §9.3 — *"At least one of the following criteria must be present: PS > 1; **GFR <= 60mL/min.**; grade >= 2 audiometric hearing loss; grade >= 2 peripheral neuropathy or NYHA class III"* (`eau.bladder-mibc.2026.9-3-first-line-systemic-therapy-for-metastatic-disease-patie.01.1229`). Carboplatin band from EORTC eligibility, §9.4.2.b (`…9-4-2-b-patients-fit-for-carboplatin-but-unfit-for-cisplatin.01.1234`).
+- **Test dossiers**: 2 (GFR 30 — must fire), 15 (GFR 65 — must NOT fire), 13 (GFR 85 — must NOT fire)
+
+#### Rule 1b: Unfit for any platinum-based chemotherapy
+
+- **Condition**: `cancer_type = bladder AND (eGFR < 30 OR performance_status > 2)`
+- **Passage pattern**: text recommends **any** platinum-based chemotherapy — cisplatin *or* carboplatin — AND does not address renal eligibility
+- **Action**: **flag**
+- **Reason**: "Patient is unfit for any platinum-based chemotherapy (eGFR {value}, PS {value}). Consider non-platinum alternatives — pembrolizumab, enfortumab vedotin, radiotherapy alone, or best supportive care per geriatric assessment."
+- **Source**: EAU MIBC 2026 §9.5 — *"severely impaired PS (PS > 2) and/or severely impaired renal function (**GFR < 30mL/min.**) or inadequate organ function"* (`eau.bladder-mibc.2026.9-5-first-line-therapy-in-patients-not-eligible-for-combinat.01.1235`)
+- **Test dossiers**: 1 (GFR 28 — must fire), 2 (GFR 30 — must NOT fire, falls in the carboplatin band)
+
+**Why the split matters, and it is the most consequential correction so far.** The single Rule 1
+said *"cisplatin contraindicated, consider carboplatin"*. For dossier 1, at eGFR 28, carboplatin
+is contraindicated too — so the rule as written would have given **actively wrong advice** to a
+real patient, in the direction of offering a therapy he cannot receive. A rule that fires
+correctly and then recommends the wrong alternative is worse than no rule.
+
+**A threshold discrepancy, resolved toward the guideline.** The instruction that produced this
+split specified Rule 1b as `eGFR <= 30`, while also stating that dossier 2 (eGFR exactly 30)
+should trigger 1a. Those two cannot both hold — 30 satisfies `<= 30`. EAU's own text says
+**`GFR < 30mL/min.`**, which resolves it in favour of the stated dossier assignment and leaves
+the bands gapless:
+
+    unfit for any platinum   GFR < 30
+    carboplatin only         30 <= GFR <= 60
+    fit for cisplatin        GFR > 60
+
+`< 30` is what is implemented, on the same principle that caught the first error: do not soften
+or harden the threshold.
+
+#### Rule 1c: Confirm a borderline GFR before deciding platinum eligibility
+
+- **Condition**: `cancer_type = bladder AND 30 <= eGFR <= 60`
+- **Passage pattern**: fires on the **patient**, not on a passage — an annotation added whenever a platinum decision is in scope
+- **Action**: **flag**
+- **Reason**: "Patient eGFR is {value}, close to the platinum eligibility boundary. NCCN recommends timed urine collection to confirm GFR before deciding cisplatin eligibility, as an estimate may be inaccurate at this range."
+- **Source**: NCCN bladder 3.2026 — *"For patients with borderline GFR, consider timed urine collection, which may more accurately determine eligibility for Cisplatin"* (`nccn.bladder.3.2026.2026.adjuvant-treatment.01.2468`), and *"Estimate glomerular filtration rate (GFR) to assess eligibility for Cisplatin"* (`…2026.muscle-invasive-bladder-cancer.01.2467`)
+- **Test dossiers**: 2 (GFR 30, exactly on the 1a/1b boundary — must fire), 1 (GFR 28 — must NOT fire, already unambiguously unfit), 13 (GFR 85 — must NOT fire)
+
+**This rule exists because a real patient sits on the boundary.** Dossier 2's eGFR is exactly 30,
+the cut point between "carboplatin available" and "unfit for any platinum". The two rules give
+opposite advice, and NCCN says the measurement that decides between them is not reliable enough
+at that value. No rule in the original set expressed this, and it changes what the board is told
+about that patient.
 
 #### Rule 2: Nutritional status gates major surgery
 
@@ -280,12 +323,50 @@ Count what comes out.
 
 This determines whether the plan is affordable before committing to the full extraction.
 
-### Step 3: Extract the complete rule catalogue
+### Step 3: Extract the rescoped rule catalogue
 
-Once the scale is known, run the extraction prompt against all 37 guideline documents. Each
-rule cites the exact guideline passage and chunk_id. Cross-reference against the 15
-dossiers to annotate which rules fire on which patients. Separate sourced from unsourced
-rules as in Part 2 above.
+**Step 2 answered the sizing question and the answer forces a rescope.** EAU MIBC 2026 yielded
+**33 rules**, against a threshold of eight for "the catalogue is large". The full extraction is
+therefore run in a different shape than originally planned. Details and the counts are in
+`safety-rules-eau-mibc-extraction.md`.
+
+**Three changes to how the extraction runs.**
+
+**1. Seventeen documents, not thirty-seven.** Only the position-bearing sources — those whose
+`source_role` is `treatment_guideline` or `treatment_consensus` — state rules that gate on
+patient state. Classification standards (WHO-IARC, PI-RADS), measurement standards (RECIST) and
+most specialist guidance either state no such rule or restate the treatment guidelines.
+
+**2. Select by section, not by document.** All 33 EAU rules came from 41 of its 178 eligible
+passages, chosen structurally: sections whose path contains `recommendation`, plus the prose
+sections stating eligibility criteria and health-status assessment. Reading whole documents
+spends most of the effort on narrative evidence — trial results, epidemiology, technique
+description — which states no rule. The known cost is recorded: **a rule stated only in body
+prose outside a recommendation section will be missed**, and that is the main threat to
+completeness.
+
+**3. Merge across guidelines before clinical review, and preserve disagreement.** This is where
+the value is, and it was measured rather than assumed. EAU, AUA and NCCN do **not** restate the
+same cisplatin rule — they complement each other:
+
+| source | contributes |
+|---|---|
+| EAU | the threshold — *"GFR <= 60mL/min."* |
+| AUA | the criteria without a number — *"comorbidities and PS, including cardiac status and presence of peripheral neuropathy, hearing loss, and renal dysfunction"* |
+| NCCN | the procedure — estimate GFR, and confirm a borderline value by timed urine collection |
+
+**One rule carrying three citations is worth more than three rules that appear to disagree.**
+Where the guidelines genuinely differ, the difference is preserved in the rule rather than
+resolved — that divergence is what a board wants to see, and it is the same principle the
+reasoning appendix is built on.
+
+Expected output: **150–250 distinct rules**, each with every guideline that states it, annotated
+with which of the 15 dossiers trigger it, and split into sourced and unsourced as in Part 2.
+
+**Roughly 40% of any extraction gates on patient state** and can populate `forbidden_chunk_ids`.
+The remainder — process and quality rules such as minimum institutional volume, VTE prophylaxis
+and multidisciplinary review, plus testing prerequisites — is not waste. It is the material the
+safety reviewer needs to audit a *plan*, and it arrives free on the same pass.
 
 ### Step 4: Implement the engine
 
