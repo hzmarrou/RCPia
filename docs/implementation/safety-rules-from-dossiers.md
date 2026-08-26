@@ -87,14 +87,35 @@ Each rule has: a condition (patient state), a passage pattern (what text matters
 Rules 1–6 are derived from stated guideline thresholds. Rules U1–U3 are in the unsourced
 list below.
 
-#### Rule 1a: Cisplatin contraindicated, carboplatin available
+#### Rule 1a: Cisplatin contraindicated
 
-- **Condition**: `cancer_type = bladder AND 30 <= eGFR <= 60 AND performance_status <= 2`
+- **Condition**: `cancer_type = bladder AND 30 <= eGFR < 50` — **or** `50 <= eGFR <= 60 AND (performance_status >= 2 OR significant_comorbidity)`
 - **Passage pattern**: text recommends cisplatin-based chemotherapy AND does not address renal eligibility
 - **Action**: **flag**
-- **Reason**: "Cisplatin-based chemotherapy is contraindicated when eGFR is 60 mL/min or below. Patient eGFR: {value}. Carboplatin-based or split-dose cisplatin regimens are alternatives."
-- **Source**: EAU MIBC 2026 §9.3 — *"At least one of the following criteria must be present: PS > 1; **GFR <= 60mL/min.**; grade >= 2 audiometric hearing loss; grade >= 2 peripheral neuropathy or NYHA class III"* (`eau.bladder-mibc.2026.9-3-first-line-systemic-therapy-for-metastatic-disease-patie.01.1229`). Carboplatin band from EORTC eligibility, §9.4.2.b (`…9-4-2-b-patients-fit-for-carboplatin-but-unfit-for-cisplatin.01.1234`).
-- **Test dossiers**: 2 (GFR 30 — must fire), 15 (GFR 65 — must NOT fire), 13 (GFR 85 — must NOT fire)
+- **Reason**: "Cisplatin-based chemotherapy is contraindicated at this renal function. Patient eGFR: {value}, PS {value}. In metastatic disease, carboplatin-based regimens are an alternative. In non-metastatic MIBC, there is insufficient evidence for carboplatin as neoadjuvant therapy — consider trimodality therapy or cystectomy without NAC."
+- **Sources**: EAU MIBC 2026 §9.3 (`eau.bladder-mibc.2026.9-3-first-line-systemic-therapy-for-metastatic-disease-patie.01.1229`); AUA MIBC 2024 for the criteria (`aua.bladder-mibc.2024.neoadjuvant-adjuvant-chemotherapy.03.0434`); AFU TVIM (`afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108`)
+- **Test dossiers**: none of the 15 fall in 30–49 — dossier 2 at exactly 30 does (30 <= 30 < 50, **must fire**); 15 (GFR 65 — must NOT fire), 13 (GFR 85 — must NOT fire)
+
+**The carboplatin advice is conditional on setting, and that correction matters.** AUA states
+*"there is insufficient data to recommend non-cisplatin-based regimens as either NAC or adjuvant
+chemotherapy (AC) for MIBC"* (`…neoadjuvant-adjuvant-chemotherapy.04.0435`), while ESMO recommends
+carboplatin for cisplatin-unfit patients in its **advanced/metastatic** chapter. Both are true of
+different settings. The earlier single-sentence advice would have routed a non-metastatic MIBC
+patient toward a regimen with no evidence behind it.
+
+#### Rule 1a-contested: Cisplatin at eGFR 50–60 — the guidelines disagree
+
+- **Condition**: `cancer_type = bladder AND 50 <= eGFR <= 60 AND performance_status <= 1 AND no significant comorbidity`
+- **Passage pattern**: text recommends cisplatin-based chemotherapy
+- **Action**: **flag**, and surface **both** positions
+- **Reason**: "Patient eGFR is {value}, in the band where the guidelines disagree. EAU classifies eGFR ≤ 60 as unfit for cisplatin. ESMO states gemcitabine-cisplatin *may be considered* at a clearance of 50–60 in an otherwise fit patient with PS 0–1 and no comorbidity, and AFU sets its threshold at DFG ≥ 50–60. This is a genuine divergence between guidelines, not an error — the board should decide."
+- **Sources**: EAU §9.3 (`…01.1229`) against ESMO (`esmo.bladder.2022.advanced-or-metastatic-uc-in-patients-not-eligible-for-cispl…`) and AFU (`afu.bladder-tvim.2024-2026.chimiotherapie-neoadjuvante-a-base-de-cisplatine.01.0108`)
+- **Test dossiers**: none of the 15 currently fall in 50–60 — the nearest is dossier 15 at 65. **The rule is kept because it fires on patient 16**, and because a board told "cisplatin is contraindicated" at a clearance of 55 would be told something two of four guidelines contest.
+
+**Why this is a rule and not a resolution.** The divergence is preserved rather than settled by
+whoever wrote the rule. A clinician seeing *"EAU says unfit, ESMO and AFU say it may be
+considered"* can decide; a clinician seeing only *"contraindicated"* cannot, and would not know
+there was anything to decide.
 
 #### Rule 1b: Unfit for any platinum-based chemotherapy
 

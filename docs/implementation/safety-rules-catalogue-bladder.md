@@ -178,9 +178,114 @@ disagreements cluster where it matters most: drug eligibility thresholds.
 9 prostate documents hold 1,165 eligible passages, so a similar density suggests **60–80 more**,
 for a corpus total of **120–140 distinct rules** — inside the 150–250 estimate, at the low end.
 
+---
+
+## Dossier annotation — which rules fire on which of the 7 bladder patients
+
+| | age | eGFR | MNA | G8 | ADL | Hb | stage | histology | other |
+|---|---|---|---|---|---|---|---|---|---|
+| **D1** | 63 | **28** | 11.5 | — | 3 | 7.8 | pT4 | **epidermoid** | bilateral UHN, prostatic infiltration, Alb 30 |
+| **D2** | **85** | **30** | **7** | **5** | **4** | 11.6 | pT2 | urothelial HG | |
+| **D10** | 56 | — | — | — | — | — | pTa LG | urothelial LG | no labs |
+| **D11** | 64 | — | — | — | — | — | pT1 LG | urothelial LG | bilateral UHN, no labs |
+| **D13** | 79 | 85 | — | — | — | 16.2 | pT4 | urothelial HG | nodal + lung metastases |
+| **D14** | 79 | — | — | — | — | 12.2 | pT2 | urothelial HG | no GFR |
+| **D15** | 71 | 65 | 23.5 | — | 6 | 9.0 | pT1 min | urothelial LG | **18 prior resections** |
+
+### Rules firing on 3 or more patients — implement first
+
+| rule | fires on | note |
+|---|---|---|
+| BP4 history + EUA at TURBT; BP22 smoking cessation; BP23 coping support | all 7 | universal prerequisites |
+| BT7 nodal size criteria on CT | 1, 2, 13, 14, 15 | staging |
+| BT5 no RC delay beyond 3 months; BT6 institutional volume | 1, 2, 13, 14 | every cystectomy candidate |
+| BC5 no radiotherapy alone as curative; BC13 ASA score not to be used | 1, 2, 13, 14 | |
+| BT15 MIBC follow-up imaging — **divergent** | 1, 2, 13, 14 | AUA 6–12 monthly against ESMO 3–4 monthly |
+| BP1 Charlson before deciding; BP3 decide on stage and frailty, not age | 1, 2, 13, 14 | |
+| BC6/BC7 no chemotherapy or TURBT alone; BC10/BC11 no preoperative RT or bowel preparation | 1, 2, 14 | |
+| BP6–BP10, BP12, BP15 — MDT, consent, PLND, VTE prophylaxis, ERAS, sexual function, reassessment | 1, 2, 14 | the cystectomy bundle |
+| BC12 extended lymphadenectomy — **divergent** | 1, 2, 14 | EAU prohibits, AUA does not |
+| BP11 preoperative optimisation — nutrition and anaemia | **1, 2, 15** | see finding 2 |
+| BT14 first cystoscopy at 3–4 months; BC14 no biomarkers in place of cystoscopy; BP21 assign a risk category | 10, 11, 15 | the NMIBC bundle |
+| BC2/BC3 BCG contraindications — **divergent**; BC4 no instillation after perforation | 10, 11, 15 | |
+
+### Rules firing on 1 or 2 patients — implement, they hit real cases
+
+| rule | fires on | why it matters here |
+|---|---|---|
+| **BT2 unfit for any platinum** | **1** | eGFR 28 — the rule behind the Step 1 forbidden labels |
+| **BT1 cisplatin ineligible** | **2** | eGFR 30, in the 30–49 band where all four guidelines agree |
+| BT11/BT12 adjuvant chemotherapy and radiotherapy populations | 1, 13 | both pT4 |
+| BT4 PD-L1 CPS ≥ 10; BP20 FGFR3 and HER2 testing; BC15 enfortumab contraindications | 1, 13 | the advanced and metastatic pathway |
+| **BT17 neobladder rarely performed after 80** | **2** | patient is 85 |
+| **BC1 no neobladder with invasive urethral or prostatic tumour** | **1** | prostatic infiltration recorded |
+| **BP2 frailty and cognitive screening, CGA** | **2** | G8 of 5, ADL 4 |
+| **BP13 frozen section of ureteral margins** | **1, 11** | both have bilateral hydronephrosis |
+| **BP16 repeat TURBT when detrusor muscle is absent** | **11, 15** | the defect behind gold-set question `bl-001` |
+| **BT18 BCG-unresponsive definition; BP17 prostatic urethral biopsy** | **15** | 18 prior resections |
+| **BP18/BP19 expert pathology review; variant histology diverges** | **1** | epidermoid — see finding 3 |
+| BT8 immediate instillation within 24 h; BC9 no cystectomy before bladder-sparing fails | 10 | pTa low grade |
+| BT13 radical cystectomy indication T2–T4a N0 M0 | 2, 14 | |
+| BT16 post-cystectomy renal follow-up; BT9 trimodality 55 Gy in 20 fractions | 1, 2, 14 | |
+
+### Rules firing on nobody — kept deliberately
+
+| rule | why kept |
+|---|---|
+| **Rule 1a-contested (eGFR 50–60)** | No dossier falls in the band; the nearest is D15 at 65. Kept because it fires on patient 16, and because a board told "contraindicated" at a clearance of 55 would not know that two of four guidelines contest it. |
+| BT10 preoperative radiotherapy dose | EAU recommends against preoperative RT; the dose applies only where it is given anyway |
+| BT3 enfortumab plus pembrolizumab eligibility | applies to D13, but as an inclusion criterion rather than a hazard |
+
+---
+
+## Four findings from the annotation
+
+### 1. Three of seven bladder patients cannot be assessed for the most important rule
+
+**D10, D11 and D14 record no eGFR at all.** BT1 and BT2 — cisplatin and platinum eligibility, the
+rules gating the most consequential decision in bladder care — cannot be evaluated for them.
+D14 is a **pT2 urothelial high grade at 79**, a cystectomy-and-neoadjuvant candidate, with no
+renal function recorded anywhere in the dossier.
+
+This is *"absent measurements are not zero"* biting harder than expected. The system must not
+conclude these patients are eligible; it must say the measurement is missing and that its absence
+prevents a safety check that would otherwise run. **This is a finding about the intake form, not
+about the rules.**
+
+### 2. Nutrition and anaemia optimisation fires on three of seven
+
+BP11 — preoperative optimisation including nutritional preparation and treatment of anaemia —
+fires on **D1 (MNA 11.5, Hb 7.8, albumin 30), D2 (MNA 7) and D15 (Hb 9.0)**. That is 43% of the
+bladder cohort, from a guideline table — AFU's RAAC perioperative protocol — that no rule in the
+original set referenced at all.
+
+It also lands on the known practice error: dossier 1's human fiche prescribed **intravenous
+albumin as nutritional support**. The rule that should have fired sits in AFU's own protocol.
+
+### 3. The variant-histology rules fire on the patient the corpus answers worst
+
+BP18 and BP19 fire on **D1 — epidermoid, a squamous variant**. Gold-set question `bl-007` asks
+precisely this, and its own note already records that the corpus is *"écrit autour du carcinome
+urothélial"* and that a thin answer would be a real corpus gap rather than a retrieval failure.
+
+So the rules say *"this histology requires divergence from standard urothelial management"* while
+the corpus has little to say about what that divergence should be. **The rule fires and the
+evidence needed to act on it is missing** — worth knowing before an agent is asked to reason
+about that patient.
+
+### 4. A rule interaction that neither rule names
+
+BP5 requires complete staging with intravenous contrast **"if not contraindicated"** (AUA
+statement 2). D1 has an eGFR of 28, where iodinated contrast carries a nephrotoxicity risk.
+
+**Two rules in the catalogue interact and neither mentions the other.** The staging prerequisite
+assumes contrast is available; the renal rules govern chemotherapy and say nothing about imaging.
+A patient can satisfy both rules individually and still be given conflicting advice. This is a
+class of problem the catalogue cannot see rule-by-rule, and it will need a pass over rule
+**pairs** rather than rules.
+
+
 ## Still to do
 
 - Extract the 9 prostate position-bearing documents
-- Annotate each rule with which of the 15 dossiers trigger it
-- Apply the D1 and D2 corrections to Rules 1a and 1b
 - Clinical review of all 57, with the five divergences flagged for a decision
