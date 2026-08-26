@@ -46,6 +46,9 @@ from rcpia.evidence.models import (
     EvidenceDocument,
 )
 from rcpia.evidence.rerank import Reranker
+from rcpia.safety_rules.catalogue import Ledger
+from rcpia.safety_rules.engine import Passage as SafetyPassage
+from rcpia.safety_rules.engine import SafetyAnnotation, SafetyEngine, SafetyReport
 
 # Both legs offer this many candidates to the fusion. Wide enough that a passage ranked
 # poorly by one leg can still be rescued by the other, narrow enough to stay one query.
@@ -348,10 +351,26 @@ class RetrievedChunk:
     # which is the fusion's, because the two are not comparable and the reader should be able
     # to see which one ordered the list.
     relevance: float | None = None
+    # What the safety rules said about this passage for this patient. Empty when no engine
+    # ran, which is the default -- retrieval without a ledger cannot judge patient safety.
+    safety_concerns: tuple[SafetyAnnotation, ...] = ()
 
     @property
     def found_by_both(self) -> bool:
         return self.keyword_rank is not None and self.dense_rank is not None
+
+
+@dataclass(frozen=True)
+class SafetyContext:
+    """What retrieval needs to run the safety rules: an engine and a patient.
+
+    Optional everywhere. Retrieval without a ledger cannot judge whether a passage is safe for
+    a patient it knows nothing about, so the default is to run no rules rather than to run them
+    against an empty ledger and report that nothing fired.
+    """
+
+    engine: SafetyEngine
+    ledger: Ledger
 
 
 # The routing dimensions, each with the clause that tests it. Named so a refusal can say
@@ -542,6 +561,8 @@ class RetrievalReport:
     chunks: list[RetrievedChunk] = field(default_factory=list)
     # Empty unless `trace=True`. Every attempt, in order, strict first.
     attempts: list[AttemptTrace] = field(default_factory=list)
+    # What the safety rules found, or None when no engine was supplied.
+    safety: SafetyReport | None = None
 
 
 def reciprocal_rank_fusion(rankings: list[list[str]], k: int = RRF_K) -> list[tuple[str, float]]:
@@ -572,6 +593,7 @@ def _to_chunk(
     relevance: float | None,
     keyword_rank: int | None,
     dense_rank: int | None,
+    safety_concerns: tuple[SafetyAnnotation, ...] = (),
 ) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=row.chunk_id,
@@ -593,6 +615,7 @@ def _to_chunk(
         keyword_rank=keyword_rank,
         dense_rank=dense_rank,
         relevance=relevance,
+        safety_concerns=safety_concerns,
     )
 
 
@@ -711,6 +734,7 @@ async def _search(
     reranker: Reranker | None,
     floor: float,
     trace: bool,
+    safety: "SafetyContext | None" = None,
 ) -> RetrievalReport:
     """Retrieve the passages an agent may see for one clinical question.
 
@@ -768,6 +792,22 @@ async def _search(
 
             fused = reciprocal_rank_fusion([list(keyword_order), list(dense_order)])
 
+            # **Between fusion and reranking**, per the safety-rules build plan. The engine
+            # sees every fused candidate rather than only the head, so a hazard ranked 40th is
+            # still annotated -- and in v1 nothing is removed, because every rule's action is
+            # FLAG. `excluded` is therefore empty and this filter is a no-op that exists so the
+            # path is tested rather than written later under pressure.
+            if safety is not None:
+                report.safety = safety.engine.apply(
+                    safety.ledger,
+                    [
+                        SafetyPassage(chunk_id=chunk_id, text=by_id[chunk_id].text)
+                        for chunk_id, _ in fused
+                    ],
+                )
+                if report.safety.excluded:
+                    fused = [(c, s) for c, s in fused if c not in report.safety.excluded]
+
             if attempt is not None:
                 attempt.keyword_ids = list(keyword_order)
                 attempt.dense_ids = list(dense_order)
@@ -786,6 +826,9 @@ async def _search(
                         relevance=None,
                         keyword_rank=keyword_order.get(chunk_id),
                         dense_rank=dense_order.get(chunk_id),
+                        safety_concerns=(
+                            report.safety.for_chunk(chunk_id) if report.safety else ()
+                        ),
                     )
                     for chunk_id, score in fused[:limit]
                 ]
@@ -847,6 +890,9 @@ async def _search(
                         relevance=relevance,
                         keyword_rank=keyword_order.get(chunk_id),
                         dense_rank=dense_order.get(chunk_id),
+                        safety_concerns=(
+                            report.safety.for_chunk(chunk_id) if report.safety else ()
+                        ),
                     )
                     for chunk_id, score, relevance in kept[:limit]
                 ]
@@ -896,6 +942,7 @@ async def search(
     limit: int = 10,
     floor: float = RELEVANCE_FLOOR,
     trace: bool = False,
+    safety: "SafetyContext | None" = None,
 ) -> RetrievalReport:
     """Retrieve the passages an agent may see for one clinical question.
 
@@ -920,6 +967,7 @@ async def search(
         reranker=reranker,
         floor=floor,
         trace=trace,
+        safety=safety,
     )
 
 
@@ -933,6 +981,7 @@ async def search_without_reranking(
     filter: Filter,
     limit: int = 10,
     trace: bool = False,
+    safety: "SafetyContext | None" = None,
 ) -> RetrievalReport:
     """Filter, search and fuse, with no cross-encoder and no relevance floor.
 
@@ -955,4 +1004,5 @@ async def search_without_reranking(
         reranker=None,
         floor=RELEVANCE_FLOOR,
         trace=trace,
+        safety=safety,
     )

@@ -37,6 +37,7 @@ from rcpia.evaluation.goldset import (
     load_goldset,
     verify_against_corpus,
 )
+from rcpia.evaluation.ledgers import ledger_for
 from rcpia.evaluation.metrics import ArmScore, QuestionScore, aggregate, score_question
 from rcpia.evidence.embedding import Embedder, build_embedder
 from rcpia.evidence.models import EvidenceChunk
@@ -44,10 +45,12 @@ from rcpia.evidence.rerank import Reranker, build_reranker
 from rcpia.evidence.retrieval import (
     Concepts,
     RetrievalReport,
+    SafetyContext,
     filter_admits,
     search,
     search_without_reranking,
 )
+from rcpia.safety_rules.engine import SafetyEngine
 
 if sys.platform == "win32":
     # psycopg's async driver cannot run on Windows' default ProactorEventLoop.
@@ -64,7 +67,12 @@ STAGE_FILTER = "filter"
 STAGE_CANDIDATES = "candidate set"
 STAGE_FLOOR = "relevance floor"
 STAGE_RANK = "ranking"
-STAGES = (STAGE_STALE, STAGE_FILTER, STAGE_CANDIDATES, STAGE_FLOOR, STAGE_RANK)
+# A passage a safety rule removed. Placed before the floor because the engine runs between
+# fusion and reranking. Always zero in v1 -- every rule's action is FLAG and nothing is
+# removed -- and wired anyway, so that enabling an exclusion cannot silently be blamed on the
+# ranking.
+STAGE_SAFETY = "safety rule"
+STAGES = (STAGE_STALE, STAGE_FILTER, STAGE_CANDIDATES, STAGE_SAFETY, STAGE_FLOOR, STAGE_RANK)
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,12 @@ class QuestionRun:
     keyword_hits: int = 0
     dense_hits: int = 0
     below_floor: int = 0
+    # The engine's effect, reported *alongside* harm@1 and never instead of it. The rules
+    # produce the forbidden labels harm@1 is scored against; if the same rules also removed
+    # those passages, the metric would read zero by construction.
+    safety_flagged: int = 0
+    safety_excluded: int = 0
+    safety_unevaluated: tuple[str, ...] = ()
 
     @property
     def unmet_groups(self) -> int:
@@ -102,6 +116,15 @@ class ArmRun:
     arm: Arm
     runs: tuple[QuestionRun, ...]
     score: ArmScore
+
+    @property
+    def safety_effect(self) -> dict[str, int]:
+        """What the engine did, reported beside harm@1 rather than folded into it."""
+        return {
+            "flagged": sum(r.safety_flagged for r in self.runs),
+            "excluded": sum(r.safety_excluded for r in self.runs),
+            "unevaluated": sum(len(r.safety_unevaluated) for r in self.runs),
+        }
 
     @property
     def losses_by_stage(self) -> dict[str, int]:
@@ -158,6 +181,7 @@ async def _attribute(
     # ran -- so an unreranked arm would have attributed every one of its misses to the legs,
     # including the ones the legs found and the ranking then dropped.
     candidates = set(attempt.fused_ids) if attempt else set()
+    removed_by_rule = report.safety.excluded if report.safety else frozenset()
     scored = dict(attempt.relevances) if attempt else {}
     above = set(attempt.above_floor) if attempt else set()
 
@@ -165,6 +189,11 @@ async def _attribute(
         passage = by_id.get(chunk_id)
         if passage is None or not passage.found:
             return 0, STAGE_STALE, "not in the corpus"
+        if chunk_id in removed_by_rule:
+            rules = ", ".join(
+                sorted({a.rule_id for a in report.safety.for_chunk(chunk_id)})  # type: ignore[union-attr]
+            )
+            return 2, STAGE_SAFETY, f"removed by {rules or 'a safety rule'}"
         if chunk_id in candidates:
             if arm.uses_floor and chunk_id in scored and chunk_id not in above:
                 return 3, STAGE_FLOOR, f"relevance {scored[chunk_id]:.3f}"
@@ -196,10 +225,16 @@ async def run_question(
     embedding_model: str,
     reranker: Reranker,
     limit: int = DEFAULT_LIMIT,
+    engine: SafetyEngine | None = None,
 ) -> QuestionRun:
     concepts = Concepts() if arm.legs == "dense" else concepts_for(question)
     vector = None if arm.legs == "keyword" else embedding
     filter = filter_for(question, arm)
+    # No ledger, no rules. A question whose dossier cannot be identified gets no safety pass
+    # rather than one run against an empty patient, which would report every check as
+    # unevaluated and read as if it had been attempted.
+    ledger = ledger_for(question)
+    safety = SafetyContext(engine=engine, ledger=ledger) if engine and ledger else None
 
     if arm.rerank:
         report = await search(
@@ -212,6 +247,7 @@ async def run_question(
             reranker=reranker,
             limit=limit,
             trace=True,
+            safety=safety,
         )
     else:
         report = await search_without_reranking(
@@ -223,6 +259,7 @@ async def run_question(
             filter=filter,
             limit=limit,
             trace=True,
+            safety=safety,
         )
 
     returned = [chunk.chunk_id for chunk in report.chunks]
@@ -239,6 +276,11 @@ async def run_question(
         keyword_hits=report.keyword_hits,
         dense_hits=report.dense_hits,
         below_floor=report.below_floor,
+        safety_flagged=len(report.safety.flagged_chunk_ids) if report.safety else 0,
+        safety_excluded=len(report.safety.excluded) if report.safety else 0,
+        safety_unevaluated=(
+            tuple(u.rule_id for u in report.safety.unevaluated) if report.safety else ()
+        ),
     )
 
 
@@ -265,6 +307,7 @@ async def run_arm(
     embedding_model: str,
     reranker: Reranker,
     limit: int = DEFAULT_LIMIT,
+    engine: SafetyEngine | None = None,
 ) -> ArmRun:
     runs = [
         await run_question(
@@ -275,6 +318,7 @@ async def run_arm(
             embedding_model=embedding_model,
             reranker=reranker,
             limit=limit,
+            engine=engine,
         )
         for question in questions
     ]
@@ -294,6 +338,7 @@ async def run_evaluation(
     embedder: Embedder,
     reranker: Reranker,
     limit: int = DEFAULT_LIMIT,
+    engine: SafetyEngine | None = None,
 ) -> Report:
     """Every arm over one split, after refusing a gold set the corpus cannot support."""
     verify_against_corpus(goldset, await present_chunk_ids(session))
@@ -310,6 +355,7 @@ async def run_evaluation(
             embedding_model=embedder.model,
             reranker=reranker,
             limit=limit,
+            engine=engine,
         )
         for arm in arms
     ]
@@ -355,6 +401,25 @@ def format_report(report: Report) -> str:
             f"{s.irrelevant_context:.2f} |"
         )
 
+    if any(any(r.safety_flagged or r.safety_unevaluated for r in a.runs) for a in report.arms):
+        lines += [
+            "",
+            "## What the safety engine did",
+            "",
+            "Reported **beside** `harm@1`, never instead of it: the same rules produce the "
+            "forbidden labels `harm@1` is scored against, so an engine that also removed those "
+            "passages would drive the metric to zero by construction.",
+            "",
+            "| arm | passages flagged | removed | checks not run |",
+            "|---|---|---|---|",
+        ]
+        for result in report.arms:
+            effect = result.safety_effect
+            lines.append(
+                f"| {result.arm.name} | {effect['flagged']} | {effect['excluded']} | "
+                f"{effect['unevaluated']} |"
+            )
+
     lines += ["", "## Where the misses were lost", "", "| arm | " + " | ".join(STAGES) + " |",
               "|---" * (len(STAGES) + 1) + "|"]
     for result in report.arms:
@@ -377,6 +442,7 @@ def report_as_dict(report: Report) -> dict:
                 "note": result.arm.note,
                 "score": asdict(result.score),
                 "losses_by_stage": result.losses_by_stage,
+                "safety_effect": result.safety_effect,
                 "runs": [
                     {
                         "query_id": run.query_id,
@@ -386,6 +452,9 @@ def report_as_dict(report: Report) -> dict:
                         "keyword_hits": run.keyword_hits,
                         "dense_hits": run.dense_hits,
                         "below_floor": run.below_floor,
+                        "safety_flagged": run.safety_flagged,
+                        "safety_excluded": run.safety_excluded,
+                        "safety_unevaluated": list(run.safety_unevaluated),
                         "score": asdict(run.score),
                         "losses": [asdict(loss) for loss in run.losses],
                     }
@@ -425,6 +494,7 @@ async def _run(args: argparse.Namespace) -> int:  # pragma: no cover - process e
                 embedder=embedder,
                 reranker=reranker,
                 limit=args.limit,
+                engine=SafetyEngine() if args.safety else None,
             )
     finally:
         await engine.dispose()
@@ -445,6 +515,11 @@ def main() -> int:  # pragma: no cover - process entrypoint
     parser.add_argument("--ablations", action="store_true", help="include the per-dimension arms")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--out", type=Path, help="write the full per-question JSON here")
+    parser.add_argument(
+        "--safety",
+        action="store_true",
+        help="run the safety rules over the retrieved passages and report their effect",
+    )
     return asyncio.run(_run(parser.parse_args()))
 
 
