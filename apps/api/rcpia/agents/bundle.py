@@ -154,19 +154,6 @@ def _readings_of(entry: LedgerEntry) -> tuple[LedgerReading, ...]:
     )
 
 
-def _default_question(case: Case) -> str:
-    """What to search the corpus with when no operator question was asked.
-
-    Deliberately the same phrasing the fiche uses for its own section 1, so the passages
-    retrieved are the ones that bear on the question the document actually poses.
-    """
-    organ = "vessie" if case.cancer_type == CancerType.bladder else "prostate"
-    return (
-        f"Proposition de stratégie thérapeutique pour un cancer de {organ} : "
-        "options de traitement, indications et contre-indications."
-    )
-
-
 async def build_bundle(
     session: AsyncSession,
     *,
@@ -194,7 +181,7 @@ async def build_bundle(
             cancer_type=str(case.cancer_type),
             agent_role=agent_role,
             entries=entries,
-            question=clinical_question or _default_question(case),
+            question=clinical_question,
             embedder=embedder,
             reranker=reranker,
         )

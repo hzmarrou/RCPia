@@ -298,6 +298,52 @@ guidelines require**, and that is a finding about data collection rather than ab
 
 ---
 
+## 7b. A stage the dossier *does* record, and the extractor drops
+
+**Added 28 August, from the fifteen-dossier batch run.** Section 7 says four of the eight
+prostate dossiers cannot have a setting derived, because they record no stage. Dossier 8 is a
+different and worse case: **the record contains the data and the extractor did not read it.**
+
+The run produced no fiche at all. It stopped after 8 seconds with `waiting_for_user`:
+
+> Type histologique : la valeur enregistrée (« RAS ») ne constitue pas une donnée exploitable —
+> analyse impossible sans cette donnée. ; Gleason : la valeur enregistrée (« RAS ») ne constitue
+> pas une donnée exploitable — analyse impossible sans cette donnée.
+
+The dossier's narrative records **adénocarcinome acinaire Gleason 9 (5+4), ISUP 5**, with
+capsular breach, perineural invasion and vascular emboli — and repeats *ISUP 5 Gleason (5+4)* in
+its own summary line. The structured fields at the foot of the document say `RAS` for
+histological type, Gleason and ISUP. The deterministic extractor read the field; the narrative
+went unread; the agent then correctly refused to grade a prostate cancer with no grade.
+
+**This is a limitation of the deterministic extractor, not a defect in the builder or the
+agent.** Both behaved correctly on the input they were given. `RAS` — *rien à signaler* — is a
+claim about a clinical finding, not a statement that a field was never filled in, and a
+field-reading extractor has no way to tell those apart. The AI extractor is the intended fix:
+read the narrative when the structured field says `RAS`.
+
+**Why it belongs in this section rather than with the other four.** Sections 5 to 7 record a
+consistent pattern — *the intake form does not capture what the guidelines require* — and every
+instance so far has been an honest absence: no eGFR, no G8, no TNM. Dossier 8 is the opposite
+shape. The information exists, twice, in the document the clinician wrote. The gap is between
+the document and the ledger, which means the count of "dossiers that cannot have a setting
+derived" is a floor rather than a measurement: it counts records that are genuinely silent, and
+silently includes any record the extractor merely failed to read.
+
+**What makes it the most serious failure the batch produced.** Every other defect degrades a
+fiche. This one deletes it — a man with documented high-volume metastatic Gleason 9 disease
+reached the tumour board with nothing. And the refusal is *well-behaved*: it names the missing
+field, it does not guess, it does not proceed. A refusal that is locally correct and globally
+wrong is harder to notice than a bad recommendation, because every visible part of it looks like
+the system working.
+
+**Unmeasured.** This was found only because the failure was loud enough to stop the run. A
+structured `RAS` shadowing a *less* critical narrative value would have produced a complete fiche
+with a silent gap, and nothing would have flagged it. The rate of that quieter version is
+unknown.
+
+---
+
 ## 8. What a reviewer should challenge
 
 Listed because a review that only confirms is worth little.

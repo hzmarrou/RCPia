@@ -31,6 +31,7 @@ from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.rerank import Reranker
 from rcpia.evidence.retrieval import RetrievedChunk, search
 from rcpia.query.builder import Fact, build_filter
+from rcpia.query.questions import question_for
 
 # How many passages an agent is given. Ten is the production `search` default; more would
 # dilute a prompt that already carries the whole ledger.
@@ -79,7 +80,7 @@ async def guideline_passages_for(
     cancer_type: str,
     agent_role: str,
     entries: Sequence[LedgerEntry],
-    question: str,
+    question: str | None = None,
     embedder: Embedder,
     reranker: Reranker,
     limit: int = PASSAGE_LIMIT,
@@ -89,12 +90,22 @@ async def guideline_passages_for(
     Returns the passages and any **notes for the agent's constraints** — how the query was
     derived, and what the record did not contain. Those notes are the difference between an
     agent that knows its evidence is broad and one that assumes it is precise.
+
+    **The question is derived too, unless an operator asked one.** It used to be a single
+    generic string per organ, and that string cost the system most of its corpus: it matched
+    AFU's French section headings so closely that AFU filled all ten slots for every prostate
+    patient, and eleven core urology guidelines holding 1,465 eligible passages were never
+    retrieved once across fourteen dossiers. The setting was already being derived here to build
+    the filter; it now names the question as well. See `rcpia.query.questions`.
     """
     query = build_filter(
         cancer_type,
         facts_from(entries),
         agent_role=agent_role,
     )
+    # An operator's own question always wins. Otherwise the patient's derived setting picks it,
+    # falling back to the organ's generic question when no setting could be derived.
+    search_question = question or question_for(cancer_type, query.decision.setting)
 
     notes: list[str] = []
     if not query.decision.determined:
@@ -110,10 +121,10 @@ async def guideline_passages_for(
             f"{', '.join(query.decision.missing)}."
         )
 
-    vectors = await embedder.embed([question])
+    vectors = await embedder.embed([search_question])
     report = await search(
         session,
-        question=question,
+        question=search_question,
         concepts=query.concepts,
         embedding=vectors[0] if vectors else None,
         embedding_model=embedder.model,
