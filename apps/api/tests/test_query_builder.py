@@ -273,3 +273,45 @@ def test_the_query_explains_itself() -> None:
     built = build_filter("prostate", facts(ctnm="cT2a N0 M0"), agent_role="urology_oncology")
     assert "Disease setting:" in built.explanation
     assert "Missing for a narrower answer" in built.explanation
+
+
+# --------------------------------------------------------------------------------------
+# Uncertain is not confirmed
+# --------------------------------------------------------------------------------------
+
+
+def test_an_unconfirmed_metastasis_does_not_select_metastatic_guidance() -> None:
+    """**Found by measuring, not by reasoning.** Dossier 1 records `cT4a N1 M1a (à confirmer)`.
+    Treating that as established routed four pilot questions to metastatic bladder guidance —
+    a different treatment intent — on a finding nobody had confirmed.
+    """
+    decision = derive_setting("bladder", facts(ctnm="cT4a N1 M1a (à confirmer)"))
+    assert decision.setting == "bladder_mibc_non_metastatic"
+    assert "unconfirmed" in decision.reason
+    assert "confirmed metastatic status" in decision.missing
+
+
+def test_a_confirmed_metastasis_still_selects_metastatic_guidance() -> None:
+    assert derive_setting("bladder", facts(ctnm="cT4a N1 M1a")).setting == "bladder_metastatic"
+
+
+def test_prostate_refuses_to_choose_when_the_metastatic_status_is_unconfirmed() -> None:
+    """Prostate has no safe fallback: metastatic and non-metastatic guidance differ in intent,
+    so neither is selected rather than one being guessed.
+    """
+    decision = derive_setting(
+        "prostate", facts(ctnm="cT3 N1 M1b (suspicion)", isup="5", psa_total="90")
+    )
+    assert decision.setting is None
+    assert "unconfirmed" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "hedge", ["(à confirmer)", "à confirmer", "suspicion de M1", "M1 probable", "M1 ?"]
+)
+def test_the_hedges_a_dossier_actually_writes_are_recognised(hedge: str) -> None:
+    stage = parse_stage(f"cT4a N1 M1a {hedge}")
+    assert stage is not None
+    assert stage.uncertain
+    assert not stage.metastatic
+    assert stage.metastasis_suspected

@@ -22,7 +22,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from sqlalchemy import select
@@ -37,19 +37,21 @@ from rcpia.evaluation.goldset import (
     load_goldset,
     verify_against_corpus,
 )
-from rcpia.evaluation.ledgers import ledger_for
+from rcpia.evaluation.ledgers import facts_for, ledger_for
 from rcpia.evaluation.metrics import ArmScore, QuestionScore, aggregate, score_question
 from rcpia.evidence.embedding import Embedder, build_embedder
 from rcpia.evidence.models import EvidenceChunk
 from rcpia.evidence.rerank import Reranker, build_reranker
 from rcpia.evidence.retrieval import (
     Concepts,
+    Filter,
     RetrievalReport,
     SafetyContext,
     filter_admits,
     search,
     search_without_reranking,
 )
+from rcpia.query.builder import build_filter
 from rcpia.safety_rules.engine import SafetyEngine
 
 if sys.platform == "win32":
@@ -144,6 +146,12 @@ class Report:
     arms: tuple[ArmRun, ...] = field(default_factory=tuple)
 
 
+def _declared_purposes(question: Question) -> list[str]:
+    """The purposes the question asks about. A property of the question, not of the patient."""
+    raw = question.filter.get("clinical_purpose")
+    return [str(p) for p in raw] if isinstance(raw, list | tuple) else []
+
+
 async def present_chunk_ids(session: AsyncSession) -> frozenset[str]:
     rows = await session.execute(select(EvidenceChunk.chunk_id))
     return frozenset(rows.scalars().all())
@@ -226,10 +234,29 @@ async def run_question(
     reranker: Reranker,
     limit: int = DEFAULT_LIMIT,
     engine: SafetyEngine | None = None,
+    built_queries: bool = False,
 ) -> QuestionRun:
-    concepts = Concepts() if arm.legs == "dense" else concepts_for(question)
+    # **`built` is the measurement the whole harness exists to enable.** Every score reported
+    # so far used the gold set's hand-written filter and concepts, which makes them a ceiling:
+    # what retrieval can do when a person has already solved the query. `built` derives both
+    # from the dossier, and the drop between the two is the query builder's score.
+    if built_queries:
+        query = build_filter(
+            question.cancer_type,
+            facts_for(question),
+            agent_role=str(question.filter.get("agent_role") or "") or None,
+            clinical_purpose=_declared_purposes(question),
+        )
+        filter = query.filter if arm.routed else replace(
+            Filter(cancer_type=question.cancer_type), admit_parent_setting=arm.admit_parent
+        )
+        built_concepts = query.concepts
+    else:
+        filter = filter_for(question, arm)
+        built_concepts = concepts_for(question)
+
+    concepts = Concepts() if arm.legs == "dense" else built_concepts
     vector = None if arm.legs == "keyword" else embedding
-    filter = filter_for(question, arm)
     # No ledger, no rules. A question whose dossier cannot be identified gets no safety pass
     # rather than one run against an empty patient, which would report every check as
     # unevaluated and read as if it had been attempted.
@@ -308,6 +335,7 @@ async def run_arm(
     reranker: Reranker,
     limit: int = DEFAULT_LIMIT,
     engine: SafetyEngine | None = None,
+    built_queries: bool = False,
 ) -> ArmRun:
     runs = [
         await run_question(
@@ -319,6 +347,7 @@ async def run_arm(
             reranker=reranker,
             limit=limit,
             engine=engine,
+            built_queries=built_queries,
         )
         for question in questions
     ]
@@ -339,6 +368,7 @@ async def run_evaluation(
     reranker: Reranker,
     limit: int = DEFAULT_LIMIT,
     engine: SafetyEngine | None = None,
+    built_queries: bool = False,
 ) -> Report:
     """Every arm over one split, after refusing a gold set the corpus cannot support."""
     verify_against_corpus(goldset, await present_chunk_ids(session))
@@ -356,6 +386,7 @@ async def run_evaluation(
             reranker=reranker,
             limit=limit,
             engine=engine,
+            built_queries=built_queries,
         )
         for arm in arms
     ]
@@ -495,6 +526,7 @@ async def _run(args: argparse.Namespace) -> int:  # pragma: no cover - process e
                 reranker=reranker,
                 limit=args.limit,
                 engine=SafetyEngine() if args.safety else None,
+                built_queries=args.queries == "built",
             )
     finally:
         await engine.dispose()
@@ -515,6 +547,13 @@ def main() -> int:  # pragma: no cover - process entrypoint
     parser.add_argument("--ablations", action="store_true", help="include the per-dimension arms")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--out", type=Path, help="write the full per-question JSON here")
+    parser.add_argument(
+        "--queries",
+        choices=("declared", "built"),
+        default="declared",
+        help="`declared` uses the gold set's hand-written filter and concepts (a ceiling); "
+        "`built` derives both from the dossier, which is what the deployed system will do",
+    )
     parser.add_argument(
         "--safety",
         action="store_true",

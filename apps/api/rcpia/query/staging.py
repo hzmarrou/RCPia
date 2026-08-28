@@ -34,6 +34,14 @@ _N = re.compile(r"\bN\s*([0-3x])", re.IGNORECASE)
 _M = re.compile(r"\bM\s*([01x])\s*([a-c])?", re.IGNORECASE)
 _GLEASON = re.compile(r"(\d)\s*\+\s*(\d)")
 _NUMBER = re.compile(r"(\d+(?:[.,]\d+)?)")
+# A dossier records what it is not yet sure of. `cT4a N1 M1a (à confirmer)` is not a metastatic
+# diagnosis; it is a suspicion awaiting a scan. Reading it as established routes the patient to
+# metastatic guidance -- a different treatment intent entirely -- on a finding nobody confirmed.
+_UNCERTAIN = re.compile(
+    r"à\s*confirmer|a\s*confirmer|to\s*be\s*confirmed|suspicion|suspect|probable|"
+    r"non\s*confirmé|non\s*confirme|douteux|\?",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +53,8 @@ class Stage:
     t_sub: str | None  # "a".."d"
     n: str | None
     m: str | None
+    # The record hedged -- "(à confirmer)", "suspicion", a bare question mark.
+    uncertain: bool = False
 
     @property
     def t_value(self) -> str:
@@ -56,7 +66,12 @@ class Stage:
 
     @property
     def metastatic(self) -> bool:
-        return self.m == "1"
+        """Confirmed M1 only. An unconfirmed M1 is handled by the derivation, not hidden here."""
+        return self.m == "1" and not self.uncertain
+
+    @property
+    def metastasis_suspected(self) -> bool:
+        return self.m == "1" and self.uncertain
 
     @property
     def muscle_invasive(self) -> bool:
@@ -79,6 +94,7 @@ def parse_stage(text: str | None) -> Stage | None:
         t_sub=(t.group(3).lower() if t and t.group(3) else None),
         n=(n.group(1).lower() if n else None),
         m=(m.group(1).lower() if m else None),
+        uncertain=bool(_UNCERTAIN.search(text)),
     )
 
 
@@ -134,6 +150,15 @@ def derive_bladder_setting(
         )
     if stage.metastatic:
         return SettingDecision("bladder_metastatic", "M1 recorded.", ("ctnm",))
+    if stage.metastasis_suspected:
+        return SettingDecision(
+            "bladder_mibc_non_metastatic" if stage.muscle_invasive else None,
+            "M1 is recorded but the dossier marks it unconfirmed, so metastatic guidance is "
+            "not selected on it. Confirm the metastatic status before the treatment intent is "
+            "decided.",
+            ("ctnm",),
+            ("confirmed metastatic status",),
+        )
     if stage.node_positive:
         return SettingDecision(
             "bladder_node_positive_non_metastatic", f"N{stage.n} with no M1.", ("ctnm",)
@@ -175,6 +200,14 @@ def derive_prostate_setting(
     Risk bands are EAU's, and the low-risk definition is the one three guidelines share —
     `cT1-cT2a`, Grade Group 1, PSA < 10 (catalogue PT9).
     """
+    if stage is not None and stage.metastasis_suspected:
+        return SettingDecision(
+            None,
+            "M1 is recorded but marked unconfirmed. Metastatic and non-metastatic prostate "
+            "guidance differ in intent, so neither is selected until the status is confirmed.",
+            ("ctnm",),
+            ("confirmed metastatic status",),
+        )
     if stage is not None and stage.metastatic:
         if on_adt and psa_rising:
             return SettingDecision(

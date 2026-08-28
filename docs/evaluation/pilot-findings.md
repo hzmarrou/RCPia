@@ -210,6 +210,77 @@ widening path is untested by this split and its cost is unmeasured.
 
 ---
 
+## 7. The ceiling has a floor now — the query builder measured
+
+Every number above was produced with the gold set's **hand-written filter and concepts**, and
+this document has said throughout that they are therefore a ceiling with no known floor. The
+query builder (`rcpia/query/`) derives both from the dossier instead, and
+`--queries built` measures the drop.
+
+| arm | declared (ceiling) | built (derived) | delta |
+|---|---|---|---|
+| dense | 0.42 | 0.42 | — |
+| fts | 0.83 | **0.33** | −0.50 |
+| fused | 0.83 | 0.67 | −0.16 |
+| **routed** | **0.83** | **0.75** | **−0.08** |
+| full | 0.75 | 0.75 | — |
+
+**The production arm loses 0.08 group recall when the query is derived rather than written.**
+That is the query builder's cost, and it is the first number in this project that is not an
+upper bound. `dense` is unchanged because that arm passes no concepts at all, which is a useful
+check that the wiring does what it claims.
+
+**The keyword leg was the hand-writing.** `fts` falls from 0.83 to 0.33 — by far the largest
+drop. The earlier finding that *"keyword carries the recall"* was true and incomplete: keyword
+carried the recall **because a person had already chosen the words**. A setting-level lexicon
+reused across patients does not reach nearly as far. Fusion and routing recover most of it;
+the single leg does not.
+
+**Reranking is not costly after all, and that reverses finding 5.** Under the ceiling, `full`
+scored 0.75 against `routed`'s 0.83 and the conclusion was that the most expensive stage was not
+paying for itself. With derived queries both read **0.75** — the cross-encoder recovers exactly
+what the weaker query loses. **The earlier conclusion was an artefact of the ceiling condition**:
+reranking has little to add when the query is already perfect, which is never the deployed case.
+Finding 5 should be read as *"reranking is neutral on realistic queries"*, not as an argument to
+remove it.
+
+### A safety bug the measurement found, which reasoning had not
+
+The first built-query run scored `routed` at 0.62. Investigating the gap rather than reporting
+it turned up the cause, and it was in the builder rather than in retrieval.
+
+Dossier 1's stage is recorded as **`cT4a N1 M1a (à confirmer)`** — *to be confirmed*. The builder
+read the `M1a` and routed four pilot questions to **metastatic bladder guidance**: a different
+treatment intent, chosen on a finding nobody had confirmed. Hedges a dossier actually writes —
+`à confirmer`, `suspicion`, `probable`, a bare question mark — are now recognised, and an
+unconfirmed metastasis selects the non-metastatic setting while naming the missing confirmation.
+Prostate refuses to choose at all, because there is no safe fallback between metastatic and
+non-metastatic intent.
+
+Fixing it moved `routed` from 0.62 to 0.75. **Half the apparent cost of the query builder was
+one unread parenthesis.**
+
+### Where the derived setting disagrees with the gold set
+
+Of 13 questions: **5 agree, 1 is correctly underivable, 7 differ** — and the differences are
+informative rather than error.
+
+- **4 were the unconfirmed-M1 bug**, now fixed.
+- **`pr-001`** — the builder derives `prostate_locally_advanced_non_metastatic` from cT3a and a
+  PSA of 34, against the gold set's `prostate_localized_intermediate_risk`. That is the conflict
+  already recorded in the gold-set README, now reached **independently from the record**.
+- **`pr-003`** — dossier 12 is metastatic on the record; the question is filtered
+  `prostate_localized_high_risk`. Another record-against-question mismatch for the clinician.
+- **`nu-001`** — declared `not_specified` by design, because a nutrition question is
+  cross-cutting. Not an error in either.
+
+**`pr-004` is correctly underivable.** Dossier 5 records no TNM at all, and the builder returns
+no setting rather than inventing one. Four of the eight prostate dossiers are in that position:
+their summaries give a PI-RADS score and "organ-confined", which are not a stage. That is the
+same intake gap the safety rules found in eGFR and G8, in the field that decides the most.
+
+---
+
 ## What this changes
 
 | | |

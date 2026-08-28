@@ -19,7 +19,8 @@ the patient, so they are arguments rather than derivations.
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from rcpia.evidence.retrieval import Filter
+from rcpia.evidence.retrieval import Concepts, Filter
+from rcpia.query.lexicon import build_concepts
 from rcpia.query.staging import (
     SettingDecision,
     Stage,
@@ -60,6 +61,7 @@ class BuiltQuery:
     filter: Filter
     decision: SettingDecision
     unset: tuple[str, ...] = ()
+    concepts: Concepts = Concepts()
 
     @property
     def explanation(self) -> str:
@@ -191,4 +193,12 @@ def build_filter(
         ),
         decision=decision,
         unset=tuple(unset),
+        concepts=build_concepts(
+            disease_setting=decision.setting,
+            clinical_purpose=clinical_purpose,
+            agent_role=agent_role,
+            # The neutral list is built from the record, so it needs the record -- not only the
+            # staging fields, because drug names live in the treatment history.
+            record_values=[fact.value for fact in facts],
+        ),
     )
