@@ -76,6 +76,11 @@ class GuidelinePassage(Strict):
     id: str = Field(min_length=1, max_length=128)
     text: str = Field(min_length=1, max_length=MAX_TEXT)
     source: str
+    # The document the passage came from, kept apart from `source`, which carries the full
+    # citation down to the section and page. Section 6 of the fiche answers "which guidelines
+    # were consulted", and a board reading a concatenation of every passage label cannot see
+    # that. Deduplicating needs the document, not the citation.
+    document_id: str | None = None
     clinical_status: str = Field(min_length=1, max_length=50)
     section: str | None = None
     version: str | None = None

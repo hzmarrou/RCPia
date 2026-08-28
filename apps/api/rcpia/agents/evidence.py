@@ -63,6 +63,7 @@ def to_passage(chunk: RetrievedChunk) -> GuidelinePassage:
         id=chunk.chunk_id,
         text=text,
         source=chunk.citation_label or chunk.document_id,
+        document_id=chunk.document_id,
         clinical_status=chunk.clinical_status,
         section=None,
         version=chunk.version_label,

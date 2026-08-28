@@ -336,8 +336,21 @@ def build_framework(
     )
 
 
-def build_missing(report: completeness.CompletenessReport) -> list[MissingItem]:
-    return [
+def build_missing(
+    report: completeness.CompletenessReport, output: AgentOutput | None = None
+) -> list[MissingItem]:
+    """What is missing, from both of the things that know.
+
+    **The two sources disagreed, and the document showed only one of them.** The completeness
+    report checks whether the dossier form carries its required fields; the agent says what it
+    needed and did not get. On dossier 1 the report found nothing missing while the agent
+    listed eleven items, so the fiche printed "Aucune information requise ne manque" directly
+    above an opinion withheld for want of information.
+
+    They are merged here and labelled by origin, because a reader has to be able to tell a
+    blank form field from a clinical judgement that the record is not sufficient.
+    """
+    items = [
         MissingItem(
             label=issue.label,
             severity=issue.severity,  # type: ignore[arg-type]
@@ -347,17 +360,50 @@ def build_missing(report: completeness.CompletenessReport) -> list[MissingItem]:
         for issue in report.issues
         if issue.highlight in ("red", "amber")
     ]
+    if output is None:
+        return items
+
+    known = {item.message.strip().lower() for item in items}
+    items.extend(
+        MissingItem(
+            label="Signalé par l’agent",
+            severity="uncertain",
+            highlight="amber",
+            message=note.strip(),
+        )
+        for note in output.missing_information
+        if note.strip() and note.strip().lower() not in known
+    )
+    return items
+
+
+ALTERNATIVE_SUPPORT = "Étaye l’alternative : {option}"
+REJECTED_SUPPORT = "Motive l’option écartée : {option}"
 
 
 def _guideline_sources(run: AgentRun) -> list[str]:
-    """The distinct guidelines the agent was actually given, in the order they arrived."""
+    """The distinct **documents** the agent was given, in the order they arrived.
+
+    Deduplicated on `document_id` rather than on the citation label, because ten passages from
+    one guideline share a document and differ only by section and page. Section 6 answers
+    *which guidelines were consulted*; listing every passage label there produces a paragraph a
+    board cannot read and does not answer the question that was asked.
+    """
     passages = (run.bundle.get("inputs", {}) or {}).get("guideline_passages") or []
-    seen: list[str] = []
+    labels: dict[str, str] = {}
     for passage in passages:
-        source = str(passage.get("source") or "").strip() if isinstance(passage, dict) else ""
-        if source and source not in seen:
-            seen.append(source)
-    return seen
+        if not isinstance(passage, dict):
+            continue
+        key = str(passage.get("document_id") or passage.get("source") or "").strip()
+        if not key or key in labels:
+            continue
+        # The readable half of the citation: everything before the section path, where the
+        # publisher, the title and the edition sit.
+        source = str(passage.get("source") or key)
+        head = source.split(",")[0].replace("|", " ").replace(chr(10), " ").strip()
+        version = str(passage.get("version") or "").strip()
+        labels[key] = f"{head} ({version})" if version and version not in head else head
+    return list(labels.values())
 
 
 def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
@@ -378,8 +424,19 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
 
     supports = {reference.id: reference.supports for reference in output.evidence_references}
     cited: list[str] = [reference.id for reference in output.evidence_references]
-    for option in (*output.alternatives, *output.rejected_options):
-        cited.extend(option.evidence_ids)
+    # **A citation reached only through an option had no justification and rendered blank.**
+    # `evidence_references` is the structured channel and carries a `supports` sentence;
+    # `option.evidence_ids` is a bare list of ids. A register row with an empty justification
+    # tells a reader nothing about why the passage is there, so the option it belongs to
+    # supplies one.
+    for option in output.alternatives:
+        for identifier in option.evidence_ids:
+            cited.append(identifier)
+            supports.setdefault(identifier, ALTERNATIVE_SUPPORT.format(option=option.option))
+    for option in output.rejected_options:
+        for identifier in option.evidence_ids:
+            cited.append(identifier)
+            supports.setdefault(identifier, REJECTED_SUPPORT.format(option=option.option))
 
     entries: list[EvidenceEntry] = []
     for identifier in dict.fromkeys(cited):
@@ -502,7 +559,7 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
             models=models,
             sources=_guideline_sources(lead_run),
         ),
-        missing=build_missing(report),
+        missing=build_missing(report, lead_output),
         evidence=build_evidence(lead_run, lead_output),
         appendices=[
             RationaleAppendix(
