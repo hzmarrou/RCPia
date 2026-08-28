@@ -27,11 +27,57 @@ determine a narrower one. The caller already reports an underivable setting in t
 constraints, so the agent is told its evidence is broad rather than being handed a
 confident-looking narrow set chosen at random.
 
+**The question also names the specialist.** Setting alone was not enough: with the urology and
+the medical oncology agent run on the same two bladder dossiers, the ten passages handed to each
+were identical on one and differed by one on the other. `agent_role` was doing its job as a
+*permission* — 203 bladder passages admit medical oncology and not urology — but permission is
+inert while both roles ask the same question. `ROLE_SETTING_QUESTIONS` closes that gap for the
+pairs the current dossiers reach, and everything else falls through to the per-setting question.
+
 **These strings are search queries, not clinical claims.** They are read by a retriever and by
 nothing else; no part of a question reaches the fiche. A question naming a setting the patient
 does not have would retrieve the wrong guidance, which is why each is derived rather than
 chosen — but it cannot by itself put a wrong word in front of a clinician.
 """
+
+# Setting *and* role. Measured before this table existed: running the urology and the medical
+# oncology agent on the same two bladder dossiers, the passages handed to each were **identical
+# 10 of 10** on one dossier and 9 of 10 on the other. `agent_role` gates what an agent *may*
+# read — of the eligible bladder passages, 1,151 admit urology and 1,336 admit medical oncology,
+# with 203 admitting only medical oncology — but the question decided what each *did* read, and
+# the question was the same for both. A filter that permits more than the question asks for
+# permits nothing in practice.
+#
+# The 203 medical-oncology-only passages are the nutrition, cachexia, geriatric-screening and
+# palliative guidance — ESMO cachexia, SIOG, ESPEN, ASPEN, Pallia10. All of them carry
+# `disease_setting = not_specified` with reason `general_principle`, which
+# `ADMISSIBLE_UNSPECIFIED_REASONS` admits, so the filter has never been what kept them out.
+# Only the ranking has, and ranking answers to the question.
+#
+# **Started where it fires.** Only the pairs the current dossiers actually reach are mapped;
+# an unmapped pair falls through to the per-setting question below, which is a narrower search
+# than the organ generic and was itself the previous improvement. Prostate follows the same
+# pattern once its dossiers record a stage to derive from.
+ROLE_SETTING_QUESTIONS: dict[tuple[str, str], str] = {
+    ("urology_oncology", "bladder_mibc_non_metastatic"): (
+        "Cystectomie radicale et dérivation urinaire pour TVIM non métastatique : indications, "
+        "contre-indications chirurgicales, critères de résécabilité, et alternatives à la "
+        "chirurgie"
+    ),
+    ("medical_oncology", "bladder_mibc_non_metastatic"): (
+        "Chimiothérapie néoadjuvante pour TVIM non métastatique : éligibilité au cisplatine, "
+        "alternatives au carboplatine, et optimisation pré-thérapeutique"
+    ),
+    ("urology_oncology", "bladder_nmibc_unspecified_risk"): (
+        "Résection transuréthrale et seconde résection pour TVNIM : qualité et complétude de la "
+        "résection, indications de cystectomie précoce, critères de résécabilité et surveillance "
+        "endoscopique"
+    ),
+    ("medical_oncology", "bladder_nmibc_unspecified_risk"): (
+        "Traitement endovésical de la TVNIM : instillations de BCG et de mitomycine, schéma "
+        "d'entretien, conduite en cas d'échec du BCG, et optimisation pré-thérapeutique"
+    ),
+}
 
 # One question per disease setting in the staging vocabulary. Each names the situation in the
 # words the guidelines use for it, so the retriever has something to match beyond the organ.
@@ -137,14 +183,26 @@ GENERIC_QUESTIONS: dict[str, str] = {
 }
 
 
-def question_for(cancer_type: str, setting: str | None) -> str:
-    """The search question for this patient, from the setting derived out of their own record.
+def question_for(
+    cancer_type: str, setting: str | None, agent_role: str | None = None
+) -> str:
+    """The search question for this patient, as asked by this specialist.
 
-    Falls back to the organ's generic question when the setting could not be derived, and when a
-    derived setting has no entry above — an unmapped setting is a gap in that table, not a reason
-    to search for nothing.
+    Three levels, most specific first:
+
+    1. **Setting and role** — what this specialist evaluates in this clinical situation.
+    2. **Setting alone** — the situation, asked role-blind.
+    3. **The organ's generic question** — when no setting could be derived.
+
+    Each fallback is a real search, not a failure: level 2 is what every agent asked before
+    roles were mapped, and level 3 is what every agent asked before settings were. An unmapped
+    pair is therefore a gap in coverage rather than a defect, which is why nothing here raises.
     """
     if setting is not None:
+        if agent_role is not None:
+            by_role = ROLE_SETTING_QUESTIONS.get((agent_role, setting))
+            if by_role is not None:
+                return by_role
         mapped = SETTING_QUESTIONS.get(setting)
         if mapped is not None:
             return mapped

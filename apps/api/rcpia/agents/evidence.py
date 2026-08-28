@@ -103,9 +103,13 @@ async def guideline_passages_for(
         facts_from(entries),
         agent_role=agent_role,
     )
-    # An operator's own question always wins. Otherwise the patient's derived setting picks it,
-    # falling back to the organ's generic question when no setting could be derived.
-    search_question = question or question_for(cancer_type, query.decision.setting)
+    # An operator's own question always wins. Otherwise the patient's derived setting *and* the
+    # asking specialist pick it, falling back to the setting alone and then to the organ's
+    # generic question. The role matters here for the same reason it matters in the filter: two
+    # specialists reading the same ten passages are not two opinions.
+    search_question = question or question_for(
+        cancer_type, query.decision.setting, agent_role
+    )
 
     notes: list[str] = []
     if not query.decision.determined:
