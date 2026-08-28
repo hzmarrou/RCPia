@@ -279,6 +279,41 @@ no setting rather than inventing one. Four of the eight prostate dossiers are in
 their summaries give a PI-RADS score and "organ-confined", which are not a stage. That is the
 same intake gap the safety rules found in eGFR and G8, in the field that decides the most.
 
+### Widening the lexicon: a negative result for recall, and a third proof for routing
+
+The first built-query run left `fts` at 0.33 against 0.83 for hand-written concepts, so the
+lexicon was widened — mined from the **section headings of the passages routed to each setting**,
+scored for how distinctive they are to that setting, rather than from what retrieves the gold
+passages. Fitting the thirteen questions would have raised the number and taught the system
+nothing about patient 16.
+
+| arm | narrow lexicon | widened | harm@1 |
+|---|---|---|---|
+| fts | 0.33 | **0.29** | 0.00 |
+| fused | 0.67 | **0.75** | **0.00 → 0.15** |
+| routed | 0.75 | 0.75 | 0.00 |
+| full | 0.75 | 0.75 | 0.00 |
+
+**It did not work, on the terms it was attempted.** The production arm is unchanged at 0.75, and
+`fts` got marginally *worse* — more terms in an OR-joined tsquery dilute rather than sharpen. The
+gain is confined to `fused`. The 0.08 gap between derived and hand-written queries is therefore
+**not a vocabulary-coverage problem**, and the next attempt should look elsewhere: of the four
+questions still short on `routed`, one is the known bad gold label, two are ranking losses, and
+`pr-001` is now a *candidate-set* loss — the built concepts do not surface the AUA passages at
+all, which is a different failure from ranking them badly.
+
+**What it did surface is worth more than the recall would have been.** With the wider vocabulary,
+`fused` reached `harm@1 = 0.15`: the unqualified AFU cisplatin passage arrived at **rank 1** for
+`bl-004` and `bl-007` — both questions about the patient with an eGFR of 28. **Routing kept it
+out; the unrouted arm did not.**
+
+That is the third independent confirmation of the same finding, each by a different mechanism:
+the ablation (`routed−agent_role` restores harm to the unrouted level), the safety engine (18
+flagged passages under routing against 48 unrouted), and now the lexicon (extra reach becomes
+extra *hazard* without routing). The corpus fitness review called `agent_role` close to useless
+on coverage grounds. On safety it is the dimension doing the work, and three separate experiments
+now say so.
+
 ---
 
 ## What this changes

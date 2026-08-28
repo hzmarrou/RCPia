@@ -13,8 +13,16 @@ runs against both and is the only bridge. So the neutral list carries what survi
 stemmer unchanged — TNM codes, drug names, scores, grades — and it is built from the patient's
 own record rather than from the lexicon, because that is where those tokens are.
 
-**Nothing here is clinician-validated.** The terms are taken from the section headings and
-recommendation text of the corpus itself, which is what the retrieval has to match against.
+**Nothing here is clinician-validated.** The terms are taken from the section headings of the
+corpus itself, which is what the retrieval has to match against.
+
+**Widened from the corpus, not from the test.** The first version of this lexicon scored 0.33 on
+the keyword-only arm against 0.83 for hand-written concepts. The obvious way to close that gap is
+to look at which terms retrieve the gold-labelled passages, and it is the wrong way: it fits the
+thirteen questions rather than the situation, and the next patient gets none of the benefit. The
+terms below were mined instead from the **section headings of the passages routed to each
+setting**, scored by how distinctive they are to that setting against the whole corpus — the same
+structural source the routing itself uses, and one that generalises to patient 16.
 """
 
 import re
@@ -27,8 +35,13 @@ from rcpia.evidence.retrieval import Concepts
 _SETTING_TERMS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "bladder_nmibc_unspecified_risk": (
         ("TVNIM", "tumeur de vessie n'infiltrant pas le muscle", "résection transurétrale",
-         "instillation endovésicale"),
-        ("non-muscle-invasive bladder cancer", "NMIBC", "TURBT", "intravesical therapy"),
+         "instillation endovésicale", "RTUV", "grades et sous-types histologiques",
+         "facteurs histopronostiques", "fibroscopie", "stratification du risque",
+         "BCG-thérapie", "mitomycine C", "surveillance cystoscopique"),
+        ("non-muscle-invasive bladder cancer", "NMIBC", "TURBT", "intravesical therapy",
+         "adjuvant intravesical treatment", "intravesical immunotherapy", "TaT1",
+         "intravesical chemotherapy", "repeat resection", "photodynamic diagnosis",
+         "surveillance and follow-up", "BCG", "risk stratification"),
     ),
     "bladder_nmibc_cis": (
         ("carcinome in situ", "CIS", "BCG"),
@@ -36,9 +49,14 @@ _SETTING_TERMS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     ),
     "bladder_mibc_non_metastatic": (
         ("TVIM", "tumeur de vessie infiltrant le muscle", "cystectomie totale",
-         "chimiothérapie néoadjuvante", "préservation vésicale"),
+         "chimiothérapie néoadjuvante", "chimiothérapie adjuvante", "préservation vésicale",
+         "dérivation urinaire", "curage ganglionnaire", "traitement trimodal",
+         "entérocystoplastie", "indications et délais"),
         ("muscle-invasive bladder cancer", "MIBC", "radical cystectomy",
-         "neoadjuvant chemotherapy", "trimodality therapy", "bladder preservation"),
+         "neoadjuvant chemotherapy", "adjuvant chemotherapy", "trimodality therapy",
+         "bladder preservation", "urinary diversion", "lymph node dissection",
+         "radical cystectomy technique and extent", "perioperative systemic therapy",
+         "health status assessment"),
     ),
     "bladder_locally_advanced_non_metastatic": (
         ("tumeur localement avancée", "cystectomie", "traitement multimodal"),
@@ -49,15 +67,21 @@ _SETTING_TERMS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ("node-positive", "lymph node dissection", "chemotherapy"),
     ),
     "bladder_metastatic": (
-        ("maladie métastatique", "chimiothérapie de première ligne", "immunothérapie"),
+        ("maladie métastatique", "chimiothérapie de première ligne", "immunothérapie",
+         "traitement de deuxième ligne"),
         ("metastatic urothelial carcinoma", "first-line systemic therapy", "immunotherapy",
-         "checkpoint inhibitor"),
+         "checkpoint inhibitor", "enfortumab vedotin", "advanced or metastatic",
+         "not eligible for combination", "further-line systemic therapy",
+         "maintenance therapy"),
     ),
     "prostate_nonmetastatic_unspecified_risk": (
         ("cancer de la prostate localisé", "prostatectomie totale", "radiothérapie",
-         "surveillance active"),
+         "surveillance active", "traitement focal", "stratégie biopsique",
+         "options thérapeutiques", "morbidité et résultats oncologiques", "curiethérapie"),
         ("localized prostate cancer", "radical prostatectomy", "radiotherapy",
-         "active surveillance"),
+         "active surveillance", "active surveillance inclusion criteria",
+         "risk-based management", "principles of management", "focal therapy",
+         "watchful waiting", "brachytherapy"),
     ),
     "prostate_localized_low_risk": (
         ("risque faible", "surveillance active"),
@@ -84,14 +108,20 @@ _SETTING_TERMS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ("node-positive", "androgen deprivation therapy", "pelvic radiotherapy"),
     ),
     "prostate_metastatic_hormone_sensitive": (
-        ("métastatique hormonosensible", "suppression androgénique", "docétaxel"),
-        ("metastatic hormone-sensitive prostate cancer", "mHSPC",
-         "androgen deprivation therapy", "docetaxel", "androgen receptor pathway inhibitor"),
+        ("métastatique hormonosensible", "suppression androgénique", "docétaxel",
+         "hormonothérapie de première ligne", "volume métastatique"),
+        ("metastatic hormone-sensitive prostate cancer", "mHSPC", "mCSPC",
+         "androgen deprivation therapy", "androgen deprivation therapies", "docetaxel",
+         "androgen receptor pathway inhibitor", "management of metastatic prostate cancer",
+         "treatment of the primary tumour", "combined chemotherapy",
+         "therapeutic decision-making"),
     ),
     "prostate_metastatic_castration_resistant": (
-        ("résistant à la castration", "abiratérone", "enzalutamide", "cabazitaxel"),
-        ("castration-resistant prostate cancer", "mCRPC", "abiraterone", "enzalutamide",
-         "cabazitaxel"),
+        ("résistant à la castration", "abiratérone", "enzalutamide", "cabazitaxel",
+         "traitement de la maladie résistante"),
+        ("castration-resistant prostate cancer", "mCRPC", "CRPC treatment", "abiraterone",
+         "enzalutamide", "cabazitaxel", "sequencing and combination treatment",
+         "lutetium vipivotide tetraxetan", "olaparib", "radium-223"),
     ),
     "prostate_nonmetastatic_castration_resistant": (
         ("résistant à la castration non métastatique", "temps de doublement du PSA"),
