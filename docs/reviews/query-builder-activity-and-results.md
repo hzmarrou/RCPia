@@ -344,6 +344,56 @@ unknown.
 
 ---
 
+## 7c. Specialising the question makes each agent deeper and narrower
+
+**Added 28 August**, from running the urology and the medical oncology agent on dossiers 14
+and 2 before and after `ROLE_SETTING_QUESTIONS`.
+
+**The isolation now exists.** Shared passages between the two specialists:
+
+| Dossier | Setting-only question | Role-aware question |
+|---|---:|---:|
+| 14 | 10 / 10 | **2 / 10** |
+| 2 | 9 / 10 | **2 / 10** |
+
+**Each agent gained its own subject.** The urologist, asked about cystectomy and urinary
+diversion rather than about treatment strategy, produced reasoning it had never produced in any
+previous run — it rejected an orthotopic neobladder for the 85-year-old with a stated threshold,
+*"Le DFG inférieur à 50 mL/min constitue une contre-indication principale rapportée"*, citing
+`eau.bladder-mibc.2026`, a document neither agent had reached before. The phrase *50 mL/min*
+appears three times in the new output and zero times in the old.
+
+**And each agent lost the other's.** The same urologist stopped mentioning carboplatin
+altogether — four mentions before, **zero** after — where it had previously carried the correct
+warning not to substitute carboplatin for cisplatin perioperatively. The medical oncologist still
+carries it, five mentions in both runs.
+
+**That trade is correct for a panel and wrong for a single agent**, and the distinction matters
+because RCPia currently runs single agents. A specialist that answers only its own question is
+what a tumour board wants from each member; it is also a fiche with a hole in it if nothing
+reassembles the members. The reassembly is `rcp_synthesis`, which is written but not yet wired,
+and the generator already refuses to render a PPS from two unsynthesised opinions
+(`SynthesisRequired`). Until that runs, **specialising the questions moves safety coverage out of
+the individual agent and into a step that does not yet exist.**
+
+**What the role-aware question did not achieve.** Neither agent retrieved the nutrition,
+cachexia or geriatric guidance that only medical oncology is permitted to read — 203 eligible
+bladder passages across ESMO cachexia, SIOG, ESPEN, ASPEN and Pallia10. Those passages are not
+blocked: they carry `disease_setting = not_specified` with reason `general_principle`, which
+`ADMISSIBLE_UNSPECIFIED_REASONS` admits, and an explicit supportive-care question against exactly
+the `medical_oncology` + MIBC filter returns ESMO cachexia five times, ESPEN three times and
+ASPEN twice. They lose on ranking to chemotherapy passages whenever the question is about
+chemotherapy.
+
+**One retrieval cannot serve two subjects.** No wording of a single question reaches both the
+cisplatin decision tables and the cachexia guidance, because the ranker is doing exactly what it
+should. Reaching both needs a second retrieval per agent — a supportive-care question alongside
+the treatment question, with its own slots — which is the same structural finding as §7d of the
+panel document, one level further in: the number of questions, not their wording, is the binding
+constraint.
+
+---
+
 ## 8. What a reviewer should challenge
 
 Listed because a review that only confirms is worth little.
