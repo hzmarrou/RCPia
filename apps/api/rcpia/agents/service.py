@@ -50,6 +50,8 @@ from rcpia.core.models import (
     CaseLedgerVersion,
     JobStatus,
 )
+from rcpia.evidence.embedding import Embedder
+from rcpia.evidence.rerank import Reranker
 from rcpia.jobs.models import JobOutcome
 from rcpia.storage.base import BlobStore, StorageError
 from rcpia.storage.keys import pi_session_key
@@ -74,8 +76,18 @@ async def run_agent(
     *,
     adapter: PiAdapter,
     blobs: BlobStore,
+    embedder: Embedder | None = None,
+    reranker: Reranker | None = None,
 ) -> JobOutcome | None:
-    """Run the agent named in the job payload. Returns None on success."""
+    """Run the agent named in the job payload. Returns None on success.
+
+    **The retriever is optional and its absence is visible.** Without an embedder and a
+    reranker the bundle carries no guideline passages, the constraints tell the agent so, and
+    the fiche's section 6 says no referential was supplied. That is the state the build was in
+    before evidence retrieval existed, and it stays reachable rather than becoming a crash --
+    a deployment without model credentials should degrade to an ungrounded opinion that says
+    it is ungrounded, not fail to produce a fiche at all.
+    """
     agent_role = str(job.payload.get("agent_role") or DEFAULT_AGENT_ROLE)
     clinical_question = job.payload.get("clinical_question") or None
 
@@ -114,6 +126,8 @@ async def run_agent(
             agent_role=agent_role,
             version=version,
             clinical_question=clinical_question,
+            embedder=embedder,
+            reranker=reranker,
         )
     except BundleError as exc:
         return _terminal(str(exc))

@@ -14,6 +14,7 @@ Two rules run through every section:
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
@@ -295,13 +296,24 @@ def build_social(values: dict[str, str | None]) -> SocialAssessment:
     )
 
 
-def build_framework(*, agent_roles: list[str], models: list[str]) -> CareFramework:
-    """Section 6 states what RCPia knows about its own basis, which is currently little."""
+def build_framework(
+    *, agent_roles: list[str], models: list[str], sources: Sequence[str] = ()
+) -> CareFramework:
+    """Section 6 states what RCPia knows about its own basis.
+
+    **`sources` names the guidelines actually put in front of the agent**, not the guidelines
+    the corpus happens to contain. The two diverge the moment a filter returns nothing, and a
+    section claiming a referential the agent never saw would be exactly the kind of false
+    completeness this document is built to avoid.
+    """
     return CareFramework(
-        # Deliberately not claiming a guideline. RCPia has no evidence corpus yet, so the
-        # agents reasoned from the dossier alone, and saying otherwise would be false.
         reference_standard=(
-            "Non référencé — aucun référentiel n'a été fourni aux agents à ce stade. "
+            "Recommandations consultées par les agents : "
+            + ", ".join(sources)
+            + ". Passages non relus par un clinicien (poc_unreviewed) : le rattachement "
+            "définitif aux recommandations en vigueur est à confirmer en RCP."
+            if sources
+            else "Non référencé — aucun référentiel n'a été fourni aux agents à ce stade. "
             "Le rattachement aux recommandations en vigueur est à établir en RCP."
         ),
         clinical_trial="a_determiner",
@@ -337,16 +349,31 @@ def build_missing(report: completeness.CompletenessReport) -> list[MissingItem]:
     ]
 
 
+def _guideline_sources(run: AgentRun) -> list[str]:
+    """The distinct guidelines the agent was actually given, in the order they arrived."""
+    passages = (run.bundle.get("inputs", {}) or {}).get("guideline_passages") or []
+    seen: list[str] = []
+    for passage in passages:
+        source = str(passage.get("source") or "").strip() if isinstance(passage, dict) else ""
+        if source and source not in seen:
+            seen.append(source)
+    return seen
+
+
 def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
     """Resolve each citation back to the snippet the agent was actually given.
 
     The bundle is stored on the run, so this needs no second read of the case and cannot
     drift: the quotation shown is the one the agent saw.
     """
+    inputs = run.bundle.get("inputs", {}) or {}
+    # Both collections, keyed together. The bundle validator already guarantees no id is
+    # shared between them, so one lookup cannot resolve to the wrong kind of source.
     snippets = {
-        str(snippet.get("id")): snippet
-        for snippet in (run.bundle.get("inputs", {}) or {}).get("source_snippets", [])
-        if isinstance(snippet, dict)
+        str(item.get("id")): item
+        for key in ("source_snippets", "guideline_passages")
+        for item in (inputs.get(key) or [])
+        if isinstance(item, dict)
     }
 
     supports = {reference.id: reference.supports for reference in output.evidence_references}
@@ -364,7 +391,10 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
                 id=identifier,
                 quote=str(snippet.get("text", "")),
                 supports=supports.get(identifier),
-                source_document_id=snippet.get("source_document_id"),
+                # A dossier excerpt carries a document id; a guideline passage carries the
+                # citation label its `source` field holds. Either way the register shows a
+                # reader where the quotation came from.
+                source_document_id=snippet.get("source_document_id") or snippet.get("source"),
                 page=snippet.get("page"),
             )
         )
@@ -467,7 +497,11 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
         treatments=build_treatments(lead_output),
         support=build_support(values, agent_roles=roles, contested=contested),
         social=build_social(values),
-        framework=build_framework(agent_roles=roles, models=models),
+        framework=build_framework(
+            agent_roles=roles,
+            models=models,
+            sources=_guideline_sources(lead_run),
+        ),
         missing=build_missing(report),
         evidence=build_evidence(lead_run, lead_output),
         appendices=[

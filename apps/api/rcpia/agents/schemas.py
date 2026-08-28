@@ -69,7 +69,11 @@ class GuidelinePassage(Strict):
     has to stay checkable after the 2027 edition lands.
     """
 
-    id: str = Field(min_length=1, max_length=64)
+    # **128, not 64, and the reason is traceability.** A corpus chunk id runs to 120
+    # characters, so a 64-character cap forced a short `gl-001` label and a lookup table
+    # mapping it back. A citation an agent emits should resolve straight to the corpus, the
+    # gold set and the safety rules with no table in between that can drift.
+    id: str = Field(min_length=1, max_length=128)
     text: str = Field(min_length=1, max_length=MAX_TEXT)
     source: str
     clinical_status: str = Field(min_length=1, max_length=50)
@@ -219,7 +223,9 @@ class TaskBundle(Strict):
 class EvidenceReference(Strict):
     """A citation, which must point at something the agent was actually given."""
 
-    id: str = Field(min_length=1, max_length=64)
+    # Matches `GuidelinePassage.id`. An agent citing a corpus passage emits its chunk id, and
+    # a cap below the length of one would refuse the citation rather than the invention.
+    id: str = Field(min_length=1, max_length=128)
     supports: str = Field(min_length=1, max_length=MAX_TEXT)
 
 

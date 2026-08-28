@@ -20,9 +20,11 @@ from dataclasses import dataclass
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rcpia.agents.evidence import guideline_passages_for
 from rcpia.agents.schemas import (
     BundleInputs,
     ConflictingField,
+    GuidelinePassage,
     LedgerField,
     OutputFormat,
     SourceSnippet,
@@ -34,6 +36,8 @@ from rcpia.cases.completeness import BLOCKING_FIELDS
 from rcpia.cases.fact_schema import required_fields_for
 from rcpia.cases.ledger import AMBER, RED, LedgerEntry, LedgerReading
 from rcpia.core.models import CancerType, Case, CaseLedgerVersion, DocumentChunk
+from rcpia.evidence.embedding import Embedder
+from rcpia.evidence.rerank import Reranker
 
 MAX_SNIPPET_CHARACTERS = 4000
 
@@ -150,6 +154,19 @@ def _readings_of(entry: LedgerEntry) -> tuple[LedgerReading, ...]:
     )
 
 
+def _default_question(case: Case) -> str:
+    """What to search the corpus with when no operator question was asked.
+
+    Deliberately the same phrasing the fiche uses for its own section 1, so the passages
+    retrieved are the ones that bear on the question the document actually poses.
+    """
+    organ = "vessie" if case.cancer_type == CancerType.bladder else "prostate"
+    return (
+        f"Proposition de stratégie thérapeutique pour un cancer de {organ} : "
+        "options de traitement, indications et contre-indications."
+    )
+
+
 async def build_bundle(
     session: AsyncSession,
     *,
@@ -157,6 +174,8 @@ async def build_bundle(
     agent_role: str,
     version: CaseLedgerVersion,
     clinical_question: str | None = None,
+    embedder: Embedder | None = None,
+    reranker: Reranker | None = None,
 ) -> BuiltBundle:
     """Turn a stored ledger version into the file Pi is given."""
     entries = entries_from_version(version)
@@ -166,6 +185,19 @@ async def build_bundle(
         )
 
     report = completeness.assess(entries, cancer_type=case.cancer_type)
+
+    passages: list[GuidelinePassage] = []
+    evidence_notes: list[str] = []
+    if embedder is not None and reranker is not None:
+        passages, evidence_notes = await guideline_passages_for(
+            session,
+            cancer_type=str(case.cancer_type),
+            agent_role=agent_role,
+            entries=entries,
+            question=clinical_question or _default_question(case),
+            embedder=embedder,
+            reranker=reranker,
+        )
 
     chunk_ids = {
         uuid.UUID(reading.source_chunk_id)
@@ -266,10 +298,11 @@ async def build_bundle(
         ledger_version=version.version,
         case_ledger=ledger_fields,
         source_snippets=snippets,
-        # Empty until evidence ingestion exists. The agent is told so through the
-        # constraints, so it reports an ungrounded opinion rather than inventing a
-        # citation to look grounded.
-        guideline_passages=[],
+        # Retrieved from the corpus when a retriever is supplied, using a filter derived
+        # from this patient's own ledger. Still empty without one, and the constraints say
+        # so -- an agent told its evidence is absent reports an ungrounded opinion rather
+        # than inventing a citation to look grounded.
+        guideline_passages=passages,
         missing_fields=[entry.key for entry in entries if entry.highlight == RED],
         conflicting_fields=conflicts,
         safety_constraints=list(SAFETY_CONSTRAINTS),
@@ -278,7 +311,13 @@ async def build_bundle(
     constraints = [
         *SAFETY_CONSTRAINTS,
         *report.limitation_notes(),
+        *evidence_notes,
     ]
+    if not passages:
+        constraints.append(
+            "Aucun passage des recommandations n'est fourni : votre avis n'est pas étayé "
+            "par un référentiel et doit le dire explicitement."
+        )
     if not snippets:
         constraints.append(
             "Aucun extrait source n'est disponible : appuyez-vous sur le tableau de "
