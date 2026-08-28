@@ -381,6 +381,41 @@ ALTERNATIVE_SUPPORT = "Étaye l’alternative : {option}"
 REJECTED_SUPPORT = "Motive l’option écartée : {option}"
 
 
+def _document_label(source: str, version: str) -> str:
+    """The readable name of a guideline, cut out of its full citation.
+
+    A citation runs *publisher | title (edition), section > subsection, pages*, and section 6
+    wants the part before the section. Two attempts at that were wrong, both found by reading
+    a rendered fiche rather than by reasoning:
+
+    **Splitting on the first comma cuts titles that contain one.** The AUA guideline is
+    *"...GUIDELINE (2017; Amended 2020, 2024)"*, so a comma split produced
+    *"(2017; Amended 2020"* — a truncated title with an unclosed bracket.
+
+    **The separator is an escaped newline, not a newline.** The citation carries the two
+    characters backslash-n, so replacing the newline character left `\\n` visible in the
+    document.
+
+    The edition is the anchor instead: it appears in the citation as `(2024-2026)`, and
+    everything up to the end of it is the document. Where the edition is absent or does not
+    appear, the citation is cut at the section arrow, and failing that used whole.
+    """
+    text = source.replace("\\n", " ").replace(chr(10), " ").replace("|", " ")
+    text = " ".join(text.split())
+
+    if version:
+        marker = f"({version})"
+        at = text.find(marker)
+        if at != -1:
+            return text[: at + len(marker)].strip()
+
+    # No edition to anchor on. The section path follows the title, so cut at its arrow.
+    for separator in (" > ", " &gt; "):
+        if separator in text:
+            return text.split(separator)[0].rsplit(",", 1)[0].strip()
+    return text.strip()
+
+
 def _guideline_sources(run: AgentRun) -> list[str]:
     """The distinct **documents** the agent was given, in the order they arrived.
 
@@ -397,12 +432,9 @@ def _guideline_sources(run: AgentRun) -> list[str]:
         key = str(passage.get("document_id") or passage.get("source") or "").strip()
         if not key or key in labels:
             continue
-        # The readable half of the citation: everything before the section path, where the
-        # publisher, the title and the edition sit.
-        source = str(passage.get("source") or key)
-        head = source.split(",")[0].replace("|", " ").replace(chr(10), " ").strip()
-        version = str(passage.get("version") or "").strip()
-        labels[key] = f"{head} ({version})" if version and version not in head else head
+        labels[key] = _document_label(
+            str(passage.get("source") or key), str(passage.get("version") or "").strip()
+        )
     return list(labels.values())
 
 
