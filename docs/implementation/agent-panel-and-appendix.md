@@ -195,6 +195,38 @@ forced-choice item Phase 9 already proposes: *which document would you rather si
 
 ---
 
+## 7b. An operational constraint, measured rather than assumed
+
+**One agent takes more than ten minutes on one dossier.** Measured on 28 August, running the
+urology agent against dossier 1 with the v2 brain and the live corpus: the first attempt was
+killed by `AGENT_TIMEOUT_SECONDS`, whose default is **600 seconds**, and the run completed only
+when that was raised to 1500.
+
+The v1 brain was 73 lines and finished inside ten minutes. The v2 brain is 231 lines, and the
+bundle it reasons over now carries ten retrieved guideline passages as well as the whole ledger.
+Both changes were deliberate improvements, and together they pushed a single agent past the
+configured limit.
+
+**What that implies for the panel.** Seven agents at this cost is **over an hour of model time
+per patient**, before consensus, the appendix or the writer. For a batch process run overnight
+against fifteen dossiers that is acceptable — roughly a working day of compute, unattended. For
+anything a clinician waits on, it is not.
+
+Three consequences worth deciding rather than discovering:
+
+- **The default timeout is wrong for the current brain.** 600 seconds kills a run that would
+  have succeeded, and the failure arrives as a dead job rather than as a slow one. Whatever
+  value is chosen, it should be chosen against a measured run.
+- **Agents can run in parallel, and the design already allows it.** Isolated retrieval means no
+  agent reads another's output, so the seven have no ordering between them. An hour of serial
+  time is roughly ten minutes of wall time if they run together — at seven times the peak
+  spend.
+- **The panel is a batch job, not an interactive one.** That is a product decision as much as a
+  technical one, and it should be stated in the design rather than inferred from a spinner.
+
+Recorded here because it is the kind of number that is cheap to measure now and expensive to
+discover in production.
+
 ## 8. Order of work
 
 Blocked-on order, not preference. Steps 1 and 2 are the critical path and everything else waits
