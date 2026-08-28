@@ -195,37 +195,155 @@ forced-choice item Phase 9 already proposes: *which document would you rather si
 
 ---
 
-## 7b. An operational constraint, measured rather than assumed
+## 7b. Agent latency, measured across fifteen dossiers
 
-**One agent takes more than ten minutes on one dossier.** Measured on 28 August, running the
-urology agent against dossier 1 with the v2 brain and the live corpus: the first attempt was
-killed by `AGENT_TIMEOUT_SECONDS`, whose default is **600 seconds**, and the run completed only
-when that was raised to 1500.
+**Corrected on 28 August.** This section first recorded that one agent takes *more than ten
+minutes per dossier*, and drew a panel estimate from it. That was a generalisation from a single
+run, and a batch of fourteen more dossiers contradicts it. The original conclusion is withdrawn;
+the measurements that replace it are below.
 
-The v1 brain was 73 lines and finished inside ten minutes. The v2 brain is 231 lines, and the
-bundle it reasons over now carries ten retrieved guideline passages as well as the whole ledger.
-Both changes were deliberate improvements, and together they pushed a single agent past the
-configured limit.
+**What was actually measured.** Fifteen runs of the urology agent with the v2 brain against the
+live corpus and the real database:
 
-**What that implies for the panel.** Seven agents at this cost is **over an hour of model time
-per patient**, before consensus, the appendix or the writer. For a batch process run overnight
-against fifteen dossiers that is acceptable — roughly a working day of compute, unattended. For
-anything a clinician waits on, it is not.
+- **Fourteen dossiers ran in 45–112 seconds**, median **60 s** (bladder 50–62 s, prostate
+  45–112 s). One further dossier stopped at 8 s without producing a fiche, for a data reason
+  rather than a time one — see §7c.
+- **Dossier 1 was the outlier.** Its first attempt was killed by `AGENT_TIMEOUT_SECONDS`,
+  default **600 seconds**, and completed only when that was raised to 1500. Nothing else in the
+  batch came close to the limit.
 
-Three consequences worth deciding rather than discovering:
+**What that implies for the panel.** At a 60-second median, seven agents is **roughly seven
+minutes of model time per patient** serially, and about a minute of wall time if they run
+together — not the hour this section previously claimed. A seven-agent panel is therefore within
+reach of an interactive workflow, which is the opposite of what was recorded here before.
 
-- **The default timeout is wrong for the current brain.** 600 seconds kills a run that would
-  have succeeded, and the failure arrives as a dead job rather than as a slow one. Whatever
-  value is chosen, it should be chosen against a measured run.
+What survives the correction:
+
+- **The default timeout is still wrong, but for the tail rather than the median.** 600 seconds
+  is comfortable for 14 of 15 runs and killed the fifteenth. The cost of a generous limit is
+  bounded — a slow run finishes late — while the cost of a tight one is a dead job and no fiche.
+  Set it against the tail, not the median.
 - **Agents can run in parallel, and the design already allows it.** Isolated retrieval means no
-  agent reads another's output, so the seven have no ordering between them. An hour of serial
-  time is roughly ten minutes of wall time if they run together — at seven times the peak
-  spend.
-- **The panel is a batch job, not an interactive one.** That is a product decision as much as a
-  technical one, and it should be stated in the design rather than inferred from a spinner.
+  agent reads another's output, so the seven have no ordering between them.
+- **Batch versus interactive is now an open choice, not a forced one.** The earlier text
+  presented batch operation as the only option the latency allowed. It isn't.
 
-Recorded here because it is the kind of number that is cheap to measure now and expensive to
-discover in production.
+**The methodological point is the reason this correction is kept rather than overwritten.** One
+run produced a number, the number was plausible, and a design consequence was drawn from it
+within minutes. Fourteen more runs moved the estimate by a factor of ten in the *favourable*
+direction — a single measurement of a variable-latency system is an anecdote, including when it
+is inconvenient.
+
+## 7c. A refusal caused by extraction, not by the agent
+
+**Dossier 8 produced no fiche at all.** The run stopped after 8 seconds with
+`JobStatus.waiting_for_user` and this reason:
+
+> Type histologique : la valeur enregistrée (« RAS ») ne constitue pas une donnée exploitable —
+> analyse impossible sans cette donnée. ; Gleason : la valeur enregistrée (« RAS ») ne constitue
+> pas une donnée exploitable — analyse impossible sans cette donnée.
+
+**The agent was right about its input and wrong about the patient.** The dossier records, in its
+narrative, *adénocarcinome acinaire Gleason 9 (5+4), ISUP 5*, with capsular breach, perineural
+invasion and vascular emboli, and repeats the ISUP 5 / Gleason (5+4) in its own summary line. The
+structured fields at the foot of the document say `RAS` for histological type, Gleason and ISUP.
+Extraction took the structured field; the narrative went unread; the agent then correctly refused
+to reason about a prostate cancer with no grade.
+
+**Why this is the most serious defect in the batch.** Every other failure mode in this project
+degrades a fiche. This one deletes it: a man with documented high-volume metastatic Gleason 9
+disease reached the tumour board with nothing. And the refusal is *well-behaved* — it names the
+missing field, it does not guess, it does not proceed. A refusal that is locally correct and
+globally wrong is harder to notice than a bad recommendation, because everything about it looks
+like the system working.
+
+**Where the fix belongs.** In extraction, not in the agent. `RAS` in a structured field means
+*rien à signaler* — "nothing to report" — which is a claim about the clinical finding, not a
+statement that the field was never filled in. Where the narrative contains the value and the
+structured field says `RAS`, the narrative is the record and the field is a transcription lapse.
+Two candidate rules, both cheap to state and neither yet implemented:
+
+- A field whose value is `RAS` should be treated as **absent**, not as a value, when the
+  document body contains a recognisable value for the same concept.
+- Extraction should surface the conflict rather than silently prefer one side, so that a
+  contested reading reaches the fiche as a contested reading — the mechanism `Trigger.evaluate`
+  already uses for support items.
+
+**Scope.** One dossier of fifteen, found only because the run failed loudly. A structured field
+saying `RAS` where the narrative holds a *less* critical value would have produced a fiche with a
+silent gap, and nothing would have flagged it. The rate of that quieter version is unmeasured.
+
+## 7d. The corpus is nine documents wide in practice, not thirty-seven
+
+**Across fourteen fiches, nine of the corpus's thirty-seven documents were cited. Twenty-eight
+were never cited once.** Citation counts:
+
+| Citations | Document |
+|---:|---|
+| 41 | `afu.prostate.2024-2026` |
+| 12 | `aua.bladder-mibc.2024` |
+| 9 | `eau.bladder-nmibc.2026` |
+| 8 | `afu.bladder-tvim.2024-2026` |
+| 7 | `afu.bladder-geriatric-management.2019` |
+| 5 | `afu.prostate-geriatric.2019` |
+| 3 | `afu.bladder-tvnim.2024-2026` |
+| 3 | `esmo.bladder.2022` |
+| 1 | `eau-esmo.bladder-advanced-variant.2020` |
+
+**About seventeen of the twenty-eight are explained by the panel not existing yet.** The three
+ASPEN and two ESPEN documents, `esmo.cancer-cachexia`, the four SIOG documents,
+`esmo-siog.geriatric-assessment`, `sfap.pallia10`, both RECIST documents, `acr.pi-rads` and
+`who-iarc.urinary-male-genital` belong to nutrition, geriatrics, radiology and pathology roles.
+Only `urology_oncology` ran. Their absence is expected and is not evidence of anything.
+
+**The remaining eleven are not explained.** These are core urology guidelines that admit
+`urology_oncology`, are retrieval-eligible and are embedded:
+
+`eau.prostate.2026` (445 eligible passages) · `nccn.prostate.6.2026` (265) ·
+`nccn.bladder.3.2026` (209) · `eau.bladder-mibc.2026` (178) · `aua.prostate-advanced.2026` (72) ·
+`aua.prostate-localized.2026` (54) · `aua.bladder-nmibc.2024` (62) · `aua.prostate-salvage.2024` ·
+`aua.prostate-early-detection.2026` · `esmo.prostate-advanced.2020` · `esmo.prostate-local.2020`
+
+**The first hypothesis was wrong and worth recording.** The obvious explanation was that these
+documents are English and the queries are French, or that a filter dimension excludes them. Both
+were checked and both are false: `agent_roles` on all of them admits `urology_oncology`, and a
+direct probe asking *"Quel traitement systémique de première ligne pour un cancer de la prostate
+métastatique hormonosensible à forte charge tumorale ?"* returns, in rank order,
+`eau.prostate.2026` first, `aua.prostate-advanced.2026` second, `esmo.prostate-advanced.2020`
+third and `nccn.prostate.6.2026` fourth. **The retriever finds them immediately.** A French query
+against English passages is not the obstacle.
+
+**The actual cause is the question, and there is only one of it per dossier.**
+`_default_question` in `agents/bundle.py` builds the same generic string for every patient:
+
+> Proposition de stratégie thérapeutique pour un cancer de prostate : options de traitement,
+> indications et contre-indications.
+
+Probed directly, that question returns **ten AFU passages out of ten** for prostate — a
+single-document monoculture — and a mixed set for bladder. It reproduces the citation table above
+exactly. The generic phrasing matches AFU's French section headings (*indications*,
+*traitement chirurgical*, *radiothérapie*, *curiethérapie*) as near-literal string matches, and
+AFU's prostate guideline is one 148-passage document covering every stage at once, so it fills
+all ten slots before a stage-specific English decision table can compete. Bladder escapes the
+monoculture only because AFU splits bladder across three narrower documents.
+
+**What this costs.** The agent reasons about a metastatic patient from passages retrieved by a
+question that never mentions metastasis. Dossier 12 shows the consequence: a de-novo metastatic,
+high-volume, hormone-sensitive prostate cancer whose clinical content is sound, but whose main
+proposal cites five dossier snippets and exactly one guideline passage —
+`afu.prostate.2024-2026.traitement-chirurgical` — a **surgical** passage attached to a metastatic
+recommendation. The passages that directly answer that patient's question sit at ranks 1–4 of a
+query the system never issues.
+
+**The shape of the fix, not yet implemented.** One retrieval per dossier is the constraint, not
+the corpus. Options, in increasing order of cost: derive the question from the staged disease
+setting the query builder already computes, so a metastatic patient asks a metastatic question;
+or issue several questions per dossier — one per decision the fiche actually poses (systemic
+therapy, local treatment, supportive care) — and merge the results. The second is closer to how
+the fiche is structured, and would also give the currently-unused documents a route in.
+
+**Worth stating plainly:** the corpus is not too small, and retrieval is not broken. Those eleven documents hold **1,465 of the corpus's 2,612 retrieval-eligible passages — 56%** —
+and none of them was reached by the one question the system asks.
 
 ## 8. Order of work
 
