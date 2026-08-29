@@ -128,7 +128,10 @@ class BundleInputs(Strict):
     """Everything the agent may know about the case.
 
     Adding a field here is a deliberate act. In particular there is no field for another
-    agent's recommendation: the first pass is independent by construction.
+    agent's recommendation **on a first pass**: independence is the property that makes a panel
+    worth convening, and it is enforced here rather than requested in a brain. `agent_opinions`
+    is the one exception, populated only for the synthesis role, whose entire job is to read
+    what the specialists said; a bundle carrying it sets `first_pass=False` and says so.
     """
 
     case_id: str
@@ -147,6 +150,8 @@ class BundleInputs(Strict):
     missing_fields: list[str] = Field(default_factory=list)
     conflicting_fields: list[ConflictingField] = Field(default_factory=list)
     safety_constraints: list[str] = Field(default_factory=list)
+    # Empty for every first pass. Populated only for `rcp_synthesis`.
+    agent_opinions: list["AgentOpinion"] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def citable_ids_are_unique(self) -> "BundleInputs":
@@ -175,19 +180,27 @@ class BundleInputs(Strict):
         return self
 
     @model_validator(mode="after")
-    def a_custom_question_is_not_a_first_pass(self) -> "BundleInputs":
+    def independence_is_derived_not_declared(self) -> "BundleInputs":
         """`first_pass` states a fact about the bundle rather than accepting a claim.
 
-        It is derived from whether an operator supplied a question, so it cannot drift
-        out of step with the thing it describes. Setting it explicitly to the wrong value
-        is rejected rather than quietly corrected: silently fixing a safety flag would
-        hide a caller that misunderstood what it means.
+        It is derived from what the bundle actually carries, so it cannot drift out of step
+        with the thing it describes. Setting it explicitly to the wrong value is rejected
+        rather than quietly corrected: silently fixing a safety flag would hide a caller that
+        misunderstood what it means.
+
+        **Two things end independence, and the second was added later.** An operator's free-text
+        question is one — nothing stops someone pasting another agent's opinion into it.
+        `agent_opinions` is the other, and a much plainer one: a bundle holding the specialists'
+        conclusions is the opposite of an independent first pass. When only the question was
+        checked here, building the synthesis bundle failed against this very validator, which is
+        the check doing its job — the premise that a question was the *only* way to lose
+        independence had quietly stopped being true.
         """
-        derived = not self.clinical_question
+        derived = not self.clinical_question and not self.agent_opinions
         if "first_pass" in self.model_fields_set and self.first_pass != derived:
             raise ValueError(
-                "clinical_question is operator-supplied free text, so a bundle carrying "
-                f"one cannot declare first_pass={self.first_pass}"
+                "first_pass is derived from what the bundle carries (a clinical_question or "
+                f"another agent's opinions), so it cannot be declared {self.first_pass} here"
             )
         self.first_pass = derived
         return self
@@ -284,6 +297,122 @@ class AgentOutput(Strict):
         return self
 
 
+class AgentOpinion(Strict):
+    """One specialist's finished opinion, as the synthesis agent reads it.
+
+    **This is the field `BundleInputs` says is deliberately absent, present for exactly one
+    role.** Every other agent's bundle omits it, and `first_pass` records which kind of bundle
+    this is. A synthesis that never saw the opinions could not name a divergence; a first pass
+    that saw them would not be independent, and the panel's whole value is that the specialists
+    did not read each other.
+
+    Carried as structured fields rather than prose so the synthesis cites positions rather than
+    paraphrasing them, and so `agent_role` on each opinion is the name it must use when it
+    reports who disagreed with whom.
+    """
+
+    agent_role: str = Field(min_length=1, max_length=64)
+    recommendation: str = Field(min_length=1, max_length=MAX_TEXT)
+    alternatives: list[TreatmentOption] = Field(default_factory=list)
+    rejected_options: list[TreatmentOption] = Field(default_factory=list)
+    contraindications: list[str] = Field(default_factory=list)
+    uncertainty_notes: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    evidence_references: list[EvidenceReference] = Field(default_factory=list)
+    recommendation_withheld: bool = False
+    rationale: str = Field(default="", max_length=MAX_RATIONALE_CHARACTERS)
+
+
+# `BundleInputs.agent_opinions` is annotated as a string above, because the opinion is
+# built from output types and this file puts inputs first. Resolve it now that they exist.
+BundleInputs.model_rebuild()
+
+
+SYNTHESIS_ROLE = "rcp_synthesis"
+
+
+class AgentPosition(Strict):
+    """One specialist's side of a disagreement, named rather than paraphrased."""
+
+    role: str = Field(min_length=1, max_length=64)
+    position: str = Field(min_length=1, max_length=MAX_TEXT)
+
+
+class Convergence(Strict):
+    """A point the specialists reached independently, and who reached it.
+
+    `agents_agreeing` needs at least two entries: one agent saying something is not a
+    convergence, it is that agent's opinion, and recording it as agreement would manufacture
+    consensus out of a single voice — the exact failure a panel exists to prevent.
+    """
+
+    point: str = Field(min_length=1, max_length=MAX_TEXT)
+    agents_agreeing: list[str] = Field(min_length=2)
+    evidence_summary: str = Field(default="", max_length=MAX_TEXT)
+
+
+class Divergence(Strict):
+    """A point the specialists did not reach together.
+
+    **Exposed, never resolved.** RCPia does not arbitrate between two specialists — that is
+    what the board is for — so this type has no field for a preferred side. `clinical_impact`
+    is what makes the disagreement actionable: a divergence that changes nothing for the patient
+    does not need board time, and one that changes the treatment does.
+    """
+
+    point: str = Field(min_length=1, max_length=MAX_TEXT)
+    agent_a: AgentPosition
+    agent_b: AgentPosition
+    clinical_impact: str = Field(min_length=1, max_length=MAX_TEXT)
+    # Whether the board must settle this before a plan can proceed.
+    resolution_required: bool = True
+
+
+class SupportiveCarePlan(Strict):
+    """The support half of the plan, which no single specialist owns.
+
+    Every field is optional prose: a synthesis with nothing to say about psychological support
+    should say nothing rather than invent a line to fill the shape.
+    """
+
+    nutrition: str | None = Field(default=None, max_length=MAX_TEXT)
+    pain_management: str | None = Field(default=None, max_length=MAX_TEXT)
+    psychological_support: str | None = Field(default=None, max_length=MAX_TEXT)
+    nursing: str | None = Field(default=None, max_length=MAX_TEXT)
+    social: str | None = Field(default=None, max_length=MAX_TEXT)
+
+
+class SynthesisOutput(AgentOutput):
+    """What the synthesis agent returns: a specialist's opinion plus what the panel disagreed on.
+
+    A subclass rather than optional fields on `AgentOutput`, because the difference is not
+    decoration. Every other agent is forbidden to hold another agent's opinion, so no other
+    agent *can* report a convergence; a schema that let them would be describing a system where
+    the first pass is not independent.
+    """
+
+    convergences: list[Convergence] = Field(default_factory=list)
+    divergences: list[Divergence] = Field(default_factory=list)
+    supportive_care_plan: SupportiveCarePlan | None = None
+
+    @model_validator(mode="after")
+    def a_synthesis_reports_what_it_compared(self) -> "SynthesisOutput":
+        """Silence about both agreement and disagreement is not a synthesis.
+
+        An agent that read two opinions and reported neither a convergence nor a divergence has
+        either not compared them or has hidden the comparison in prose, and in both cases the
+        board is being handed a single plan whose provenance it cannot see. Withholding a
+        recommendation is exempt: an agent that cannot conclude is not required to have found
+        structure first.
+        """
+        if not self.recommendation_withheld and not self.convergences and not self.divergences:
+            raise ValueError(
+                "Une synthèse doit rapporter au moins une convergence ou une divergence : "
+                "sans cela, elle présente un plan unique sans montrer d'où il vient."
+            )
+        return self
+
+
 class UncitedEvidence(ValueError):
     """The agent cited an id it was never given."""
 
@@ -365,6 +494,15 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
         )
 
 
-def agent_output_json_schema() -> dict[str, Any]:
+def output_model_for(agent_role: str) -> type[AgentOutput]:
+    """Which output schema this role answers under.
+
+    One place decides it, so the schema an agent is *given* and the schema its answer is
+    *checked against* cannot drift apart — they are the same call.
+    """
+    return SynthesisOutput if agent_role == SYNTHESIS_ROLE else AgentOutput
+
+
+def agent_output_json_schema(agent_role: str = "") -> dict[str, Any]:
     """The schema embedded in the bundle, so the agent is told exactly what to return."""
-    return AgentOutput.model_json_schema()
+    return output_model_for(agent_role).model_json_schema()

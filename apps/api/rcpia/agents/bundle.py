@@ -21,7 +21,10 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.agents.evidence import guideline_passages_for
+from rcpia.agents.opinions import prior_opinions
 from rcpia.agents.schemas import (
+    SYNTHESIS_ROLE,
+    AgentOpinion,
     BundleInputs,
     ConflictingField,
     GuidelinePassage,
@@ -173,9 +176,16 @@ async def build_bundle(
 
     report = completeness.assess(entries, cancer_type=case.cancer_type)
 
+    # The synthesis reads opinions, not the corpus. Its evidence is whatever the specialists
+    # already cited, gathered below, so that it can quote their grounds without being handed a
+    # separate search that might ground a *different* claim than the one it is reconciling.
+    opinions: list[AgentOpinion] = []
     passages: list[GuidelinePassage] = []
     evidence_notes: list[str] = []
-    if embedder is not None and reranker is not None:
+    if agent_role == SYNTHESIS_ROLE:
+        opinions, passages, synthesis_notes = await prior_opinions(session, case_id=case.id)
+        evidence_notes.extend(synthesis_notes)
+    elif embedder is not None and reranker is not None:
         passages, evidence_notes = await guideline_passages_for(
             session,
             cancer_type=str(case.cancer_type),
@@ -281,7 +291,6 @@ async def build_bundle(
         clinical_question=clinical_question,
         # Free text can carry another agent's opinion, so a bundle carrying a question is
         # not an independent first pass and must not claim to be.
-        first_pass=not clinical_question,
         ledger_version=version.version,
         case_ledger=ledger_fields,
         source_snippets=snippets,
@@ -293,6 +302,8 @@ async def build_bundle(
         missing_fields=[entry.key for entry in entries if entry.highlight == RED],
         conflicting_fields=conflicts,
         safety_constraints=list(SAFETY_CONSTRAINTS),
+        # Populated only for the synthesis role; every first pass leaves this empty.
+        agent_opinions=opinions,
     )
 
     constraints = [
@@ -300,7 +311,18 @@ async def build_bundle(
         *report.limitation_notes(),
         *evidence_notes,
     ]
-    if not passages:
+    if agent_role == SYNTHESIS_ROLE:
+        constraints.append(
+            "Vous recevez les avis déjà rendus par les spécialistes. Rapportez leurs "
+            "convergences et leurs divergences ; n'arbitrez pas un désaccord et ne "
+            "choisissez pas entre deux spécialités — exposez le désaccord à la RCP."
+        )
+        if not opinions:
+            constraints.append(
+                "Aucun avis de spécialité n'a pu être chargé : aucune synthèse n'est "
+                "possible et vous devez le dire explicitement."
+            )
+    elif not passages:
         constraints.append(
             "Aucun passage des recommandations n'est fourni : votre avis n'est pas étayé "
             "par un référentiel et doit le dire explicitement."
@@ -330,7 +352,7 @@ async def build_bundle(
         inputs=inputs,
         # By field name, not by the `schema` alias: `schema_` avoids shadowing
         # pydantic's own attribute, and the alias is what serialization emits.
-        output_format=OutputFormat(schema_=agent_output_json_schema()),
+        output_format=OutputFormat(schema_=agent_output_json_schema(agent_role)),
         constraints=constraints,
     )
 

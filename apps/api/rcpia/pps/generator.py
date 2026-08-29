@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.agents.bundle import entries_from_version
-from rcpia.agents.schemas import AgentOutput
+from rcpia.agents.schemas import SYNTHESIS_ROLE, AgentOutput, output_model_for
 from rcpia.cases import completeness
 from rcpia.cases.ledger import AMBER, LedgerEntry, display_label, latest_version
 from rcpia.core.models import AgentRun, AgentRunStatus, Case, CaseLedgerVersion
@@ -513,7 +513,9 @@ async def latest_runs(
         if run.agent_role in seen or run.output is None:
             continue
         seen.add(run.agent_role)
-        runs.append((run, AgentOutput.model_validate(run.output)))
+        # By role: a synthesis carries convergences and divergences that `AgentOutput` forbids,
+        # and validating it as one would drop the only run entitled to present a single plan.
+        runs.append((run, output_model_for(run.agent_role).model_validate(run.output)))
     return runs
 
 
@@ -534,10 +536,19 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
             "générer le PPS."
         )
 
-    if len(runs) > 1:
+    # The synthesis, when one exists, is the run section 3 speaks from. It is the only run
+    # that read the others, so it is the only one entitled to present a single plan.
+    synthesis = next(
+        ((run, output) for run, output in runs if run.agent_role == SYNTHESIS_ROLE), None
+    )
+    if synthesis is not None:
+        runs = [synthesis] + [
+            (run, output) for run, output in runs if run.agent_role != SYNTHESIS_ROLE
+        ]
+    elif len(runs) > 1:
         # Refused rather than arbitrated. Section 3 carries one plan, and picking the
         # most recently finished run would let the job queue decide which speciality a
-        # clinician reads first. Phase 9's synthesis agent is what reconciles these.
+        # clinician reads first. The synthesis agent is what reconciles these.
         specialities = ", ".join(sorted(agent_label(run.agent_role) for run, _ in runs))
         raise SynthesisRequired(
             f"Plusieurs avis de spécialité existent pour ce dossier ({specialities}) et "

@@ -39,6 +39,7 @@ from rcpia.agents.schemas import (
     UncitedEvidence,
     UngroundedRecommendation,
     check_citations,
+    output_model_for,
 )
 from rcpia.cases.ledger import latest_version
 from rcpia.core.models import (
@@ -272,8 +273,11 @@ def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
     """Parse, validate, and reject anything the agent was not entitled to say."""
     payload = result.output_json()
 
+    # The schema the answer is checked against is the schema the bundle asked for -- one
+    # call decides both, so a synthesis is not rejected for returning the fields it was told
+    # to return.
     try:
-        output = AgentOutput.model_validate(payload)
+        output = output_model_for(bundle.inputs.agent_role).model_validate(payload)
     except ValidationError as exc:
         raise PiOutputInvalid(
             f"La réponse de {result.agent_name} ne respecte pas le schéma demandé : "

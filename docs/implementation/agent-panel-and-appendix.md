@@ -345,6 +345,64 @@ the fiche is structured, and would also give the currently-unused documents a ro
 **Worth stating plainly:** the corpus is not too small, and retrieval is not broken. Those eleven documents hold **1,465 of the corpus's 2,612 retrieval-eligible passages — 56%** —
 and none of them was reached by the one question the system asks.
 
+## 7e. The synthesis runs, and its first answer manufactures a consensus
+
+**Added 29 August.** The `rcp_synthesis` agent is wired and the three-agent pipeline completes:
+dossier to facts to filter to dual retrieval to two independent specialists to a synthesis that
+reads both, in 3 minutes 32 seconds for dossier 2. The generator now accepts the synthesis as
+the run section 3 speaks from, so a PPS renders from a panel for the first time.
+
+**Two of the three things it was asked to find, it found.** On dossier 2 it reported seven
+convergences, including the two that were predicted:
+
+- *"La chimiothérapie néoadjuvante à base de cisplatine ne doit pas être proposée en l'état"* —
+  grounded in the DFG of 30 against the 60 mL/min threshold.
+- *"Une évaluation oncogériatrique, anesthésique, nutritionnelle et rénale est indispensable"* —
+  grounded in **G8 5, ADL 4 and MNA 7 being discordant with an OMS of 1**, which is a sharper
+  statement than either specialist made alone.
+
+**The third it got wrong, and the way it got it wrong is the finding.** The carboplatin question
+was the known divergence: medical oncology rejects the substitution on AUA grounds, and the
+urologist has not mentioned carboplatin at all since its question was specialised — **zero
+mentions in this run, confirmed by search of its stored output**. The synthesis recorded it as a
+*convergence*, attributed to both specialities:
+
+> La chimiothérapie néoadjuvante à base de cisplatine ne doit pas être proposée en l'état, et le
+> carboplatine ne doit pas la remplacer. — *agents: medical_oncology, urology_oncology*
+
+**It reported zero divergences.** A panel of two specialists who demonstrably do not cover the
+same ground produced, on its first run, a document saying they agreed about everything.
+
+**Silence was read as assent.** The brain states the converse rule — *"Un agent qui s'abstient
+n'est pas en désaccord"* — and that rule is correct. Its mirror is missing: an agent that said
+nothing has not agreed either. A specialist who never raised carboplatin holds no position on
+carboplatin, and a synthesis that lists it under `agents_agreeing` has invented one.
+
+**The schema guard was necessary and is not sufficient.** `Convergence.agents_agreeing` requires
+at least two entries, precisely so that one voice cannot be recorded as consensus. That check
+counts names; it cannot verify that a named speciality actually took the position. The
+manufactured convergence here satisfies the guard perfectly — both roles exist, both were
+genuine inputs, and one of them simply never spoke to the point.
+
+**Why this matters more than a wrong answer.** Every other defect in this project has been
+visible: a missing fiche, an empty citation, a passage from the wrong stage. This one is
+*invisible in the output* — the fiche reads as a well-supported consensus, and the only way to
+know it is not one is to go back to the specialists' stored opinions and grep. A board reading
+the fiche would see agreement where there is a gap, which is the precise failure a
+multidisciplinary panel is convened to prevent.
+
+**Two candidate fixes, neither implemented.** The cheap one is the brain: state that silence is
+not agreement, and that a point raised by one speciality and unaddressed by another is neither a
+convergence nor a divergence but a *coverage gap* worth its own field. The stronger one is
+mechanical: a convergence naming a speciality could be checked against whether that speciality's
+opinion contains the terms at issue — crude, but it would have caught this exact case, where the
+word appears five times in one opinion and zero times in the other.
+
+**Also not yet done: the fiche does not render them.** The convergences and divergences are
+stored on the run and shown in no section of the document. The board currently gets the
+synthesis's single plan without the agreement structure that justifies it, which removes the
+main reason to run a synthesis at all.
+
 ## 8. Order of work
 
 Blocked-on order, not preference. Steps 1 and 2 are the critical path and everything else waits
