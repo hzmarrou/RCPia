@@ -16,6 +16,7 @@ from rcpia.agents.schemas import (
     AgentOutput,
     BundleInputs,
     Convergence,
+    CoverageGap,
     Divergence,
     EvidenceReference,
     SynthesisOutput,
@@ -67,9 +68,13 @@ def test_a_specialist_may_not_return_synthesis_fields() -> None:
 # --- What a synthesis must say ----------------------------------------------------------------
 
 
-def test_a_synthesis_reporting_neither_agreement_nor_disagreement_is_rejected() -> None:
-    """A single plan with no visible provenance is what the synthesis exists to prevent."""
-    with pytest.raises(ValidationError, match="convergence ou une divergence"):
+def test_a_synthesis_reporting_no_structure_at_all_is_rejected() -> None:
+    """A single plan with no visible provenance is what the synthesis exists to prevent.
+
+    Any one of the three categories satisfies this — a panel that only produced coverage gaps
+    has still reported how its members related to each other.
+    """
+    with pytest.raises(ValidationError, match="convergence, une divergence ou une"):
         SynthesisOutput.model_validate(an_output(SYNTHESIS_ROLE))
 
 
@@ -205,3 +210,58 @@ def test_a_caller_may_not_declare_itself_independent_while_holding_opinions() ->
                 AgentOpinion(agent_role="urology_oncology", recommendation="Cystectomie.")
             ],
         )
+
+
+# --- Coverage gaps: the category the first run lacked ------------------------------------------
+
+
+def test_a_coverage_gap_satisfies_the_structure_requirement() -> None:
+    """A panel where one speciality raised everything the other did not is still a synthesis."""
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            coverage_gaps=[
+                {
+                    "point": "Remplacement du cisplatine par le carboplatine",
+                    "raised_by": ["medical_oncology"],
+                    "silent": ["urology_oncology"],
+                    "clinical_impact": "Examiné par une seule spécialité.",
+                }
+            ],
+        )
+    )
+    assert output.convergences == []
+    assert output.coverage_gaps[0].silent == ["urology_oncology"]
+
+
+def test_a_speciality_cannot_both_raise_a_point_and_be_silent_on_it() -> None:
+    """Both claims cannot be true, and a board would have no way to tell which to believe."""
+    with pytest.raises(ValidationError, match="silencieuse"):
+        SynthesisOutput.model_validate(
+            an_output(
+                SYNTHESIS_ROLE,
+                coverage_gaps=[
+                    {
+                        "point": "Carboplatine",
+                        "raised_by": ["medical_oncology"],
+                        "silent": ["medical_oncology", "urology_oncology"],
+                    }
+                ],
+            )
+        )
+
+
+def test_a_gap_names_someone_on_both_sides() -> None:
+    """A gap with nobody silent is not a gap, and one with nobody raising it is not a point."""
+    for raised, silent in ((["medical_oncology"], []), ([], ["urology_oncology"])):
+        with pytest.raises(ValidationError):
+            CoverageGap(point="Carboplatine", raised_by=raised, silent=silent)
+
+
+def test_the_synthesis_schema_offers_the_gap_category_to_the_agent() -> None:
+    """The agent can only use a category the bundle told it about.
+
+    The first synthesis run had two boxes for a three-way distinction and put a speciality's
+    silence in the `convergence` box.
+    """
+    assert "coverage_gaps" in agent_output_json_schema(SYNTHESIS_ROLE)["properties"]

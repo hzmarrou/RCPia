@@ -156,6 +156,70 @@ def _support(item: SupportItem) -> list[str]:
     return [*lines, ""]
 
 
+# The marker for each kind of panel point. A convergence and a disagreement must not look
+# alike at a glance: the board scans this block before it reads it.
+PANEL_MARKS = {"convergence": "🟢", "divergence": "🔴", "gap": "⚪"}
+
+PANEL_KIND_LABELS = {
+    "convergence": "Accord",
+    "divergence": "Désaccord",
+    "gap": "Non traité par tous",
+}
+
+
+def _panel(document: PpsDocument) -> list[str]:
+    """What the specialists agreed on, disagreed on, and did not both address.
+
+    **Not a numbered section.** The six numbered sections are the hospital's own form, and
+    inserting a seventh would renumber a document clinicians read by position. This is a titled
+    block before section 3, the same shape as `Points signalés par RCPia`.
+
+    Rendered only for a panel. One agent has nothing to converge with, and a block announcing
+    unanimity among a single speciality would be actively misleading.
+    """
+    if not document.panel.points:
+        return []
+
+    out = ["**Concordance du panel — lectures non validées**", ""]
+    if document.panel.specialities:
+        out += [
+            "Avis comparés : " + ", ".join(document.panel.specialities) + ".",
+            "",
+        ]
+    # Stated once, here, because it is the thing this block exists to make visible: an
+    # agreement is only an agreement among the specialities named on its line.
+    out += [
+        "> Chaque point porte les spécialités qui l'ont soutenu. Une spécialité qui ne s'est "
+        "pas exprimée sur un point n'y a pas consenti : elle figure alors comme non traitée.",
+        "",
+    ]
+
+    rows = [("", "Point", "Positions")]
+    for point in document.panel.points:
+        mark = PANEL_MARKS.get(point.kind, "•")
+        label = PANEL_KIND_LABELS.get(point.kind, point.kind)
+        # Separated, because attribution and reasoning are different claims: who held the
+        # point, then why. Run together they read as one sentence and the provenance -- the
+        # thing this block exists to show -- stops being legible. A dash rather than a line
+        # break: `_no_html` keeps markup out of this document, and the renderer should not
+        # grant itself an exemption from a rule it enforces on agent text.
+        detail = f" — *{_inline(point.detail)}*" if point.detail else ""
+        rows.append(
+            (
+                mark,
+                f"**{label}.** {_inline(point.point)}",
+                f"**{_inline(point.attribution)}**{detail}",
+            )
+        )
+
+    out.append("| " + " | ".join(rows[0]) + " |")
+    out.append("|---|---|---|")
+    for row in rows[1:]:
+        out.append("| " + " | ".join(row) + " |")
+    out.append("")
+    return out
+
+
 def render_markdown(document: PpsDocument) -> str:
     """The whole document. French throughout, because the readers are the RCP."""
     out: list[str] = ["# FICHE RCP — PROPOSITION DE PRISE EN CHARGE (PPS)", ""]
@@ -217,6 +281,10 @@ def render_markdown(document: PpsDocument) -> str:
     out += [f"{UNCHECKED} Décision prise", "", document.decision.statement, ""]
     for referral in document.decision.referrals:
         out += _referral(referral)
+
+    # The panel's agreement structure, before the plan it produced: a reader should know
+    # what was disputed before reading what is proposed.
+    out += _panel(document)
 
     # ------------------------------------------------------------------ 3
     out += [f"# 3 — {SECTION_TITLES[2]}", ""]

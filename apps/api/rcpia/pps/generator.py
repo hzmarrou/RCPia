@@ -21,7 +21,12 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.agents.bundle import entries_from_version
-from rcpia.agents.schemas import SYNTHESIS_ROLE, AgentOutput, output_model_for
+from rcpia.agents.schemas import (
+    SYNTHESIS_ROLE,
+    AgentOutput,
+    SynthesisOutput,
+    output_model_for,
+)
 from rcpia.cases import completeness
 from rcpia.cases.ledger import AMBER, LedgerEntry, display_label, latest_version
 from rcpia.core.models import AgentRun, AgentRunStatus, Case, CaseLedgerVersion
@@ -31,6 +36,8 @@ from rcpia.pps.schemas import (
     EvidenceEntry,
     Field2,
     MissingItem,
+    PanelAgreement,
+    PanelPoint,
     PpsDocument,
     RationaleAppendix,
     SocialAssessment,
@@ -490,6 +497,72 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
     return entries
 
 
+def build_panel(output: AgentOutput, roles: Sequence[str]) -> PanelAgreement:
+    """The synthesis's comparison, flattened for the reader.
+
+    **Attribution is spelled out rather than implied.** The first synthesis run recorded a
+    speciality as agreeing to a point it had never mentioned, and the fiche showed no trace of
+    it — the defect was invisible to everyone who did not open the stored opinions. Printing who
+    held each point, on the line with the point, is what makes that checkable by the board
+    rather than by a maintainer with a JSON reader.
+    """
+    if not isinstance(output, SynthesisOutput):
+        return PanelAgreement()
+
+    points: list[PanelPoint] = []
+    for convergence in output.convergences:
+        points.append(
+            PanelPoint(
+                kind="convergence",
+                point=convergence.point,
+                attribution="Convergence — "
+                + ", ".join(agent_label(role) for role in convergence.agents_agreeing),
+                detail=convergence.evidence_summary,
+            )
+        )
+    for divergence in output.divergences:
+        points.append(
+            PanelPoint(
+                kind="divergence",
+                point=divergence.point,
+                attribution=(
+                    f"{agent_label(divergence.agent_a.role)} : {divergence.agent_a.position}"
+                    f" — contre — "
+                    f"{agent_label(divergence.agent_b.role)} : {divergence.agent_b.position}"
+                ),
+                detail=divergence.clinical_impact
+                + (
+                    "  Arbitrage RCP requis."
+                    if divergence.resolution_required
+                    else "  Sans conséquence sur la conduite proposée."
+                ),
+            )
+        )
+    for gap in output.coverage_gaps:
+        points.append(
+            PanelPoint(
+                kind="gap",
+                point=gap.point,
+                attribution=(
+                    "Soulevé par "
+                    + ", ".join(agent_label(role) for role in gap.raised_by)
+                    + " — non abordé par "
+                    + ", ".join(agent_label(role) for role in gap.silent)
+                ),
+                detail=gap.clinical_impact,
+            )
+        )
+
+    return PanelAgreement(
+        points=points,
+        # The synthesis is the agent doing the comparing, not one of the opinions compared.
+        # Listing it here read as a third speciality having agreed with the other two.
+        specialities=[
+            agent_label(role) for role in roles if role != SYNTHESIS_ROLE
+        ],
+    )
+
+
 async def latest_runs(
     session: AsyncSession, *, case_id: uuid.UUID
 ) -> list[tuple[AgentRun, AgentOutput]]:
@@ -594,6 +667,9 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
         ),
         generator_version=GENERATOR_VERSION,
         decision=build_decision(values, contested=contested),
+        # Only a synthesis has a panel to report on; a single opinion yields an empty
+        # block and the renderer prints nothing.
+        panel=build_panel(lead_output, roles),
         treatments=build_treatments(lead_output),
         support=build_support(values, agent_roles=roles, contested=contested),
         social=build_social(values),

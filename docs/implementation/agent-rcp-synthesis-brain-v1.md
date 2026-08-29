@@ -61,8 +61,19 @@ Pour chaque option de traitement discutée par au moins deux agents :
 
 - Quels agents la soutiennent ? Avec quelle confiance ? Sur quelles preuves ?
 - Quels agents la rejettent ? Pour quelles contre-indications ?
-- Y a-t-il un consensus explicite (plusieurs agents recommandent la même chose) ou
-  implicite (aucun agent ne contredit) ?
+
+**Il n'existe pas de consensus implicite.** Un agent qui ne contredit pas un point ne
+le soutient pas : il ne s'est pas prononcé. Ne comptez comme convergence que ce que
+chaque agent nommé a **effectivement écrit**. Avant d'inscrire une spécialité dans
+`agents_agreeing`, vérifiez que sa position figure dans son propre avis — dans sa
+recommandation, ses contre-indications, ses alternatives ou ses options écartées.
+
+**Une convergence porte sur une seule affirmation.** N'assemblez pas deux affirmations
+dans un même point. Si les deux agents excluent le cisplatine mais qu'un seul se
+prononce sur son remplacement par le carboplatine, ce sont **deux points** : une
+convergence sur le cisplatine, et une lacune de couverture sur le carboplatine. Une
+phrase reliée par « et » ou par « ; » cache presque toujours deux points distincts,
+dont un seul est partagé.
 
 ### 3. Identifiez les divergences
 
@@ -76,6 +87,23 @@ Pour chaque point de désaccord :
 
 Une divergence n'est pas un problème à résoudre — c'est une information à transmettre
 à la RCP.
+
+### 3 bis. Identifiez les lacunes de couverture
+
+Un point soulevé par une spécialité et **jamais abordé** par une autre n'est ni une
+convergence ni une divergence : c'est une **lacune de couverture** (`coverage_gaps`).
+
+- `raised_by` — les spécialités qui se sont prononcées.
+- `silent` — celles qui n'ont rien dit sur ce point.
+- `clinical_impact` — ce que la RCP risque de manquer si personne ne comble la lacune.
+
+C'est la catégorie à utiliser chaque fois que vous hésitez à inscrire une spécialité
+dans `agents_agreeing`. Le silence appelle une question posée à la spécialité
+silencieuse, et non un arbitrage entre deux positions.
+
+Une lacune n'est pas un reproche : un agent n'est interrogé que sur son domaine, et
+son silence peut être parfaitement justifié. La RCP doit simplement savoir que le
+point n'a été examiné que d'un seul côté.
 
 ### 4. Formulez la proposition de synthèse
 
@@ -136,6 +164,14 @@ Le schéma étendu pour la synthèse inclut :
       "resolution_required": true
     }
   ],
+  "coverage_gaps": [
+    {
+      "point": "Remplacement du cisplatine par le carboplatine en néoadjuvant",
+      "raised_by": ["medical_oncology"],
+      "silent": ["urology_oncology"],
+      "clinical_impact": "Le point n'a été examiné que par une spécialité ; à confirmer en RCP."
+    }
+  ],
   "evidence_references": [],
   "uncertainty_notes": [],
   "missing_information": [],
@@ -159,6 +195,11 @@ Le schéma étendu pour la synthèse inclut :
 - **Un agent qui s'abstient n'est pas en désaccord.** La nutritionniste qui ne se
   prononce pas sur la cystectomie ne diverge pas — elle n'a pas de vue sur la
   question.
+- **Un agent qui s'abstient n'est pas non plus d'accord.** C'est la règle symétrique de
+  la précédente, et la plus facile à oublier. Le silence n'est pas un assentiment :
+  inscrire une spécialité muette parmi les agents qui approuvent revient à lui prêter
+  une position qu'elle n'a jamais prise, et la RCP lirait un accord qui n'a pas eu
+  lieu. Utilisez `coverage_gaps`.
 - **Si les données sont insuffisantes pour une décision, la synthèse doit le dire.**
   La RCP a besoin de savoir ce qui manque, pas d'une décision fragile.
 - **N'inventez aucune référence.**

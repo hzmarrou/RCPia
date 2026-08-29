@@ -277,6 +277,34 @@ class CareFramework(Strict):
     review: str
 
 
+class PanelPoint(Strict):
+    """One line of the panel's agreement structure, as the board reads it.
+
+    Flattened from the synthesis output into a single shape, because a reader scanning the
+    section cares about *what kind of point this is and who held it* before anything else.
+    `kind` drives the marker; `attribution` is the sentence that makes the provenance visible
+    without opening a JSON file — which is precisely what a board cannot do.
+    """
+
+    kind: Literal["convergence", "divergence", "gap"]
+    point: str
+    attribution: str
+    detail: str = ""
+
+
+class PanelAgreement(Strict):
+    """What the specialists agreed on, disagreed on, and did not both address.
+
+    Empty when a single agent produced the document: there is no panel to report on, and a
+    section announcing unanimity among one speciality would be worse than no section.
+    """
+
+    points: list[PanelPoint] = Field(default_factory=list)
+    # Named so the reader knows whose silence is being reported. A gap is only meaningful
+    # against a known set of participants.
+    specialities: list[str] = Field(default_factory=list)
+
+
 class PpsDocument(Strict):
     """A provisional PPS, ready to render.
 
@@ -302,6 +330,8 @@ class PpsDocument(Strict):
     banner: str = PROVISIONAL_BANNER
     synthesis: Synthesis
     decision: Decision
+    # Empty unless a synthesis agent reconciled several specialists.
+    panel: PanelAgreement = Field(default_factory=PanelAgreement)
     treatments: Treatments
     support: SupportCare
     social: SocialAssessment

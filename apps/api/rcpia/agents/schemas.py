@@ -382,6 +382,26 @@ class SupportiveCarePlan(Strict):
     social: str | None = Field(default=None, max_length=MAX_TEXT)
 
 
+class CoverageGap(Strict):
+    """A point one speciality raised and another never addressed.
+
+    **The category the first synthesis run did not have, and needed.** Asked to reconcile two
+    opinions where the medical oncologist ruled out carboplatin and the urologist never mentioned
+    it, the synthesis had only two boxes to put that in, and chose `convergence` — recording the
+    urologist as agreeing to something it had not said. Silence is not assent, and it is not
+    dissent either; it is a third thing, and a board needs to see it as a third thing, because
+    the action it calls for is *ask the silent speciality*, not *choose between two positions*.
+
+    `raised_by` and `silent` are separate lists rather than a pair, because the same gap can be
+    raised by two specialities and unaddressed by three.
+    """
+
+    point: str = Field(min_length=1, max_length=MAX_TEXT)
+    raised_by: list[str] = Field(min_length=1)
+    silent: list[str] = Field(min_length=1)
+    clinical_impact: str = Field(default="", max_length=MAX_TEXT)
+
+
 class SynthesisOutput(AgentOutput):
     """What the synthesis agent returns: a specialist's opinion plus what the panel disagreed on.
 
@@ -393,6 +413,7 @@ class SynthesisOutput(AgentOutput):
 
     convergences: list[Convergence] = Field(default_factory=list)
     divergences: list[Divergence] = Field(default_factory=list)
+    coverage_gaps: list[CoverageGap] = Field(default_factory=list)
     supportive_care_plan: SupportiveCarePlan | None = None
 
     @model_validator(mode="after")
@@ -405,11 +426,30 @@ class SynthesisOutput(AgentOutput):
         recommendation is exempt: an agent that cannot conclude is not required to have found
         structure first.
         """
-        if not self.recommendation_withheld and not self.convergences and not self.divergences:
+        structure = self.convergences or self.divergences or self.coverage_gaps
+        if not self.recommendation_withheld and not structure:
             raise ValueError(
-                "Une synthèse doit rapporter au moins une convergence ou une divergence : "
-                "sans cela, elle présente un plan unique sans montrer d'où il vient."
+                "Une synthèse doit rapporter au moins une convergence, une divergence ou une "
+                "lacune de couverture : sans cela, elle présente un plan unique sans montrer "
+                "d'où il vient."
             )
+        return self
+
+    @model_validator(mode="after")
+    def a_speciality_is_not_both_agreeing_and_silent(self) -> "SynthesisOutput":
+        """The same speciality cannot agree to a point and be silent on it.
+
+        Not a hypothetical: the failure this whole category exists for was a speciality being
+        listed as agreeing to something it never mentioned. If a later run reports both, the
+        two claims cannot both be true and the board would have no way to tell which to believe.
+        """
+        for gap in self.coverage_gaps:
+            overlap = set(gap.raised_by) & set(gap.silent)
+            if overlap:
+                raise ValueError(
+                    "Une spécialité ne peut pas être à la fois à l'origine d'un point et "
+                    f"silencieuse sur ce point : {', '.join(sorted(overlap))}"
+                )
         return self
 
 

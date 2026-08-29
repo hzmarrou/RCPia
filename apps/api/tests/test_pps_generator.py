@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rcpia.agents.pi_adapter import PiAdapter
 from rcpia.agents.routes import dedupe_key_for
+from rcpia.agents.schemas import SYNTHESIS_ROLE, AgentOutput, SynthesisOutput
 from rcpia.agents.service import run_agent
 from rcpia.auth import security, throttle
 from rcpia.cases.facts import extract_case_facts
@@ -49,7 +50,7 @@ from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.jobs.models import JobType
 from rcpia.main import app
 from rcpia.pps import generator
-from rcpia.pps.generator import AGENT_LABELS, agent_label
+from rcpia.pps.generator import AGENT_LABELS, agent_label, build_panel
 from rcpia.pps.render import render_markdown
 from rcpia.pps.schemas import (
     FORBIDDEN_IN_GENERATED_OUTPUT,
@@ -1299,3 +1300,84 @@ def test_no_label_is_the_english_fallback() -> None:
         assert agent_label(role) != role.replace("_", " ").capitalize(), (
             f"{role} is rendering through the English fallback"
         )
+
+
+# --- The panel block ---------------------------------------------------------------------------
+
+
+def _synthesis(**overrides: object) -> SynthesisOutput:
+    payload: dict = {
+        "agent_role": SYNTHESIS_ROLE,
+        "case_id": "case-1",
+        "recommendation": "Cystectomie après optimisation.",
+        "rationale": "Motif.",
+        "convergences": [
+            {
+                "point": "Pas de cisplatine en l'état.",
+                "agents_agreeing": ["urology_oncology", "medical_oncology"],
+                "evidence_summary": "DFG sous le seuil usuel.",
+            }
+        ],
+        "coverage_gaps": [
+            {
+                "point": "Le carboplatine ne remplace pas le cisplatine.",
+                "raised_by": ["medical_oncology"],
+                "silent": ["urology_oncology"],
+                "clinical_impact": "Examiné par une seule spécialité.",
+            }
+        ],
+    }
+    payload.update(overrides)
+    return SynthesisOutput.model_validate(payload)
+
+
+def test_the_panel_block_names_who_held_each_point() -> None:
+    """The defect this block exists for was invisible in the fiche: a speciality was recorded
+    as agreeing to a point it never mentioned, and nothing on the page showed it."""
+    panel = build_panel(
+        _synthesis(), ["rcp_synthesis", "urology_oncology", "medical_oncology"]
+    )
+
+    kinds = [point.kind for point in panel.points]
+    assert kinds == ["convergence", "gap"]
+    assert "Oncologie urologique" in panel.points[0].attribution
+    assert "non abordé par Oncologie urologique" in panel.points[1].attribution
+
+
+def test_the_synthesis_is_not_listed_among_the_opinions_it_compared() -> None:
+    """It is the agent doing the comparing. Listing it read as a third speciality agreeing."""
+    panel = build_panel(
+        _synthesis(), ["rcp_synthesis", "urology_oncology", "medical_oncology"]
+    )
+    assert "Rcp synthesis" not in panel.specialities
+    assert panel.specialities == ["Oncologie urologique", "Oncologie médicale"]
+
+
+def test_a_single_specialist_produces_no_panel_block() -> None:
+    """One agent has nothing to converge with, and a block announcing unanimity among a single
+    speciality would be worse than no block."""
+    lone = AgentOutput.model_validate(
+        {
+            "agent_role": "urology_oncology",
+            "case_id": "case-1",
+            "recommendation": "Cystectomie.",
+            "rationale": "Motif.",
+        }
+    )
+    assert build_panel(lone, ["urology_oncology"]).points == []
+
+
+def test_the_rendered_block_states_that_silence_is_not_consent() -> None:
+    """A reader who never opens a JSON file has to be able to read the provenance rule."""
+    document = _minimal_document()
+    document.panel = build_panel(
+        _synthesis(), ["rcp_synthesis", "urology_oncology", "medical_oncology"]
+    )
+    body = render_markdown(document)
+
+    assert "Concordance du panel" in body
+    assert "n'y a pas consenti" in body
+    assert "Non traité par tous" in body
+    # The block belongs before the plan: a reader should know what was disputed before
+    # reading what is proposed.
+    assert body.index("Concordance du panel") < body.index("PROPOSITIONS DE TRAITEMENTS")
