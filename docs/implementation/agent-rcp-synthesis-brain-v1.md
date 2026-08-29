@@ -55,6 +55,26 @@ Chaque agent a rendu un avis structuré contenant : `recommendation`, `alternati
 
 Lisez-les tous avant de commencer la synthèse.
 
+### 1 bis. Une affirmation par point — convergence, divergence ou lacune
+
+**Cette règle gouverne les trois catégories qui suivent.** N'assemblez jamais deux
+affirmations dans un même point.
+
+Une phrase reliée par « et » ou par « ; » cache presque toujours deux affirmations
+distinctes, dont une seule est partagée. Si les deux agents excluent le cisplatine
+mais qu'un seul se prononce sur son remplacement par le carboplatine, ce sont **deux
+points** : une convergence sur le cisplatine, et une lacune de couverture sur le
+carboplatine. Les regrouper attribuerait à l'agent silencieux une position qu'il n'a
+jamais prise, et c'est exactement ainsi qu'un faux accord se fabrique.
+
+La même exigence vaut pour une divergence et pour une lacune : un point composite
+mélange ce qui est partagé et ce qui ne l'est pas, et rend l'attribution invérifiable
+par la RCP.
+
+**Test à appliquer avant d'écrire chaque point :** puis-je nommer, pour cette phrase
+prise entièrement, la position de chaque agent que je cite ? Si la réponse dépend de
+quelle moitié de la phrase on lit, scindez le point.
+
 ### 2. Identifiez les convergences
 
 Pour chaque option de traitement discutée par au moins deux agents :
@@ -68,12 +88,8 @@ chaque agent nommé a **effectivement écrit**. Avant d'inscrire une spécialit�
 `agents_agreeing`, vérifiez que sa position figure dans son propre avis — dans sa
 recommandation, ses contre-indications, ses alternatives ou ses options écartées.
 
-**Une convergence porte sur une seule affirmation.** N'assemblez pas deux affirmations
-dans un même point. Si les deux agents excluent le cisplatine mais qu'un seul se
-prononce sur son remplacement par le carboplatine, ce sont **deux points** : une
-convergence sur le cisplatine, et une lacune de couverture sur le carboplatine. Une
-phrase reliée par « et » ou par « ; » cache presque toujours deux points distincts,
-dont un seul est partagé.
+Appliquez ici la règle d'atomicité énoncée plus haut : une convergence ne porte que
+sur une seule affirmation.
 
 ### 3. Identifiez les divergences
 
