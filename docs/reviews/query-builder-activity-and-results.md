@@ -394,6 +394,64 @@ constraint.
 
 ---
 
+## 7d. A second question per agent, and the supportive corpus finally arrives
+
+**Added 29 August.** §7c ended with a claim that no wording of a single question could reach
+both the treatment guidance and the supportive-care corpus, and that a second retrieval was the
+only way. That has now been built and measured.
+
+**The result.** Supportive documents cited, across four agent runs on the two bladder dossiers:
+
+| Dossier | Agent | Before | After |
+|---|---|---|---|
+| 2 | Urology | none | `espen.nutrition-surgery`, `siog.bladder` |
+| 2 | Medical oncology | none | `esmo.cancer-cachexia`, `esmo-siog.geriatric-assessment`, `siog.bladder` |
+| 14 | Urology | none | `espen.nutrition-surgery` |
+| 14 | Medical oncology | none | `esmo-siog.geriatric-assessment`, `siog.bladder` |
+
+**Zero of four before, four of four after.**
+
+**One question, specialised by the filter rather than by its wording.** Both agents ask the same
+`SUPPORTIVE_QUESTION`; the filter still carries `agent_role`, so each receives what it is
+permitted to read. Medical oncology reaches ESMO cachexia and ESMO-SIOG. Urology, which is not
+admitted to those, reaches ESPEN's *surgical* nutrition guidance instead — and that turns out to
+be the more useful passage for a urologist, because it carries an operational window:
+
+> En cas de risque nutritionnel sévère, une thérapie nutritionnelle préopératoire est
+> recommandée avant chirurgie majeure, avec un délai de 7 à 14 jours pouvant être approprié.
+
+Neither table nor per-role question produced that. It came from a single shared question meeting
+two different permission sets, which is the corpus's role routing finally doing visible work.
+
+**What changed in the reasoning, not just the citations.** Before this, both agents flagged
+*MNA 7* and *G8 5* from the ledger and cited nothing for either — a number read off a form. Now
+the medical oncologist grounds the nutritional risk in ESMO cachexia's recommendation for
+repeated objective assessment, and the frailty in ESMO-SIOG's list of what a geriatric assessment
+must cover. On dossier 14, where no G8 is recorded at all, SIOG grounds the *demand* for one
+rather than an interpretation of it.
+
+**The budget, and why it is two numbers.** Ten passages for the agent's own question, four more
+for the supportive one, rather than a split of ten. The primary set is what produced the
+reasoning this project has measured — including the urologist's rejection of an orthotopic
+neobladder below eGFR 50 — and narrowing it to make room would have traded a demonstrated gain
+for an untested one. Four is what the supportive question earns before it starts repeating a
+single document. `supportive_limit=0` restores the previous behaviour, so the change stays
+measurable rather than merely argued.
+
+**What this does not fix.** The coverage gap in §7c is untouched: the urologist still never
+mentions carboplatin — zero mentions across both runs, against four before the questions were
+specialised. The second retrieval is about supportive care, not about restoring one specialist's
+view of another's decisions, and nothing here changes the conclusion that `rcp_synthesis` is what
+must reassemble the panel.
+
+**An operational note.** One of the four runs failed on a transient `Connection error` from the
+model endpoint, reported with `retryable=True`, and succeeded unchanged on retry. Worth recording
+because the failure produced a *fiche* rather than an error: with only the urology opinion
+stored, the generator had one opinion to render and no reason to refuse. A panel that loses an
+agent to a network blip does not currently look like a panel that lost an agent.
+
+---
+
 ## 8. What a reviewer should challenge
 
 Listed because a review that only confirms is worth little.
