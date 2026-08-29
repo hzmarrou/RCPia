@@ -29,13 +29,27 @@ from rcpia.agents.schemas import MAX_TEXT, GuidelinePassage
 from rcpia.cases.ledger import LedgerEntry
 from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.rerank import Reranker
-from rcpia.evidence.retrieval import RetrievedChunk, search
+from rcpia.evidence.retrieval import Concepts, RetrievedChunk, search
 from rcpia.query.builder import Fact, build_filter
-from rcpia.query.questions import question_for
+from rcpia.query.questions import SUPPORTIVE_QUESTION, question_for
 
-# How many passages an agent is given. Ten is the production `search` default; more would
-# dilute a prompt that already carries the whole ledger.
+# How many passages an agent is given for its own question. Ten is the production `search`
+# default; more would dilute a prompt that already carries the whole ledger.
 PASSAGE_LIMIT = 10
+
+# How many more it is given from the supportive-care question. Held *alongside* the ten rather
+# than carved out of them, deliberately: the primary set is what produced the reasoning this
+# project has actually measured — the urologist's rejection of an orthotopic neobladder below
+# eGFR 50 came from those slots — and narrowing it to make room would trade a demonstrated gain
+# for an untested one. Four is what the supportive question earns: probed against the medical
+# oncology filter it returns four distinct documents (SIOG bladder, ESMO-SIOG, SIOG screening,
+# ESMO cachexia) before it starts repeating one.
+#
+# The budget is two constants rather than a split of one because the two questions are not
+# competing for the same thing. If prompt size becomes the binding constraint, this is the
+# number to cut first: losing supportive grounding degrades an opinion, losing treatment
+# passages changes it.
+SUPPORTIVE_PASSAGE_LIMIT = 4
 
 # What a truncated passage says about itself. The corpus holds decision tables that run past
 # the bundle's text cap, and a passage silently cut mid-table would be quoted in a fiche as
@@ -84,6 +98,7 @@ async def guideline_passages_for(
     embedder: Embedder,
     reranker: Reranker,
     limit: int = PASSAGE_LIMIT,
+    supportive_limit: int = SUPPORTIVE_PASSAGE_LIMIT,
 ) -> tuple[list[GuidelinePassage], list[str]]:
     """Retrieve the guidance this agent may see for this patient.
 
@@ -137,14 +152,53 @@ async def guideline_passages_for(
         limit=limit,
     )
 
-    truncated = sum(1 for chunk in report.chunks if len(chunk.text) > MAX_TEXT)
+    # The second search: what this patient needs before any treatment, rather than which
+    # treatment. It runs under the *same* filter, so each specialist gets what it is permitted
+    # to read — the nutrition and geriatric corpus for medical oncology, surgical nutrition for
+    # urology — and it is a separate query because no single question ranks both a cisplatin
+    # decision table and cachexia guidance. See `SUPPORTIVE_PASSAGE_LIMIT`.
+    supportive: list[RetrievedChunk] = []
+    if supportive_limit > 0:
+        support_vectors = await embedder.embed([SUPPORTIVE_QUESTION])
+        support_report = await search(
+            session,
+            question=SUPPORTIVE_QUESTION,
+            # No concepts: those are built from the treatment question's vocabulary and would
+            # pull this search back toward the subject it exists to leave.
+            concepts=Concepts(),
+            embedding=support_vectors[0] if support_vectors else None,
+            embedding_model=embedder.model,
+            filter=query.filter,
+            reranker=reranker,
+            limit=supportive_limit,
+        )
+        # A passage both questions found is kept once, in the primary set. Handing the agent the
+        # same text twice under two headings would misrepresent how much evidence it has.
+        already = {chunk.chunk_id for chunk in report.chunks}
+        supportive = [c for c in support_report.chunks if c.chunk_id not in already]
+
+    chunks = list(report.chunks) + supportive
+
+    if supportive:
+        # Which passages answer which question. Without this the agent sees fourteen passages of
+        # equal standing and may cite a nutrition screening instrument as though it were the
+        # guidance on the treatment it was asked about.
+        notes.append(
+            "Une seconde recherche, distincte de la question thérapeutique, a été menée sur les "
+            "soins de support, la dénutrition et la fragilité gériatrique. Les passages suivants "
+            "en proviennent et ne répondent pas à la question thérapeutique : "
+            + ", ".join(chunk.chunk_id for chunk in supportive)
+            + "."
+        )
+
+    truncated = sum(1 for chunk in chunks if len(chunk.text) > MAX_TEXT)
     if truncated:
         notes.append(
             f"{truncated} passage(s) des recommandations ont été tronqués faute de place : "
             "leur texte est incomplet et signalé comme tel. Ne citez pas un passage tronqué "
             "comme s'il était complet."
         )
-    if not report.chunks:
+    if not chunks:
         notes.append(
             "Aucun passage des recommandations n'a été retenu pour ce patient : "
             "formulez un avis non étayé et dites-le explicitement."
@@ -155,4 +209,4 @@ async def guideline_passages_for(
             "les recommandations citées correspondent moins précisément à ce patient."
         )
 
-    return [to_passage(chunk) for chunk in report.chunks], notes
+    return [to_passage(chunk) for chunk in chunks], notes

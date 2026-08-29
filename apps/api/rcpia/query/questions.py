@@ -40,6 +40,34 @@ does not have would retrieve the wrong guidance, which is why each is derived ra
 chosen — but it cannot by itself put a wrong word in front of a clinician.
 """
 
+# The second question every agent asks, alongside its own.
+#
+# **Why a second question rather than a wider first one.** The nutrition, cachexia and geriatric
+# guidance is in the corpus, it is retrieval-eligible, and the filter admits it: those passages
+# carry `disease_setting = not_specified` with reason `general_principle`. Measured, an explicit
+# supportive-care question against exactly the `medical_oncology` + MIBC filter returns ESMO
+# cachexia five times, ESPEN three times and ASPEN twice. Nothing blocks them.
+#
+# What kept them out of every run so far is ranking, and ranking is the retriever working
+# correctly: a question about cisplatin eligibility *should* rank a cisplatin decision table
+# above cachexia guidance. No wording reaches both subjects, because they are two subjects. The
+# fix is a second retrieval with its own slots, not a longer first one.
+#
+# **The same question for every role, and a different answer for each.** The filter still
+# carries `agent_role`, so the supportive search returns what that specialist is permitted to
+# read: medical oncology reaches SIOG screening, ESMO-SIOG and ESMO cachexia; urology, which is
+# not admitted to those, reaches SIOG bladder and ESPEN's *surgical* nutrition guidance instead.
+# One question, specialised by the filter rather than by its wording.
+#
+# The phrasing names the instruments the dossiers actually record — MNA and G8 — because those
+# are the values an agent is asked to interpret, and a passage that defines the instrument is
+# what grounds the interpretation.
+SUPPORTIVE_QUESTION = (
+    "Dénutrition, fragilité et vulnérabilité gériatrique avant traitement anticancéreux : "
+    "dépistage nutritionnel et MNA, dépistage G8 et évaluation gériatrique approfondie, "
+    "support nutritionnel et adaptation du traitement chez le sujet âgé."
+)
+
 # Setting *and* role. Measured before this table existed: running the urology and the medical
 # oncology agent on the same two bladder dossiers, the passages handed to each were **identical
 # 10 of 10** on one dossier and 9 of 10 on the other. `agent_role` gates what an agent *may*
