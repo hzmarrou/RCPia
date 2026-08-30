@@ -22,6 +22,7 @@ from rcpia.agents.schemas import (
     OutputFormat,
     SynthesisOutput,
     TaskBundle,
+    TreatmentOption,
     UnattestedAgreement,
     agent_output_json_schema,
     check_synthesis,
@@ -411,3 +412,47 @@ def test_a_speciality_outside_the_panel_is_refused() -> None:
                 {"role": "medical_oncology", "quote": "autre chose"},
             ],
         )
+
+
+def test_an_option_may_be_quoted_together_with_its_reason() -> None:
+    """The false rejection the first real run produced, as a regression test.
+
+    A specialist's rejected option and its rationale read as one passage — *"Cystectomie
+    radicale d'emblée. Disproportionnée pour une première TVNIM…"* — and a synthesis quoting
+    them together was refused as a fabrication because the searchable text listed every option
+    before every rationale. A check that rejects a truthful attestation blocks correct work and
+    teaches everyone to switch it off.
+    """
+    specialist = AgentOpinion(
+        agent_role="medical_oncology",
+        recommendation="Surveillance apres resection complete.",
+        rejected_options=[
+            TreatmentOption(
+                option="Cystectomie radicale d'emblee.",
+                rationale="Disproportionnee pour une premiere TVNIM pTa de bas grade.",
+            )
+        ],
+    )
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            convergences=[
+                {
+                    "point": "La cystectomie d'emblee n'est pas indiquee.",
+                    "agents_agreeing": ["urology_oncology", "medical_oncology"],
+                    "support": [
+                        {
+                            "role": "urology_oncology",
+                            "quote": "Le DFG est trop bas pour le cisplatine",
+                        },
+                        {
+                            "role": "medical_oncology",
+                            "quote": "Cystectomie radicale d'emblee. Disproportionnee",
+                        },
+                    ],
+                }
+            ],
+        )
+    )
+
+    check_synthesis(output, _bundle_with(UROLOGY, specialist))

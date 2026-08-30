@@ -730,16 +730,24 @@ def _words(text: str) -> str:
 
 
 def _searchable(opinion: AgentOpinion) -> str:
-    parts = [
+    """One agent's opinion as continuous text, in the order a reader meets it.
+
+    **Each option is followed by its own rationale**, and that ordering is not cosmetic. Listing
+    every option first and every rationale afterwards destroys the adjacency a reader sees, and
+    a synthesis quoting an option together with its reason — *"Cystectomie radicale d'emblée.
+    Disproportionnée pour une première TVNIM…"*, which is exactly how that opinion reads — was
+    rejected as a fabrication on the first real run. A check that refuses a truthful attestation
+    is worse than no check: it blocks correct work and teaches everyone to switch it off.
+    """
+    parts: list[str] = [
         opinion.recommendation,
         opinion.rationale,
         *opinion.contraindications,
         *opinion.uncertainty_notes,
         *opinion.missing_information,
-        *(option.option for option in opinion.alternatives),
-        *(option.rationale for option in opinion.alternatives),
-        *(option.option for option in opinion.rejected_options),
-        *(option.rationale for option in opinion.rejected_options),
-        *(reference.supports for reference in opinion.evidence_references),
     ]
+    for option in (*opinion.alternatives, *opinion.rejected_options):
+        parts.append(option.option)
+        parts.append(option.rationale)
+    parts.extend(reference.supports for reference in opinion.evidence_references)
     return _words(" ".join(part for part in parts if part))
