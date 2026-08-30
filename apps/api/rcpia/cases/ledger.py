@@ -18,7 +18,13 @@ from dataclasses import asdict, dataclass
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rcpia.cases.fact_schema import FIELDS_BY_KEY, REPORTED_ABSENT, fields_for
+from rcpia.cases.fact_schema import (
+    FIELDS_BY_KEY,
+    REPORTED_ABSENT,
+    absence_answers,
+    fields_for,
+    is_reported_absent,
+)
 from rcpia.core.models import (
     AuditEvent,
     Case,
@@ -199,17 +205,35 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
             )
             continue
 
+        # `RAS` on a field where absence cannot be an answer is an empty box, not a finding.
+        # Recorded as missing so the query builder, the completeness check, the agents and the
+        # rendered page all read it the same way -- and the form's own wording is kept in the
+        # note, because "the box said RAS" and "nobody filled the box" are different facts about
+        # the dossier even though both leave the value unknown.
+        blank_box = (
+            fact.value is not None
+            and is_reported_absent(fact.value)
+            and not absence_answers(spec.key)
+        )
+        note = fact.note
+        if blank_box:
+            note = (
+                "Le formulaire porte « RAS » pour ce champ. « Rien à signaler » ne peut pas "
+                "répondre à un type histologique, un grade ou un stade : la valeur est traitée "
+                "comme absente."
+            )
+
         entries.append(
             LedgerEntry(
                 key=spec.key,
                 label=display_label(spec.key),
                 category=str(spec.category),
-                value=fact.value,
-                status=str(fact.status),
+                value=None if blank_box else fact.value,
+                status=str(FactStatus.missing) if blank_box else str(fact.status),
                 origin=str(fact.origin),
-                highlight=highlight_for(fact.status),
+                highlight=RED if blank_box else highlight_for(fact.status),
                 unit=spec.unit,
-                note=fact.note,
+                note=note,
                 source_excerpt=fact.source_excerpt,
                 source_document_id=(
                     str(fact.source_document_id) if fact.source_document_id else None

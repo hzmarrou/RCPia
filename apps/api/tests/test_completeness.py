@@ -9,9 +9,9 @@ over a missing bone scan is useless.
 
 import pytest
 
-from rcpia.cases.completeness import BLOCKING_FIELDS, assess
+from rcpia.cases.completeness import BLOCKING_FIELDS, assess, satisfies_blocking
 from rcpia.cases.extraction import extract_from_text, resolve
-from rcpia.cases.fact_schema import required_fields_for
+from rcpia.cases.fact_schema import absence_answers, required_fields_for
 from rcpia.cases.ledger import LedgerEntry, display_label, highlight_for
 from rcpia.core.models import CancerType, FactStatus
 
@@ -185,3 +185,36 @@ def test_the_reference_dossier_is_complete_enough_to_analyse() -> None:
     report = assess(entries, cancer_type=CancerType.bladder)
 
     assert report.can_run_analysis is True, [issue.message for issue in report.blocking]
+
+
+# --- `RAS` where absence cannot be an answer ---------------------------------------------------
+
+
+def test_absence_answers_a_symptom_but_not_an_identity() -> None:
+    """The distinction the whole rule rests on: `RAS` is a finding about a symptom and an empty
+    box on a diagnosis."""
+    assert absence_answers("haematuria")
+    assert absence_answers("previous_rcp_decisions")
+
+    for key in ("histology", "gleason", "isup", "ctnm", "ptnm"):
+        assert not absence_answers(key), f"{key} must not accept RAS as a value"
+
+
+def test_a_grade_of_ras_does_not_satisfy_a_blocking_field() -> None:
+    """Already true before this change, and kept because it is the property that matters."""
+    assert not satisfies_blocking("gleason", "RAS")
+    assert not satisfies_blocking("histology", "néant")
+    assert satisfies_blocking("gleason", "9 (5+4)")
+
+
+def test_the_ras_rule_covers_every_blocking_field() -> None:
+    """A blocking field that accepted `RAS` would stage a patient from an empty box.
+
+    Checked against `BLOCKING_FIELDS` rather than a restated list, so a new blocking field
+    cannot be added without deciding what absence means for it.
+    """
+    for cancer_type, keys in BLOCKING_FIELDS.items():
+        for key in keys:
+            assert not absence_answers(key), (
+                f"{key} blocks analysis for {cancer_type} but would accept RAS"
+            )

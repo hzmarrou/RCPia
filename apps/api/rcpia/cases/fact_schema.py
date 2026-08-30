@@ -339,6 +339,47 @@ FIELDS: tuple[FactField, ...] = (
         "intraepithelial_neoplasia", ("pin",), FactCategory.pathology,
         cancer_types=(PROSTATE,),
     ),
+    # Read from the fifteen dossiers on 30 August, and previously discarded. Only labels that
+    # name a clinical field are added: the survey's long tail is report structure -- `Conclusion`,
+    # `Technique`, `À l'étage thoracique`, `Latéralement` -- and those must stay unrecognised, or
+    # every radiology paragraph becomes a fact.
+    FactField(
+        "digital_rectal_exam", ("toucher rectal", "tr"), FactCategory.examination,
+        cancer_types=(PROSTATE,),
+    ),
+    FactField("vaginal_exam", ("toucher vaginal",), FactCategory.examination),
+    # Treatment already under way. The query builder reads androgen deprivation out of free
+    # text to decide castration resistance; a named field is a better source than prose.
+    FactField("hormone_therapy", ("hormonothérapie", "hormonotherapie"), FactCategory.history),
+    FactField("procedure_performed", ("geste",), FactCategory.history),
+    # Ureteral stents: obstruction management, and directly relevant to renal function and to
+    # whether a platinum agent can be considered.
+    FactField(
+        "ureteral_stent_right",
+        ("sonde double jj droite", "sonde double j droite"),
+        FactCategory.history,
+    ),
+    FactField(
+        "ureteral_stent_left",
+        ("sonde double jj gauche", "sonde double j gauche"),
+        FactCategory.history,
+    ),
+    # Biology that gates systemic therapy. Bilirubin and platelets in particular decide whether
+    # a cytotoxic can be given at all, and were being read and dropped.
+    FactField("bilirubin_total", ("bilirubine totale",), FactCategory.biology, unit="mg/L"),
+    FactField("bilirubin_free", ("bilirubine libre",), FactCategory.biology, unit="mg/L"),
+    FactField(
+        "bilirubin_conjugated", ("bilirubine conjuguée", "bilirubine conjuguee"),
+        FactCategory.biology, unit="mg/L",
+    ),
+    FactField("ggt", ("ggt",), FactCategory.biology, unit="UI/L"),
+    FactField("platelets", ("plq", "plaquettes"), FactCategory.biology),
+    FactField("bicarbonate", ("bicar", "bicarbonates"), FactCategory.biology, unit="mmol/L"),
+    FactField("phosphorus", ("phosphore",), FactCategory.biology, unit="mg/L"),
+    FactField("uric_acid", ("acide urique",), FactCategory.biology, unit="mg/L"),
+    FactField(
+        "vitamin_d", ("vitamine d2/d3", "vitamine d"), FactCategory.biology, unit="ng/mL"
+    ),
     FactField(
         "margin_details",
         ("précisions sur les marges", "precisions sur les marges"),
@@ -371,6 +412,42 @@ def fields_for(cancer_type: CancerType) -> tuple[FactField, ...]:
 
 def required_fields_for(cancer_type: CancerType) -> tuple[FactField, ...]:
     return tuple(field_spec for field_spec in FIELDS if field_spec.is_required_for(cancer_type))
+
+
+# Fields where "rien à signaler" cannot be the answer.
+#
+# `RAS` means the clinician looked and found nothing to report. That is information about a
+# symptom — no haematuria, no pain — and nonsense about an identity: there is no such thing as a
+# tumour with no histological type, a prostate cancer with no grade, or a stage that is "nothing
+# to report". A form carrying `Gleason : RAS` has an empty box, not a patient without a grade.
+#
+# Dossier 8 is why this exists. Its form read `Type histologique : RAS`, `Gleason : RAS`,
+# `ISUP : RAS`, while its own narrative recorded *adénocarcinome acinaire Gleason 9 (5+4),
+# ISUP 5*. Every one was stored as a confirmed value, the disease setting could not be derived
+# from a grade of "RAS", and all three agents refused. A man with documented high-volume
+# metastatic disease reached the tumour board with no document at all.
+#
+# `completeness.satisfies_blocking` already refused these values, but it runs *after* the ledger
+# is built — too late for the query builder, which had already staged from `RAS`. Treating the
+# value as absent at the point the ledger is assembled is what makes every later reader agree.
+ABSENCE_IS_NOT_AN_ANSWER: frozenset[str] = frozenset(
+    {
+        "histology",
+        "gleason",
+        "isup",
+        "ctnm",
+        "ptnm",
+        # Added because the test checking this set against `BLOCKING_FIELDS` refused a
+        # hand-written list: muscle invasion decides between conservative treatment and
+        # cystectomy, and its answer is Oui or Non. "Rien à signaler" is neither.
+        "muscle_invasion",
+    }
+)
+
+
+def absence_answers(key: str) -> bool:
+    """Whether `RAS` is a legitimate reading for this field."""
+    return key not in ABSENCE_IS_NOT_AN_ANSWER
 
 
 def is_reported_absent(value: str) -> bool:
