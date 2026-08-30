@@ -84,6 +84,27 @@ AGENT_LABELS = {
     "safety_reviewer": "Revue de sécurité",
 }
 
+# The specialities a complete RCPia panel is meant to carry.
+#
+# **A smaller set than `AGENT_LABELS`, and deliberately so.** That map exists to name every role
+# the corpus can route a passage to, including roles that are lenses rather than seats at a
+# table: `renal_safety` and `genetics_molecular` qualify a decision someone else takes,
+# `safety_reviewer` reviews the panel rather than joining it, and the synthesis is the agent
+# doing the comparing. None of them is a speciality whose absence the board should chase.
+#
+# The eight below are the ones with a written brain, and the ones whose silence would be a
+# missing opinion rather than a missing check. Two are wired today; the fiche has to say so.
+EXPECTED_PANEL: tuple[str, ...] = (
+    "urology_oncology",
+    "medical_oncology",
+    "radiation_oncology",
+    "radiology",
+    "pathology",
+    "geriatric_frailty",
+    "nutrition",
+    "palliative_supportive",
+)
+
 
 class PpsError(Exception):
     """The case cannot produce a PPS draft."""
@@ -105,6 +126,24 @@ class SynthesisRequired(PpsError):
 
 def agent_label(role: str) -> str:
     return AGENT_LABELS.get(role, role.replace("_", " ").capitalize())
+
+
+def _panel_shortfall(roles: Sequence[str]) -> str:
+    """The sentence naming which of the expected specialities were never asked.
+
+    Empty when the panel is complete, so a full board is not made to carry a disclaimer about
+    nothing.
+    """
+    seated = {role for role in roles if role != SYNTHESIS_ROLE}
+    absent = [role for role in EXPECTED_PANEL if role not in seated]
+    if not absent:
+        return ""
+    return (
+        f". Panel incomplet : {len(EXPECTED_PANEL) - len(absent)} spécialité(s) sur "
+        f"{len(EXPECTED_PANEL)}. Non sollicitées : "
+        + ", ".join(agent_label(role) for role in absent)
+        + "."
+    )
 
 
 def _values(entries: list[LedgerEntry]) -> dict[str, str | None]:
@@ -337,6 +376,10 @@ def build_framework(
                 + (f" ({model})" if model else "")
                 for role, model in zip(agent_roles, models, strict=False)
             )
+            # Said here as well as in the panel block, because a single-agent fiche has no panel
+            # block: this field would then be the only statement of who was consulted, and one
+            # speciality standing alone reads as the whole of what RCPia had to offer.
+            + _panel_shortfall(agent_roles)
             if agent_roles
             else "RCP à constituer."
         ),
@@ -562,12 +605,15 @@ def build_panel(output: AgentOutput, roles: Sequence[str]) -> PanelAgreement:
             )
         )
 
+    contributed = [role for role in roles if role != SYNTHESIS_ROLE]
     return PanelAgreement(
         points=points,
         # The synthesis is the agent doing the comparing, not one of the opinions compared.
         # Listing it here read as a third speciality having agreed with the other two.
-        specialities=[
-            agent_label(role) for role in roles if role != SYNTHESIS_ROLE
+        specialities=[agent_label(role) for role in contributed],
+        # In roster order rather than sorted, so the list reads the way a board is convened.
+        absent=[
+            agent_label(role) for role in EXPECTED_PANEL if role not in set(contributed)
         ],
     )
 

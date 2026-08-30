@@ -176,8 +176,13 @@ def _panel(document: PpsDocument) -> list[str]:
 
     Rendered only for a panel. One agent has nothing to converge with, and a block announcing
     unanimity among a single speciality would be actively misleading.
+
+    **Rendered even when no point survives.** Coverage gaps are filtered by `gap_policy` before
+    they reach here, so a panel whose only structure was suppressed silences would otherwise drop
+    the whole block — and with it the sentence saying which specialities were never consulted,
+    exactly when the document looks most settled.
     """
-    if not document.panel.points:
+    if not document.panel.points and not document.panel.specialities:
         return []
 
     out = ["**Concordance du panel — lectures non validées**", ""]
@@ -186,6 +191,22 @@ def _panel(document: PpsDocument) -> list[str]:
             "Avis comparés : " + ", ".join(document.panel.specialities) + ".",
             "",
         ]
+    if document.panel.absent:
+        # The count, not only the names: "2 of 8" is what stops the list reading as the roster.
+        seated = len(document.panel.specialities)
+        total = seated + len(document.panel.absent)
+        out += [
+            f"> ⚠️ **Panel incomplet : {seated} spécialité(s) sur {total}.** Non sollicitées à "
+            "ce jour : " + ", ".join(document.panel.absent) + ". Leur silence dans ce document "
+            "ne signifie pas qu'elles n'ont rien à dire : elles n'ont pas été interrogées.",
+            "",
+        ]
+    if not document.panel.points:
+        out += [
+            "Aucun point de comparaison n'est retenu pour affichage sur ce dossier.",
+            "",
+        ]
+        return out
     # Stated once, here, because it is the thing this block exists to make visible: an
     # agreement is only an agreement among the specialities named on its line.
     out += [

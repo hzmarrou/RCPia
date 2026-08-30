@@ -303,6 +303,11 @@ class PanelAgreement(Strict):
     # Named so the reader knows whose silence is being reported. A gap is only meaningful
     # against a known set of participants.
     specialities: list[str] = Field(default_factory=list)
+    # And the ones that did not sit. Naming only the contributors makes any panel read as a
+    # complete one: two specialities of eight look like a board rather than a quarter of one,
+    # and the illusion strengthens as agents are added, because seven names look like all of
+    # them. A reader cannot weigh a silence without knowing who was never asked to speak.
+    absent: list[str] = Field(default_factory=list)
 
 
 class PpsDocument(Strict):

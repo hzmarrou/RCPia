@@ -50,7 +50,13 @@ from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.jobs.models import JobType
 from rcpia.main import app
 from rcpia.pps import generator
-from rcpia.pps.generator import AGENT_LABELS, agent_label, build_panel
+from rcpia.pps.generator import (
+    AGENT_LABELS,
+    EXPECTED_PANEL,
+    agent_label,
+    build_framework,
+    build_panel,
+)
 from rcpia.pps.render import render_markdown
 from rcpia.pps.schemas import (
     FORBIDDEN_IN_GENERATED_OUTPUT,
@@ -1357,6 +1363,43 @@ def test_the_synthesis_is_not_listed_among_the_opinions_it_compared() -> None:
     )
     assert "Rcp synthesis" not in panel.specialities
     assert panel.specialities == ["Oncologie urologique", "Oncologie médicale"]
+
+
+def test_the_panel_names_the_specialities_that_were_never_asked() -> None:
+    """Naming only the contributors makes any panel read as a complete one.
+
+    Two specialities of eight look like a board rather than a quarter of one, and the illusion
+    strengthens as agents are added: seven names look like all of them. A reader cannot weigh a
+    silence without knowing who was never invited to break it.
+    """
+    panel = build_panel(
+        _synthesis(), ["rcp_synthesis", "urology_oncology", "medical_oncology"]
+    )
+    assert panel.specialities == ["Oncologie urologique", "Oncologie médicale"]
+    assert panel.absent == [
+        "Radiothérapie",
+        "Radiologie",
+        "Anatomopathologie",
+        "Oncogériatrie",
+        "Nutrition clinique",
+        "Soins de support et palliatifs",
+    ]
+    # The synthesis is not a speciality, so it is neither seated nor missing.
+    assert "Rcp synthesis" not in panel.absent
+
+
+def test_a_complete_panel_carries_no_shortfall() -> None:
+    """A full board is not made to carry a disclaimer about nothing."""
+    panel = build_panel(_synthesis(), [SYNTHESIS_ROLE, *EXPECTED_PANEL])
+    assert panel.absent == []
+
+
+def test_the_fiche_states_the_shortfall_where_it_names_the_participants() -> None:
+    """The panel block only exists for a panel. A single-agent fiche has none, and then this
+    field is the only place saying who was consulted."""
+    framework = build_framework(agent_roles=["urology_oncology"], models=["claude-opus-5"])
+    assert "Panel incomplet : 1 spécialité(s) sur 8" in framework.participants
+    assert "Oncogériatrie" in framework.participants
 
 
 def test_a_single_specialist_produces_no_panel_block() -> None:
