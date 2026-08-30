@@ -3,8 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "description": "The agent runtime RCPia runs its specialists on, pinned so a clinical opinion is attributable to a known harness.",
-  "packageManager": "pnpm@10.33.4",
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.80.3"
+  },
+  "overrides": {
+    "@earendil-works/pi-ai": "0.80.3",
+    "@earendil-works/pi-agent-core": "0.80.3",
+    "@earendil-works/pi-tui": "0.80.3"
   }
 }
