@@ -544,6 +544,12 @@ class AgentRun(TimestampMixin, Base):
     # The deployment that produced the opinion, recorded rather than implied.
     provider: Mapped[str | None] = mapped_column(String(100))
     model: Mapped[str | None] = mapped_column(String(100))
+    # The agent runtime that produced this opinion. Provider and model say which brain
+    # answered; this says which harness put the question, and the two are not the same
+    # deployment. `UploadedDocument.parser_provider_version` records the parser for the same
+    # reason. `None` when the runtime could not be identified, which is the honest reading of
+    # an installation resolved from PATH.
+    runtime_version: Mapped[str | None] = mapped_column(String(50))
 
     bundle: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     output: Mapped[dict | None] = mapped_column(JSONB)

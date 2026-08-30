@@ -748,6 +748,8 @@ def _searchable(opinion: AgentOpinion) -> str:
     ]
     for option in (*opinion.alternatives, *opinion.rejected_options):
         parts.append(option.option)
-        parts.append(option.rationale)
+        # An option may carry no rationale; the empty string keeps it adjacent to its own
+        # option rather than silently pulling the next option's text alongside it.
+        parts.append(option.rationale or "")
     parts.extend(reference.supports for reference in opinion.evidence_references)
     return _words(" ".join(part for part in parts if part))

@@ -48,7 +48,32 @@ MAX_SNIPPET_CHARACTERS = 4000
 # point is that a large case degrades in a way RCPia chooses and declares, rather than
 # failing as a provider error nobody can explain to a clinician.
 MAX_SNIPPETS = 250
-MAX_BUNDLE_BYTES = 1_000_000
+
+# **The real limit is compaction, not the context window.** The runtime summarises when
+# `contextTokens > contextWindow - reserveTokens`, keeping only the most recent
+# `keepRecentTokens` verbatim and condensing everything before that into a checkpoint. A bundle
+# large enough to trigger it would have part of the patient's ledger replaced by a summary,
+# silently, and the agent would reason about a dossier it can no longer quote.
+#
+# So the ceiling is derived rather than chosen. Both figures are the runtime's documented
+# defaults, overridable in `~/.pi/agent/settings.json`; if they are changed there, change them
+# here. The character-per-token ratio is the runtime's own estimator, which divides raw text by
+# four — deliberately the same approximation, so this bound errs the same way the check it is
+# guarding against does.
+PI_RESERVE_TOKENS = 16_384
+PI_KEEP_RECENT_TOKENS = 20_000
+CHARACTERS_PER_TOKEN = 4
+
+# The smallest window any model RCPia routes an agent to is assumed to be 128k. A model with
+# less than this needs its own number, which is why the assumption is written down rather than
+# folded into the arithmetic.
+ASSUMED_CONTEXT_WINDOW_TOKENS = 128_000
+
+# Half of what fits before compaction. The other half is the agent's own reasoning, its tool
+# results and its answer, none of which exist yet when the bundle is measured.
+MAX_BUNDLE_BYTES = (
+    (ASSUMED_CONTEXT_WINDOW_TOKENS - PI_RESERVE_TOKENS) * CHARACTERS_PER_TOKEN
+) // 2
 
 # What every specialist agent is bound by, whatever its speciality. These are constraints
 # on the *output*, so they belong in the bundle rather than only in `brain.md`: the bundle

@@ -218,6 +218,7 @@ async def run_agent(
         job_id=job.id,
         provider=result.provider,
         model=result.model,
+        runtime_version=result.runtime_version,
         bundle=built.bundle.model_dump(by_alias=True),
         output=output.model_dump(),
         session_blob_key=pi_session_key(case.id, agent_role, run_id),
@@ -370,6 +371,7 @@ async def _record_failure(
         job_id=job.id,
         provider=result.provider if result else None,
         model=result.model if result else None,
+        runtime_version=result.runtime_version if result else None,
         bundle=built.bundle.model_dump(by_alias=True),
         error_message=message,
         # Only a run whose transcript reached storage has one to point at. A crashed run

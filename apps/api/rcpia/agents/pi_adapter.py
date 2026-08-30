@@ -40,6 +40,54 @@ JSON_FENCE = re.compile(r"^\s*```(?:json)?\s*(?P<body>.*?)\s*```\s*$", re.DOTALL
 SAFE_AGENT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,49}$")
 
 
+# The npm package that provides the runtime, and the entry point inside it.
+#
+# **Resolved to its real entry point rather than to the shim.** `npm i -g` installs `pi` as
+# `pi.cmd` / `pi.ps1`, a wrapper that spawns `node`. Running the wrapper puts a process between
+# this code and the agent, and a signal sent to the wrapper does not reach the worker — which is
+# how a 240-second timeout became a 747-second hang before `_kill_tree` existed. Launching
+# `node dist/cli.js` removes the wrapper entirely, so the process this code starts is the
+# process it can stop.
+#
+# It also makes the version knowable: the package directory carries the `package.json` that
+# states it, and a clinical opinion should be attributable to a known harness.
+PI_PACKAGE = "@earendil-works/pi-coding-agent"
+PI_ENTRY = Path("dist") / "cli.js"
+
+# Where to look for the package, in order of preference. A repository-local install is a pinned
+# one; a global install is whatever the machine happens to have.
+def _package_roots(resolved_shim: Path | None) -> list[Path]:
+    roots = [Path.cwd() / "node_modules", Path.cwd().parent / "node_modules"]
+    if resolved_shim is not None:
+        # npm's layout: the shim sits beside the `node_modules` holding the package.
+        roots.append(resolved_shim.parent / "node_modules")
+    return roots
+
+
+def _find_package(resolved_shim: Path | None) -> Path | None:
+    for root in _package_roots(resolved_shim):
+        candidate = root.joinpath(*PI_PACKAGE.split("/"))
+        if (candidate / PI_ENTRY).is_file():
+            return candidate
+    return None
+
+
+def runtime_version(package_dir: Path | None) -> str | None:
+    """The runtime's own version, read from the package that will run.
+
+    `None` when the package cannot be located — the run still happens through whatever `pi` is
+    on PATH, and recording nothing is more honest than recording a guess.
+    """
+    if package_dir is None:
+        return None
+    try:
+        data = json.loads((package_dir / "package.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):  # pragma: no cover - unreadable install
+        return None
+    version = data.get("version")
+    return str(version) if version else None
+
+
 class PiError(Exception):
     """Base class for Pi runtime failures."""
 
@@ -84,6 +132,8 @@ class PiRunResult:
     session_bytes: bytes
     provider: str | None
     model: str | None
+    # The version of the runtime that ran, when it could be identified.
+    runtime_version: str | None
     usage: PiUsage
     duration_seconds: float
     stderr: str = ""
@@ -299,11 +349,42 @@ class PiAdapter:
             )
         return resolved
 
+    def launcher(self) -> tuple[list[str], Path | None]:
+        """How to start the runtime, and which package will run.
+
+        Prefers `node <package>/dist/cli.js` over the npm shim, for the reasons on
+        `PI_PACKAGE`: no wrapper process between this code and the agent, and a readable
+        version. Falls back to the shim when the package or `node` cannot be found, because a
+        machine that can only offer the wrapper should still be able to run.
+        """
+        configured = self.pi_command[0]
+
+        # An explicit path to the entry point: honour it and read the version beside it.
+        if configured.endswith(".js"):
+            entry = Path(configured)
+            if not entry.is_file():
+                raise PiNotConfigured(f"Pi entry point not found: {configured!r}")
+            node = shutil.which("node")
+            if node is None:
+                raise PiNotConfigured(
+                    f"PI_BIN points at {configured!r} but `node` is not on PATH."
+                )
+            return [node, str(entry)], entry.parent.parent
+
+        resolved = Path(self.executable())
+        package = _find_package(resolved)
+        node = shutil.which("node")
+        if package is not None and node is not None:
+            return [node, str(package / PI_ENTRY)], package
+
+        return [str(resolved)], package
+
     def build_command(
         self, *, settings: AgentSettings, session_path: Path, task_path: Path
     ) -> list[str]:
+        launch, _package = self.launcher()
         command = [
-            self.executable(),
+            *launch,
             *self.pi_command[1:],
             "--provider",
             settings.provider,
@@ -364,6 +445,10 @@ class PiAdapter:
         command = self.build_command(
             settings=settings, session_path=session_path, task_path=task_path
         )
+        # Which installation is about to run. Resolved again rather than threaded through
+        # `build_command`, because that method is also used by the extraction reader and its
+        # signature belongs to building a command, not to reporting provenance.
+        _, package_dir = self.launcher()
 
         # Pi runs in a worker thread rather than through asyncio's subprocess support:
         # psycopg's async driver requires the selector event loop on Windows, and that
@@ -428,6 +513,7 @@ class PiAdapter:
             session_bytes=session_bytes,
             provider=parsed.provider or settings.provider,
             model=parsed.model or settings.model,
+            runtime_version=runtime_version(package_dir),
             usage=parsed.usage,
             duration_seconds=duration,
             stderr=stderr,
