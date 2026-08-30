@@ -82,6 +82,16 @@ Pour chaque option de traitement discutée par au moins deux agents :
 - Quels agents la soutiennent ? Avec quelle confiance ? Sur quelles preuves ?
 - Quels agents la rejettent ? Pour quelles contre-indications ?
 
+**Chaque spécialité citée doit être appuyée par une citation de son propre avis.**
+Pour chaque convergence, remplissez `support` : un objet par spécialité nommée dans
+`agents_agreeing`, contenant son rôle et une phrase **recopiée de son avis** où elle
+prend cette position. La citation est vérifiée mécaniquement contre l'avis en
+question ; une convergence dont une spécialité ne peut pas être citée est refusée.
+
+C'est aussi ce qui rend la règle « une seule affirmation par point » vérifiable : un
+point qui mélange une affirmation partagée et une affirmation propre à un seul agent
+ne peut pas être cité chez l'agent silencieux, et sera rejeté.
+
 **Il n'existe pas de consensus implicite.** Un agent qui ne contredit pas un point ne
 le soutient pas : il ne s'est pas prononcé. Ne comptez comme convergence que ce que
 chaque agent nommé a **effectivement écrit**. Avant d'inscrire une spécialité dans
@@ -168,6 +178,10 @@ Le schéma étendu pour la synthèse inclut :
     {
       "point": "La cystectomie radicale est indiquée pour ce stade",
       "agents_agreeing": ["urology_oncology", "medical_oncology"],
+      "support": [
+        {"role": "urology_oncology", "quote": "phrase recopiée de l'avis urologique"},
+        {"role": "medical_oncology", "quote": "phrase recopiée de l'avis d'oncologie"}
+      ],
       "evidence_summary": "..."
     }
   ],
@@ -211,6 +225,11 @@ Le schéma étendu pour la synthèse inclut :
 - **Un agent qui s'abstient n'est pas en désaccord.** La nutritionniste qui ne se
   prononce pas sur la cystectomie ne diverge pas — elle n'a pas de vue sur la
   question.
+- **Nommez les spécialités par leur identifiant** (`urology_oncology`,
+  `medical_oncology`, `radiation_oncology`, `radiology`, `pathology`,
+  `geriatric_frailty`, `nutrition`, `palliative_supportive`), jamais par leur libellé
+  français. Onze synthèses sur quatorze le faisaient déjà ; les trois autres ont rendu
+  toute vérification d'attribution impossible.
 - **Un agent qui s'abstient n'est pas non plus d'accord.** C'est la règle symétrique de
   la précédente, et la plus facile à oublier. Le silence n'est pas un assentiment :
   inscrire une spécialité muette parmi les agents qui approuvent revient à lui prêter

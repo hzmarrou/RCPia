@@ -35,10 +35,13 @@ from rcpia.agents.pi_adapter import (
 )
 from rcpia.agents.schemas import (
     AgentOutput,
+    SynthesisOutput,
     TaskBundle,
+    UnattestedAgreement,
     UncitedEvidence,
     UngroundedRecommendation,
     check_citations,
+    check_synthesis,
     output_model_for,
 )
 from rcpia.cases.ledger import latest_version
@@ -301,6 +304,16 @@ def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
         check_citations(output, bundle)
     except (UncitedEvidence, UngroundedRecommendation) as exc:
         raise PiOutputInvalid(str(exc)) from exc
+
+    # A synthesis claims agreements between agents it read. Each claim must be quotable from
+    # the agent's own opinion, for the same reason an evidence citation must resolve: an
+    # assertion nobody can check is not reviewable, and a fabricated consensus reads exactly
+    # like a real one on the rendered page.
+    if isinstance(output, SynthesisOutput):
+        try:
+            check_synthesis(output, bundle)
+        except UnattestedAgreement as exc:
+            raise PiOutputInvalid(str(exc)) from exc
 
     return output
 

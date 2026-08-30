@@ -14,9 +14,12 @@ Clinical text is French; JSON keys are English, because they are code.
 """
 
 import re
+import unicodedata
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from rcpia.corpus.vocabulary import AGENT_ROLES
 
 # One A4 page, the limit the design fixes for each agent's rationale.
 MAX_RATIONALE_CHARACTERS = 3000
@@ -331,11 +334,98 @@ BundleInputs.model_rebuild()
 SYNTHESIS_ROLE = "rcp_synthesis"
 
 
+# The names a synthesis may use for a speciality, and the display labels it reaches for instead.
+#
+# Measured across fifteen dossiers: eleven syntheses named specialities by role key
+# (`medical_oncology`) and three by French display label (`Oncologie médicale`). The fiche
+# renders both identically, so the inconsistency is invisible to a reader and fatal to any
+# programmatic check on attribution — the same shape as the fabricated-convergence defect. The
+# cause is that the agent is handed French labels in its constraints while the schema example
+# uses keys.
+#
+# Normalised rather than rejected: a run that named the right speciality in the wrong vocabulary
+# got the clinical judgement right, and discarding it would cost an opinion to punish a spelling.
+# What must not survive is the ambiguity.
+ROLE_ALIASES: dict[str, str] = {
+    "oncologie urologique": "urology_oncology",
+    "urologie": "urology_oncology",
+    "oncologie medicale": "medical_oncology",
+    "radiotherapie": "radiation_oncology",
+    "oncologie radiotherapie": "radiation_oncology",
+    "radiologie": "radiology",
+    "anatomopathologie": "pathology",
+    "pathologie": "pathology",
+    "oncogeriatrie": "geriatric_frailty",
+    "geriatrie": "geriatric_frailty",
+    "nutrition": "nutrition",
+    "soins de support": "palliative_supportive",
+    "soins de support et palliatifs": "palliative_supportive",
+    "soins palliatifs": "palliative_supportive",
+}
+
+
+def normalise_role(name: str) -> str:
+    """A speciality name as the corpus spells it, whichever way the agent wrote it.
+
+    Raises when the name matches nothing. A synthesis attributing a position to a speciality the
+    panel does not have has not made a spelling mistake — it has named a participant that never
+    sat at the table, and no downstream check could tell the two apart afterwards.
+    """
+    cleaned = " ".join(str(name).strip().split())
+    if cleaned in AGENT_ROLES:
+        return cleaned
+
+    folded = unicodedata.normalize("NFD", cleaned.lower())
+    folded = "".join(c for c in folded if unicodedata.category(c) != "Mn")
+    alias = ROLE_ALIASES.get(folded)
+    if alias is not None:
+        return alias
+
+    raise ValueError(
+        f"{name!r} ne designe aucune specialite du panel : utilisez l'identifiant du role."
+    )
+
+
+def _roles(values: list[str]) -> list[str]:
+    return [normalise_role(value) for value in values]
+
+
 class AgentPosition(Strict):
     """One specialist's side of a disagreement, named rather than paraphrased."""
 
     role: str = Field(min_length=1, max_length=64)
     position: str = Field(min_length=1, max_length=MAX_TEXT)
+
+    @field_validator("role")
+    @classmethod
+    def role_is_a_speciality(cls, value: str) -> str:
+        return normalise_role(value)
+
+
+class AgentSupport(Strict):
+    """Where in one specialist's own opinion the claimed position appears.
+
+    **This is the field that makes an attribution checkable.** A synthesis previously asserted
+    that two specialities agreed and nothing could test the assertion: measured across fifteen
+    dossiers, one convergence in ninety-two credited an agent with a position it never took, and
+    the failure was invisible in the rendered fiche. Requiring a quotation turns the claim into
+    something `check_synthesis` can verify against the stored opinion.
+
+    It also enforces one claim per point without trying to parse French. A convergence bundling
+    a shared assertion with an unshared one — the carboplatin defect — cannot produce a quotation
+    from the silent agent, so the compound point fails where the atomic ones pass. The rule is
+    not "reject sentences containing *et*", which would fire on most clinical prose; it is
+    "prove it, per agent".
+    """
+
+    role: str = Field(min_length=1, max_length=64)
+    # Long enough to be locatable. A three-word quotation matches half the document.
+    quote: str = Field(min_length=12, max_length=MAX_TEXT)
+
+    @field_validator("role")
+    @classmethod
+    def role_is_a_speciality(cls, value: str) -> str:
+        return normalise_role(value)
 
 
 class Convergence(Strict):
@@ -349,6 +439,42 @@ class Convergence(Strict):
     point: str = Field(min_length=1, max_length=MAX_TEXT)
     agents_agreeing: list[str] = Field(min_length=2)
     evidence_summary: str = Field(default="", max_length=MAX_TEXT)
+
+    # One quotation per agreeing speciality, from that speciality's own opinion.
+    support: list[AgentSupport] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def every_named_agent_is_attested(self) -> "Convergence":
+        """Naming an agent and showing where it said so are the same act, done properly.
+
+        Left optional, this field would be skipped exactly when it matters — a fabricated
+        agreement is the one a model cannot quote.
+        """
+        attested = {item.role for item in self.support}
+        unattested = [role for role in self.agents_agreeing if role not in attested]
+        if unattested:
+            raise ValueError(
+                "Chaque specialite citee dans une convergence doit etre appuyee par une "
+                f"citation de son propre avis ; manquant pour : {', '.join(unattested)}."
+            )
+        return self
+
+    @field_validator("agents_agreeing")
+    @classmethod
+    def named_specialities_exist(cls, value: list[str]) -> list[str]:
+        """Normalised, then de-duplicated — in that order, and the order is the point.
+
+        `["Oncologie medicale", "medical_oncology"]` is one speciality written twice. Counted
+        before normalising it satisfies the two-name rule on its own, which is a single voice
+        recorded as a consensus — exactly what that rule exists to prevent.
+        """
+        seen = list(dict.fromkeys(_roles(value)))
+        if len(seen) < 2:
+            raise ValueError(
+                "Une convergence doit nommer au moins deux specialites distinctes ; "
+                f"celle-ci n'en nomme qu'une ({seen[0] if seen else '-'})."
+            )
+        return seen
 
 
 class Divergence(Strict):
@@ -366,6 +492,17 @@ class Divergence(Strict):
     clinical_impact: str = Field(min_length=1, max_length=MAX_TEXT)
     # Whether the board must settle this before a plan can proceed.
     resolution_required: bool = True
+
+    @model_validator(mode="after")
+    def a_speciality_does_not_diverge_from_itself(self) -> "Divergence":
+        """Two sides written in two vocabularies can be the same speciality, and a board asked
+        to arbitrate between an agent and itself would be arbitrating nothing."""
+        if self.agent_a.role == self.agent_b.role:
+            raise ValueError(
+                "Une divergence oppose deux specialites differentes ; "
+                f"les deux cotes sont ici {self.agent_a.role}."
+            )
+        return self
 
 
 class SupportiveCarePlan(Strict):
@@ -400,6 +537,11 @@ class CoverageGap(Strict):
     raised_by: list[str] = Field(min_length=1)
     silent: list[str] = Field(min_length=1)
     clinical_impact: str = Field(default="", max_length=MAX_TEXT)
+
+    @field_validator("raised_by", "silent")
+    @classmethod
+    def named_specialities_exist(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(_roles(value)))
 
 
 class SynthesisOutput(AgentOutput):
@@ -546,3 +688,58 @@ def output_model_for(agent_role: str) -> type[AgentOutput]:
 def agent_output_json_schema(agent_role: str = "") -> dict[str, Any]:
     """The schema embedded in the bundle, so the agent is told exactly what to return."""
     return output_model_for(agent_role).model_json_schema()
+
+
+class UnattestedAgreement(ValueError):
+    """A synthesis claimed an agreement it could not quote from the agent's own opinion."""
+
+
+def check_synthesis(output: "SynthesisOutput", bundle: TaskBundle) -> None:
+    """Verify every claimed agreement against the opinion it claims to summarise.
+
+    The quotation must appear in that speciality's own output. Compared on words rather than
+    bytes — a model requotes with the spacing and accents rearranged, and demanding an exact
+    match would reject honest citations and make the check worthless.
+
+    This is the mechanical half of the fix for fabricated attribution. The brain asks for one
+    claim per point; this refuses the claim that cannot be shown.
+    """
+    opinions = {
+        normalise_role(opinion.agent_role): _searchable(opinion)
+        for opinion in bundle.inputs.agent_opinions
+    }
+
+    for convergence in output.convergences:
+        for item in convergence.support:
+            haystack = opinions.get(item.role)
+            if haystack is None:
+                raise UnattestedAgreement(
+                    f"La convergence cite {item.role}, dont aucun avis n'a ete fourni."
+                )
+            if _words(item.quote) not in haystack:
+                raise UnattestedAgreement(
+                    f"La citation attribuee a {item.role} ne figure pas dans son avis : "
+                    f"{item.quote[:80]!r}"
+                )
+
+
+def _words(text: str) -> str:
+    folded = unicodedata.normalize("NFD", text.lower())
+    folded = "".join(c for c in folded if unicodedata.category(c) != "Mn")
+    return re.sub(r"[^a-z0-9]+", " ", folded).strip()
+
+
+def _searchable(opinion: AgentOpinion) -> str:
+    parts = [
+        opinion.recommendation,
+        opinion.rationale,
+        *opinion.contraindications,
+        *opinion.uncertainty_notes,
+        *opinion.missing_information,
+        *(option.option for option in opinion.alternatives),
+        *(option.rationale for option in opinion.alternatives),
+        *(option.option for option in opinion.rejected_options),
+        *(option.rationale for option in opinion.rejected_options),
+        *(reference.supports for reference in opinion.evidence_references),
+    ]
+    return _words(" ".join(part for part in parts if part))

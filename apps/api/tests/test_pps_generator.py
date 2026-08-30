@@ -1315,6 +1315,12 @@ def _synthesis(**overrides: object) -> SynthesisOutput:
             {
                 "point": "Pas de cisplatine en l'état.",
                 "agents_agreeing": ["urology_oncology", "medical_oncology"],
+                # Every named speciality carries a quotation from its own opinion; the
+                # schema refuses a convergence that cannot show one.
+                "support": [
+                    {"role": "urology_oncology", "quote": "DFG sous le seuil usuel"},
+                    {"role": "medical_oncology", "quote": "cisplatine non eligible"},
+                ],
                 "evidence_summary": "DFG sous le seuil usuel.",
             }
         ],

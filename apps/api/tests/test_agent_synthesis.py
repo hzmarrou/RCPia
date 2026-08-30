@@ -19,8 +19,12 @@ from rcpia.agents.schemas import (
     CoverageGap,
     Divergence,
     EvidenceReference,
+    OutputFormat,
     SynthesisOutput,
+    TaskBundle,
+    UnattestedAgreement,
     agent_output_json_schema,
+    check_synthesis,
     output_model_for,
 )
 
@@ -265,3 +269,145 @@ def test_the_synthesis_schema_offers_the_gap_category_to_the_agent() -> None:
     silence in the `convergence` box.
     """
     assert "coverage_gaps" in agent_output_json_schema(SYNTHESIS_ROLE)["properties"]
+
+
+# --- Attribution, made checkable --------------------------------------------------------------
+
+
+def _bundle_with(*opinions: AgentOpinion) -> TaskBundle:
+    return TaskBundle(
+        goal="g",
+        audience="a",
+        inputs=BundleInputs(
+            case_id="case-1",
+            agent_role=SYNTHESIS_ROLE,
+            cancer_type="bladder",
+            ledger_version=1,
+            agent_opinions=list(opinions),
+        ),
+        output_format=OutputFormat(schema_={}),
+        constraints=["Avis provisoire."],
+    )
+
+
+UROLOGY = AgentOpinion(
+    agent_role="urology_oncology",
+    recommendation="Cystectomie radicale apres optimisation geriatrique.",
+    rationale="Le DFG est trop bas pour le cisplatine.",
+)
+MEDICAL = AgentOpinion(
+    agent_role="medical_oncology",
+    recommendation="Pas de cisplatine ; le carboplatine ne le remplace pas en neoadjuvant.",
+    rationale="Aucun benefice de survie demontre pour le carboplatine.",
+)
+
+
+def test_a_convergence_must_quote_every_agent_it_names() -> None:
+    """Naming an agent and showing where it said so are the same act done properly."""
+    with pytest.raises(ValidationError, match="citation de son propre avis"):
+        Convergence(
+            point="Pas de cisplatine.",
+            agents_agreeing=["urology_oncology", "medical_oncology"],
+            support=[{"role": "urology_oncology", "quote": "Le DFG est trop bas"}],
+        )
+
+
+def test_an_attested_agreement_passes_the_check() -> None:
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            convergences=[
+                {
+                    "point": "Pas de cisplatine en l'etat.",
+                    "agents_agreeing": ["urology_oncology", "medical_oncology"],
+                    "support": [
+                        {
+                            "role": "urology_oncology",
+                            "quote": "Le DFG est trop bas pour le cisplatine",
+                        },
+                        {"role": "medical_oncology", "quote": "Pas de cisplatine"},
+                    ],
+                }
+            ],
+        )
+    )
+    check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
+
+
+def test_the_carboplatin_fabrication_is_now_refused() -> None:
+    """The defect this whole mechanism exists for, as a regression test.
+
+    The medical oncologist ruled out carboplatin; the urologist never mentioned it. A synthesis
+    claiming both agreed cannot produce a quotation from the urologist's opinion, so the claim
+    fails here instead of reaching a board as consensus.
+    """
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            convergences=[
+                {
+                    "point": "Le carboplatine ne remplace pas le cisplatine.",
+                    "agents_agreeing": ["urology_oncology", "medical_oncology"],
+                    "support": [
+                        {
+                            "role": "urology_oncology",
+                            "quote": "le carboplatine ne doit pas remplacer le cisplatine",
+                        },
+                        {"role": "medical_oncology", "quote": "le carboplatine ne le remplace"},
+                    ],
+                }
+            ],
+        )
+    )
+    with pytest.raises(UnattestedAgreement, match="urology_oncology"):
+        check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
+
+
+def test_a_quotation_from_an_agent_that_never_ran_is_refused() -> None:
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            convergences=[
+                {
+                    "point": "Radiotherapie a discuter.",
+                    "agents_agreeing": ["urology_oncology", "radiation_oncology"],
+                    "support": [
+                        {
+                            "role": "urology_oncology",
+                            "quote": "Le DFG est trop bas pour le cisplatine",
+                        },
+                        {"role": "radiation_oncology", "quote": "irradiation a discuter"},
+                    ],
+                }
+            ],
+        )
+    )
+    with pytest.raises(UnattestedAgreement, match="aucun avis"):
+        check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
+
+
+def test_a_french_label_is_normalised_rather_than_rejected() -> None:
+    """A run that named the right speciality in the wrong vocabulary got the clinical judgement
+    right. Eleven of fourteen syntheses used identifiers and three used labels."""
+    convergence = Convergence(
+        point="Pas de cisplatine.",
+        agents_agreeing=["Oncologie urologique", "Oncologie medicale"],
+        support=[
+            {"role": "Oncologie urologique", "quote": "Le DFG est trop bas"},
+            {"role": "Oncologie medicale", "quote": "Pas de cisplatine du tout"},
+        ],
+    )
+    assert convergence.agents_agreeing == ["urology_oncology", "medical_oncology"]
+
+
+def test_a_speciality_outside_the_panel_is_refused() -> None:
+    """Not a spelling mistake: a participant that never sat at the table."""
+    with pytest.raises(ValidationError):
+        Convergence(
+            point="p",
+            agents_agreeing=["cardiologie", "medical_oncology"],
+            support=[
+                {"role": "cardiologie", "quote": "quelque chose"},
+                {"role": "medical_oncology", "quote": "autre chose"},
+            ],
+        )
