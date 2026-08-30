@@ -30,6 +30,7 @@ from rcpia.agents.schemas import (
 from rcpia.cases import completeness
 from rcpia.cases.ledger import AMBER, LedgerEntry, display_label, latest_version
 from rcpia.core.models import AgentRun, AgentRunStatus, Case, CaseLedgerVersion
+from rcpia.pps import gap_policy
 from rcpia.pps.schemas import (
     CareFramework,
     Decision,
@@ -539,6 +540,14 @@ def build_panel(output: AgentOutput, roles: Sequence[str]) -> PanelAgreement:
             )
         )
     for gap in output.coverage_gaps:
+        # A silence only reaches the board when an agent of that speciality was expected to hold
+        # a view on the subject. The medical oncologist having no opinion on which urinary
+        # diversion to build is the division of labour, not an omission, and printing it buries
+        # the silences that matter. `gap_policy` carries the clinician's judgement; nothing is
+        # deleted, because the full gap list stays in the stored synthesis output.
+        silent = [role for role in gap.silent if gap_policy.reports(gap.point, role)]
+        if not silent:
+            continue
         points.append(
             PanelPoint(
                 kind="gap",
@@ -547,7 +556,7 @@ def build_panel(output: AgentOutput, roles: Sequence[str]) -> PanelAgreement:
                     "Soulevé par "
                     + ", ".join(agent_label(role) for role in gap.raised_by)
                     + " — non abordé par "
-                    + ", ".join(agent_label(role) for role in gap.silent)
+                    + ", ".join(agent_label(role) for role in silent)
                 ),
                 detail=gap.clinical_impact,
             )
