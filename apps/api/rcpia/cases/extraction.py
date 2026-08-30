@@ -20,6 +20,7 @@ from rcpia.cases.fact_schema import (
     REPORTED_ABSENT,
     FactCategory,
     FactField,
+    absence_answers,
     is_reported_absent,
 )
 from rcpia.core.models import CancerType, FactStatus
@@ -114,6 +115,11 @@ class FactCandidate:
     chunk_id: object | None = None
     document_id: object | None = None
     reported_absent: bool = False
+    # True when the value was read out of a sentence rather than a `Label : value` line. The
+    # distinction has to survive as far as the rendered page: a grade taken from prose is a
+    # different kind of fact from one taken from a filled field, and the clinician holding the
+    # document is the person who needs to know which it was.
+    from_narrative: bool = False
 
 
 def extract_from_text(
@@ -370,6 +376,23 @@ def resolve(
                 )
             )
             continue
+
+        # An empty box does not contradict a reading. Where absence cannot be an answer --
+        # a histology, a grade, a stage -- `RAS` means the field was not filled in, so it must
+        # not compete with a value read elsewhere in the dossier. Without this, recovering
+        # `Gleason 9 (5+4)` from the narrative turned a missing grade into a *contested* one,
+        # and the agents refused for a new reason instead of the old one.
+        #
+        # It is dropped only when something else was read: `RAS` alone is still the dossier
+        # saying the clinician left the box empty, and that survives into the ledger's note.
+        if not absence_answers(field_spec.key):
+            answered = [
+                candidate
+                for candidate in found
+                if not (candidate.value and is_reported_absent(candidate.value))
+            ]
+            if answered:
+                found = answered
 
         distinct = {normalize_value(candidate.value) for candidate in found}
         first = found[0]
