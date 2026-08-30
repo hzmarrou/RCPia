@@ -32,9 +32,10 @@ than needing new machinery:
 
 import json
 import re
+import time
 import unicodedata
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from rcpia.cases.extraction import FactCandidate, normalize_value
@@ -72,6 +73,9 @@ class NarrativeExtraction:
     still_missing: list[str] = field(default_factory=list)
     rejected: list[RejectedFact] = field(default_factory=list)
     raw_response: str = ""
+    # Wall time of the model call, so the cost of the second pass is measured rather than
+    # estimated. Zero when no call was made.
+    seconds: float = 0.0
 
     @property
     def notes(self) -> list[str]:
@@ -282,14 +286,18 @@ async def extract(
         return NarrativeExtraction(still_missing=sorted(wanted))
 
     prompt = build_prompt(dossier_text, known=known, wanted=wanted)
+    started = time.monotonic()
     try:
         raw = await reader.read(prompt)
     except Exception as exc:  # noqa: BLE001 - any reader failure is the same outcome here
         return NarrativeExtraction(
             still_missing=sorted(wanted),
             rejected=[RejectedFact("*", "", f"lecture du texte impossible : {exc}")],
+            seconds=time.monotonic() - started,
         )
+    elapsed = time.monotonic() - started
 
-    return parse_response(
+    result = parse_response(
         raw, dossier_text=dossier_text, wanted=wanted, document_id=document_id
     )
+    return replace(result, seconds=elapsed)

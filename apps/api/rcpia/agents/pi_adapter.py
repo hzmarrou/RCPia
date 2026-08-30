@@ -15,7 +15,9 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -133,6 +135,85 @@ class AgentSettings:
                 f"{settings_path} must set defaultProvider and defaultModel"
             )
         return cls(provider=str(provider), model=str(model))
+
+
+# How long to wait for a killed tree to release its pipes before giving up on them. The output
+# of a run that timed out is not worth blocking on; the timeout itself is the result.
+_REAP_SECONDS = 10.0
+
+
+def _kill_tree(process: "subprocess.Popen[bytes]") -> None:
+    """Kill the agent and everything it started.
+
+    **`pi` is an npm shim.** On Windows it resolves to `pi.cmd` / `pi.ps1`, which spawns `node`;
+    the Python child is the wrapper, and the model call lives in the grandchild. Killing the
+    child therefore leaves `node` running, holding the stdout pipe open — and the reap that
+    follows blocks until it exits on its own.
+
+    Measured, that turned a 240-second timeout into 426, 747 and 833-second hangs across one
+    fifteen-dossier run: the timeout fired on schedule every time, killed the wrapper, and the
+    runner then sat on an orphaned pipe. Each one ended the moment `node` was killed by hand.
+
+    In a batch that is lost time. In production it is a job that never reports, because the
+    configured limit cannot end it.
+    """
+    if sys.platform == "win32":
+        # No process groups to speak of; `taskkill /T` walks the tree by parent id.
+        subprocess.run(  # noqa: S603
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+            timeout=_REAP_SECONDS,
+        )
+        return
+
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):  # pragma: no cover - already gone
+        pass
+
+
+def _run_with_tree_timeout(
+    command: list[str], *, cwd: str, env: dict[str, str], timeout: float
+) -> "subprocess.CompletedProcess[bytes]":
+    """`subprocess.run(timeout=...)`, except that the timeout ends the whole process tree.
+
+    Everything else about the call is unchanged: the same command, the same working directory
+    so `.pi/APPEND_SYSTEM.md` still loads `brain.md`, the same captured output.
+    """
+    creationflags = 0
+    start_new_session = False
+    if sys.platform == "win32":
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        # Its own session, so the whole tree can be signalled at once.
+        start_new_session = True
+
+    with subprocess.Popen(  # noqa: S603
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=creationflags,
+        start_new_session=start_new_session,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_tree(process)
+            try:
+                # The tree is dead, so this returns rather than waiting on a live writer. The
+                # grace period is a guard against a pipe held by something that survived
+                # `taskkill`, not part of the normal path.
+                stdout, stderr = process.communicate(timeout=_REAP_SECONDS)
+            except subprocess.TimeoutExpired:
+                stdout, stderr = b"", b""
+            raise subprocess.TimeoutExpired(
+                command, timeout, output=stdout, stderr=stderr
+            ) from None
+
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 @dataclass
@@ -291,11 +372,10 @@ class PiAdapter:
         try:
             completed = await anyio.to_thread.run_sync(
                 partial(
-                    subprocess.run,
+                    _run_with_tree_timeout,
                     command,
                     cwd=str(agent_dir),  # so .pi/APPEND_SYSTEM.md applies, loading brain.md
                     env=self._environment(),
-                    capture_output=True,
                     timeout=self.timeout_seconds,
                 )
             )

@@ -135,10 +135,20 @@ async def extract_case_facts(
                 "documents": len(documents),
                 "facts": len(resolved),
                 "extraction_signature": signature,
-                # What the second pass contributed, so a ledger that changed can be explained
-                # without re-running anything.
+                # What the second pass was asked for and what it contributed, so a ledger that
+                # changed can be explained — and a fill rate measured — without re-running
+                # anything. The field names are recorded, not just the counts: "it filled four
+                # fields" and "it filled the grade" are different facts about a run.
+                "narrative_wanted": len(narrative.still_missing) + len(narrative.candidates),
                 "narrative_facts": len(narrative.candidates),
+                "narrative_filled": sorted(
+                    {candidate.key for candidate in narrative.candidates}
+                ),
                 "narrative_rejected": len(narrative.rejected),
+                "narrative_rejected_reasons": sorted(
+                    {item.reason for item in narrative.rejected}
+                ),
+                "narrative_seconds": round(narrative.seconds, 1),
             },
         )
     )
@@ -274,6 +284,7 @@ def _made_traceable(
         )),
         rejected=rejected,
         raw_response=result.raw_response,
+        seconds=result.seconds,
     )
 
 
