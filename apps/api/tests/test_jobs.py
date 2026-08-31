@@ -288,6 +288,50 @@ async def test_a_healthy_running_job_is_left_alone(
     assert (await read_job(session_factory, job_id)).status is JobStatus.running
 
 
+async def test_a_finished_job_records_when_it_finished(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """`finished_at` must be the moment the work ended, not the moment its transaction opened.
+
+    PostgreSQL's `now()` is the *transaction* timestamp. A worker holds one transaction open for
+    the whole handler -- claim, run the agent, record the outcome, commit -- so a fifty-four
+    second agent run wrote `finished_at` equal to the instant the handler began. Observed in the
+    end-to-end verification: every job reported `finished_at` within twenty milliseconds of
+    `started_at`, including runs that demonstrably took a minute.
+
+    Nothing downstream is corrupted -- the real duration is on `agent_runs` -- but every
+    queue-level answer to *how long did that take* is wrong, and monitoring built on it would
+    report a healthy queue while agents ran for minutes.
+    """
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+
+    # One session for the whole thing, which is what the worker does.
+    async with session_factory() as session:
+        claimed = await service.claim_next(session, worker="slow-worker")
+        assert claimed is not None
+        token = claimed.claim_token
+        assert token is not None
+        await session.commit()
+
+    async with session_factory() as session:
+        # Exactly what the worker does: read the row first -- which opens the transaction --
+        # then run the handler, then record the outcome. `now()` is fixed at that first
+        # statement, which is why a long handler wrote a `finished_at` from before it ran.
+        assert await session.get(AnalysisJob, job_id) is not None
+        await asyncio.sleep(1.1)
+        await service.complete(session, job_id, token)
+        await session.commit()
+
+    job = await read_job(session_factory, job_id)
+    assert job.started_at is not None and job.finished_at is not None
+    elapsed = (job.finished_at - job.started_at).total_seconds()
+    assert elapsed >= 1.0, (
+        f"finished_at is {elapsed:.3f}s after started_at; the work took over a second, so the "
+        "timestamp is recording the transaction rather than the moment"
+    )
+
+
 async def test_stale_worker_cannot_complete_a_reclaimed_job(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

@@ -17,6 +17,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
@@ -40,6 +41,14 @@ from rcpia.jobs.models import JobType
 from rcpia.jobs.service import enqueue
 
 logger = logging.getLogger(__name__)
+
+# How old an extraction may be and still convene a panel by itself.
+#
+# One hour is comfortably longer than any healthy parse-and-extract, and far shorter than a
+# backlog. It bounds the damage of the case this exists for: a worker fleet starting against a
+# queue nobody has drained convenes nothing, and the history is replayed on purpose or not at
+# all.
+DEFAULT_MAX_EXTRACTION_AGE = timedelta(hours=1)
 
 # A job in one of these has settled: it will not produce an opinion later.
 #
@@ -208,6 +217,8 @@ async def convene_after_extraction(
     case: Case,
     version: CaseLedgerVersion | None,
     roles: Sequence[str],
+    job: AnalysisJob | None = None,
+    max_age: timedelta | None = DEFAULT_MAX_EXTRACTION_AGE,
 ) -> PanelStart | None:
     """Start the panel for a case whose ledger version has just settled.
 
@@ -229,6 +240,28 @@ async def convene_after_extraction(
     """
     if not roles or version is None:
         return None
+
+    # **The guard that stops a first deploy spending hours.** Measured: the first genuine worker
+    # ever started against the development database drained an extraction backlog that had been
+    # accumulating since 17 August -- 111 jobs in about twenty seconds, each recording a version
+    # and each correctly convening a panel, for 334 agent runs. Left alone those three workers
+    # would have spent roughly five and a half hours of model time answering questions nobody
+    # was waiting for.
+    #
+    # Nothing was wrong with convening; what was wrong was convening for work queued weeks ago.
+    # A fresh extraction is a clinician waiting for an answer. A stale one is history, and
+    # history is replayed deliberately or not at all.
+    if job is not None and max_age is not None:
+        age = datetime.now(UTC) - job.created_at
+        if age > max_age:
+            logger.info(
+                "case %s: extraction job is %.0f h old, older than the %.0f h cutoff; "
+                "not convening automatically",
+                case.id,
+                age.total_seconds() / 3600,
+                max_age.total_seconds() / 3600,
+            )
+            return None
 
     entries = entries_from_version(version)
     report = completeness.assess(entries, cancer_type=case.cancer_type)

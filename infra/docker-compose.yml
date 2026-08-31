@@ -1,7 +1,16 @@
 # RCPia v1 local runtime.
 #
 # Run from the repository root:
-#     docker compose -f infra/docker-compose.yml up
+#     docker compose --env-file .env -f infra/docker-compose.yml up --build --scale rcpia-worker=3
+#
+# `--env-file .env` is required. Compose reads the environment file next to *this* file
+# (`infra/.env`), and the project keeps `.env` at the repository root -- so without the flag every
+# `${...}` below silently takes its default: no credentials, no parser key, no feed proxy. The
+# stack starts anyway and the workers then refuse to run agents, with nothing saying why.
+#
+# `--build` after a code change. `up` alone reuses the existing image, and a stale API image is
+# healthy, answers /health, and serves the routes it was built with -- a missing endpoint is the
+# symptom.
 #
 # Specialists run concurrently by running several workers, not by running several agents inside
 # one. Each worker claims one job at a time; the queue's `FOR UPDATE SKIP LOCKED` guarantees no

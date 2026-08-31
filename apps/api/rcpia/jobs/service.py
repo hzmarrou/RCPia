@@ -32,7 +32,22 @@ TERMINAL_STATUSES = (JobStatus.completed, JobStatus.cancelled, JobStatus.failed)
 
 # now() is the transaction start time on PostgreSQL, which is what we want: every
 # comparison inside one transaction sees a single consistent instant.
+# Two clocks, and the difference matters.
+#
+# `now()` is PostgreSQL's *transaction* timestamp: every statement in one transaction sees the
+# same value, however long the transaction runs. That is what makes it right for the comparisons
+# below -- a job's runnability should not shift underneath a query -- and wrong for recording
+# when something happened. A worker holds one transaction open across the whole handler, so a
+# fifty-four second agent run wrote `finished_at` equal to the instant the handler began.
+# Measured in the end-to-end verification: every job reported finishing within twenty
+# milliseconds of starting, including runs that took a minute.
+#
+# `clock_timestamp()` reads the wall clock at the statement, which is what a timestamp of an
+# event has to mean. Used for the moments -- claimed, started, finished -- and for deadlines
+# computed from now, since a lease measured from a transaction that opened minutes ago is
+# already partly spent.
 DB_NOW = sa.func.now()
+DB_CLOCK = sa.func.clock_timestamp()
 
 
 class JobTransitionError(RuntimeError):
@@ -115,9 +130,9 @@ async def claim_next(
             status=JobStatus.running,
             claim_token=uuid.uuid4(),
             claimed_by=worker,
-            claimed_at=DB_NOW,
-            lease_expires_at=DB_NOW + lease,
-            started_at=sa.func.coalesce(AnalysisJob.started_at, DB_NOW),
+            claimed_at=DB_CLOCK,
+            lease_expires_at=DB_CLOCK + lease,
+            started_at=sa.func.coalesce(AnalysisJob.started_at, DB_CLOCK),
             attempts=AnalysisJob.attempts + 1,
         )
         .returning(AnalysisJob)
@@ -176,7 +191,7 @@ async def reap_expired_leases(session: AsyncSession) -> int:
                         else_="Lease expired with no attempts remaining",
                     ),
                 ),
-                finished_at=DB_NOW,
+                finished_at=DB_CLOCK,
                 claim_token=None,
                 claimed_by=None,
                 lease_expires_at=None,
@@ -199,7 +214,7 @@ async def extend_lease(
         job_id,
         claim_token,
         from_statuses=(JobStatus.running,),
-        values={"lease_expires_at": DB_NOW + lease},
+        values={"lease_expires_at": DB_CLOCK + lease},
         action="extend the lease on",
     )
 
@@ -213,7 +228,7 @@ async def complete(session: AsyncSession, job_id: uuid.UUID, claim_token: uuid.U
         from_statuses=(JobStatus.running,),
         values={
             "status": JobStatus.completed,
-            "finished_at": DB_NOW,
+            "finished_at": DB_CLOCK,
             "claim_token": None,
             "claimed_by": None,
             "lease_expires_at": None,
@@ -268,13 +283,13 @@ async def fail(
         values: dict[str, object] = {
             "status": JobStatus.failed,
             "error_message": error,
-            "finished_at": DB_NOW,
+            "finished_at": DB_CLOCK,
         }
     else:
         values = {
             "status": JobStatus.queued,
             "error_message": error,
-            "available_at": DB_NOW + retry_delay(job.attempts),
+            "available_at": DB_CLOCK + retry_delay(job.attempts),
         }
 
     await _transition(
@@ -298,7 +313,7 @@ async def cancel(session: AsyncSession, job_id: uuid.UUID, *, reason: str | None
         values={
             "status": JobStatus.cancelled,
             "error_message": reason,
-            "finished_at": DB_NOW,
+            "finished_at": DB_CLOCK,
             "claim_token": None,
             "claimed_by": None,
             "lease_expires_at": None,
@@ -314,7 +329,7 @@ async def resume(session: AsyncSession, job_id: uuid.UUID) -> None:
         job_id,
         claim_token=None,
         from_statuses=(JobStatus.waiting_for_user,),
-        values={"status": JobStatus.queued, "available_at": DB_NOW, "error_message": None},
+        values={"status": JobStatus.queued, "available_at": DB_CLOCK, "error_message": None},
         action="resume",
     )
 

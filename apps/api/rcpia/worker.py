@@ -133,6 +133,8 @@ def build_worker() -> Worker:
                     case=case,
                     version=version,
                     roles=get_settings().auto_panel_role_list,
+                    # The job carries its own age, which is what the backlog guard reads.
+                    job=job,
                 )
         return outcome
 

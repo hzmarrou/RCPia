@@ -700,6 +700,66 @@ async def test_no_configured_roles_means_no_automatic_panel(
         ) is None
 
 
+async def test_a_stale_extraction_does_not_convene_a_panel(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The guard that keeps a first deploy from spending hours on history.
+
+    Measured: the first genuine worker ever started against the development database drained an
+    extraction backlog accumulated since 17 August -- 111 jobs in about twenty seconds, each
+    correctly convening a panel, for 334 agent runs and roughly five and a half hours of model
+    time nobody was waiting for.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    _, case = await seed_case(session_factory)
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        version = await latest_version(session, case_id=case.id)
+        old = AnalysisJob(
+            case_id=case.id, organization_id=case.organization_id,
+            job_type=JobType.EXTRACT_FACTS, payload={}, status=JobStatus.completed,
+        )
+        session.add(old)
+        await session.flush()
+        # Two days old: a backlog entry, not a clinician waiting.
+        old.created_at = datetime.now(UTC) - timedelta(days=2)
+        await session.flush()
+
+        assert await panel_service.convene_after_extraction(
+            session, case=stored, version=version, roles=list(ROLES), job=old
+        ) is None
+        await session.commit()
+
+    async with session_factory() as session:
+        queued = await session.scalar(
+            sa.select(sa.func.count()).select_from(AnalysisJob)
+            .where(AnalysisJob.case_id == case.id, AnalysisJob.job_type == JobType.RUN_AGENT)
+        )
+    assert queued == 0, "a stale extraction must convene nothing"
+
+
+async def test_a_fresh_extraction_still_convenes(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The guard must not stop the case it exists to serve."""
+    _, case = await seed_case(session_factory)
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        version = await latest_version(session, case_id=case.id)
+        fresh = AnalysisJob(
+            case_id=case.id, organization_id=case.organization_id,
+            job_type=JobType.EXTRACT_FACTS, payload={}, status=JobStatus.completed,
+        )
+        session.add(fresh)
+        await session.flush()
+        started = await panel_service.convene_after_extraction(
+            session, case=stored, version=version, roles=list(ROLES), job=fresh
+        )
+        await session.commit()
+    assert started is not None and set(started.jobs) == set(ROLES)
+
+
 # --- Panel-scoped reading ---------------------------------------------------------------------
 
 

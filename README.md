@@ -53,13 +53,36 @@ data/         local runtime artifacts (gitignored — never commit patient data)
 ```bash
 cp .env.example .env        # then fill in secrets
 
-# Everything in containers
-docker compose -f infra/docker-compose.yml up --build
+# Everything in containers. Both flags matter -- see below.
+docker compose --env-file .env -f infra/docker-compose.yml up --build --scale rcpia-worker=3
 # web    -> http://localhost:3000
 # api    -> http://localhost:8000/health
 # db     -> localhost:5432 (pgvector/pgvector:pg17)
 # worker -> 3 replicas, no port; they take jobs off the queue
 ```
+
+**`--env-file .env` is not optional.** Compose looks for an environment file beside the compose
+file it was given -- `infra/.env` -- and this project keeps `.env` at the repository root. Without
+the flag every `${...}` in the compose file silently falls back to its default: no Azure
+credentials, no LlamaParse key, no feed proxy for the build. The containers still start, and the
+workers then refuse to run agents. Nothing announces the cause.
+
+**`--build` matters after a code change.** `up` reuses whatever image already exists. A stale API
+image is easy to miss because the container is healthy and answers `/health` -- it simply serves
+the routes it was built with. If `/cases` returns 404, or a fix you just made has no effect, the
+image is old:
+
+```bash
+# Rebuild one service and replace the running container with it
+docker compose --env-file .env -f infra/docker-compose.yml build api
+docker compose --env-file .env -f infra/docker-compose.yml up -d --force-recreate api
+
+# What the API actually exposes right now
+curl -s localhost:8000/openapi.json | python -c "import sys,json;print(len(json.load(sys.stdin)['paths']),'routes')"
+```
+
+Nineteen routes is a current API; nine means only `/auth` and `/health` are mounted, so the
+image predates the routers.
 
 ### Running a panel of specialists at once
 
@@ -99,6 +122,12 @@ AUTO_PANEL_ROLES=urology_oncology,medical_oncology,radiation_oncology   # the de
 AUTO_PANEL_ROLES=                                                      # off; analysis is then
                                                                        # only ever requested
 ```
+
+**A worker fleet meeting an old queue convenes nothing.** An extraction job older than an hour
+does not start a panel by itself, because a first deploy against a database with pending
+extractions would otherwise drain the backlog and start a panel for every one of them -- measured
+here as 334 agent runs from 111 stale jobs in twenty seconds, roughly five and a half hours of
+model time. Replaying history is a deliberate act: request those analyses through the API.
 
 A case that is missing a blocking field convenes nothing and costs nothing: automatic convening
 applies the same completeness gate as the manual endpoint, so an incomplete upload does not buy
