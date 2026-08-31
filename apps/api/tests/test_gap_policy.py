@@ -104,6 +104,55 @@ def test_radiotherapy_is_a_shared_decision_for_urology_not_for_medical_oncology(
     assert not gap_policy.reports(point, ONCOLOGY)
 
 
+def test_the_radiation_oncologist_silent_on_radiotherapy_reaches_the_board() -> None:
+    """The speciality that owns the subject saying nothing about it.
+
+    This is the radiotherapy equivalent of the carboplatin case, and it was reaching the board
+    on the default rather than on a rule — which is exactly how `(radiotherapy,
+    medical_oncology)` came to carry a verdict nobody had given.
+    """
+    point = "Discussion de l'irradiation ganglionnaire pelvienne dans le schéma de radiothérapie."
+    label, reported, ruled = gap_policy.explain(point, "radiation_oncology")
+    assert reported is gap_policy.REPORT
+    assert ruled is True, "the flagship gap for this speciality must rest on a rule"
+    assert label == "Radiothérapie"
+
+
+def test_a_radiotherapy_decision_is_recognised_by_the_words_it_is_written_in() -> None:
+    """Dose, fractionation and target volumes are the substance of the decision.
+
+    The first vocabulary carried `radiotherapeutique` and `hypofractionnee` and missed both
+    `radiothérapique` and `fractionnement`, so a fractionation point was filed as `Autre` and
+    adjudicated under no rule at all — on the batch where radiotherapy had just been wired.
+    """
+    point = (
+        "Choix précis du fractionnement radiothérapique et prudence vis-à-vis de "
+        "l'ultrahypofractionnement."
+    )
+    assert gap_policy.subject_of(point).key == "radiotherapy"
+    assert not gap_policy.reports(point, ONCOLOGY)
+    assert gap_policy.reports(point, "radiation_oncology")
+
+
+def test_single_fraction_palliative_irradiation_is_radiotherapy_not_the_bone_pathway() -> None:
+    """`osseuse` claims this point for the hormonal pathway unless the phrase is matched first.
+
+    `fraction` cannot be a term on its own: *fraction d'éjection* is a cardiac measurement, and
+    a fitness assessment must not be adjudicated as a radiotherapy decision.
+    """
+    palliative = (
+        "Fraction unique comme option privilégiée pour une métastase osseuse douloureuse."
+    )
+    cardiac = "Fraction d'éjection ventriculaire gauche altérée avant traitement."
+    assert gap_policy.subject_of(palliative).key == "radiotherapy"
+    assert gap_policy.subject_of(cardiac) is not gap_policy.RADIOTHERAPY
+    # And the hormonal pathway keeps its own bone-health points.
+    antiresorptive = (
+        "Ne pas utiliser un antirésorptif mensuel à dose de prévention des événements osseux."
+    )
+    assert gap_policy.subject_of(antiresorptive).key == "hormonal"
+
+
 # --- What happens to a combination nobody has ruled on ----------------------------------------
 
 

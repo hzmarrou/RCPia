@@ -114,12 +114,27 @@ SURGERY = Subject(
     }),
 )
 
+# **The words a radiotherapy decision is actually written in**, which is not the same set as the
+# words for the treatment. The first version carried `radiotherapeutique` and `hypofractionnee`
+# and missed both `radiothérapique` and `fractionnement` -- so *"choix précis du fractionnement
+# radiothérapique et prudence vis-à-vis de l'ultrahypofractionnement"* was classified as `Autre`
+# and adjudicated under no rule at all, on a batch where radiotherapy had just become a wired
+# speciality. Dose, fractionation and target volumes are the substance of the decision, so the
+# terms have to reach them.
+#
+# `dose` and `volume` are deliberately left out despite belonging to the subject: they appear in
+# other specialities' sentences too -- *"un antirésorptif mensuel à dose de prévention"* is a
+# hormonal point -- and this subject is tested before `HORMONAL`, so adding them would move
+# points out of the pathway they belong to. A missed point defaults to reported; a stolen one is
+# silently ruled by the wrong row.
 RADIOTHERAPY = Subject(
     key="radiotherapy",
     label="Radiothérapie",
     terms=frozenset({
         "radiotherapie", "curietherapie", "trimodal", "trimodale", "irradiation",
-        "radiochimiotherapie", "hypofractionnee", "radiotherapeutique",
+        "radiochimiotherapie", "hypofractionnee", "radiotherapeutique", "radiotherapique",
+        "radiotherapiques", "fractionnement", "hypofractionnement", "ultrahypofractionnement",
+        "fractionne", "fractionnee", "stereotaxie", "stereotaxique", "ebrt",
     }),
 )
 
@@ -222,6 +237,13 @@ POLICY: dict[tuple[str, str], bool] = {
     # those are not its domain.
     ("radiotherapy", "urology_oncology"): REPORT,
     ("radiotherapy", "medical_oncology"): SUPPRESS,
+    # The radiation oncologist silent on a radiotherapy point raised by someone else. This is
+    # the speciality that owns the subject saying nothing about it -- the shape the whole
+    # category exists to catch, and the radiotherapy equivalent of the carboplatin case. It was
+    # reaching the board on the default rather than on a rule, which is how
+    # `("radiotherapy", "medical_oncology")` came to be wrong: a verdict nobody had given,
+    # reading as one that had been.
+    ("radiotherapy", "radiation_oncology"): REPORT,
     # 8 — systemic therapy. The radiation oncologist's pathway runs through irradiation, not
     # chemotherapy. Its silence on systemic drug choice, administration, or general
     # indication is division of labour.
@@ -261,6 +283,12 @@ def subject_of(point: str) -> Subject:
         return SYSTEMIC_CHOICE
     if "hors essai" in folded:
         return SYSTEMIC_CHOICE
+    # Single-fraction palliative irradiation of a painful bone metastasis. `fraction` alone
+    # cannot be a radiotherapy term -- *fraction d'éjection* is a cardiac measurement and would
+    # drag a fitness assessment into this subject -- and without the phrase `osseuse` claims the
+    # point for the hormonal pathway, which is tested later but matches first here.
+    if "fraction unique" in folded:
+        return RADIOTHERAPY
     # `HORMONAL` is tested before `SYSTEMIC_TECHNIQUE` (see `SUBJECTS`), which is right for the
     # androgen-deprivation pathway and wrong the moment a cytotoxic is named.
     order = SUBJECTS
