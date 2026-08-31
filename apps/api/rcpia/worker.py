@@ -20,6 +20,7 @@ from rcpia.agents.pi_adapter import PiNotConfigured
 from rcpia.agents.service import run_agent
 from rcpia.cases.facts import extract_case_facts
 from rcpia.cases.ledger import record_version
+from rcpia.core.config import get_settings
 from rcpia.core.db import get_session_factory
 from rcpia.core.models import AnalysisJob, Case, JobStatus
 from rcpia.jobs.models import JobOutcome, JobType
@@ -109,8 +110,18 @@ def build_worker() -> Worker:
         if outcome is None:
             case = await session.get(Case, job.case_id)
             if case is not None:
-                await record_version(
+                version = await record_version(
                     session, case=case, change_reason="Extraction automatique"
+                )
+                # The step that closes the chain. Until now it ended here: parse, extract,
+                # record a version, and stop -- with three worker replicas idle because nothing
+                # routed the case to them. Convening refuses on its own when the case still has
+                # a blocking gap, or when no roles are configured.
+                await panel.convene_after_extraction(
+                    session,
+                    case=case,
+                    version=version,
+                    roles=get_settings().auto_panel_role_list,
                 )
         return outcome
 

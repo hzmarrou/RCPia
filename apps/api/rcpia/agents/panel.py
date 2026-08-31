@@ -13,6 +13,7 @@ than inferred, because both decide what a tumour board is told.
 """
 
 import hashlib
+import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -21,7 +22,9 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rcpia.agents.bundle import entries_from_version
 from rcpia.agents.schemas import SYNTHESIS_ROLE
+from rcpia.cases import completeness
 from rcpia.core.models import (
     AgentRun,
     AgentRunStatus,
@@ -29,10 +32,14 @@ from rcpia.core.models import (
     AnalysisPanel,
     AnalysisPanelDispatch,
     AnalysisPanelJob,
+    Case,
+    CaseLedgerVersion,
     JobStatus,
 )
 from rcpia.jobs.models import JobType
 from rcpia.jobs.service import enqueue
+
+logger = logging.getLogger(__name__)
 
 # A job in one of these has settled: it will not produce an opinion later.
 #
@@ -193,6 +200,68 @@ async def start_panel(
 
     await session.flush()
     return PanelStart(panel=panel, jobs=jobs, reused=frozenset(reused))
+
+
+async def convene_after_extraction(
+    session: AsyncSession,
+    *,
+    case: Case,
+    version: CaseLedgerVersion | None,
+    roles: Sequence[str],
+) -> PanelStart | None:
+    """Start the panel for a case whose ledger version has just settled.
+
+    **The step that was missing between an upload and an answer.** The chain ran parse, extract,
+    record a version -- and stopped. Three worker replicas sat idle because nothing routed the
+    case to them, so a dossier reached a panel only when somebody called the API by hand.
+
+    Returns `None`, without enqueueing anything, when the panel should not run:
+
+    - no roles are configured, which is how a deployment turns this off;
+    - no ledger version exists yet, so there is nothing to pin the analysis to;
+    - the case still has a blocking gap. The API route already refuses those at the door, and
+      convening automatically has to apply the same gate -- otherwise an upload missing its
+      histology quietly spends one Pi run per speciality producing one refusal per speciality.
+
+    Repeat extraction is safe. A corrected field or a re-uploaded page records a new version and
+    calls this again; `start_panel` reuses the live jobs when they are already answering the same
+    question on the same version, and refuses when they are answering a different one.
+    """
+    if not roles or version is None:
+        return None
+
+    entries = entries_from_version(version)
+    report = completeness.assess(entries, cancer_type=case.cancer_type)
+    if not report.can_run_analysis:
+        logger.info(
+            "case %s is not analysable yet; no panel convened (%s)",
+            case.id,
+            "; ".join(issue.message for issue in report.blocking)[:200],
+        )
+        return None
+
+    try:
+        started = await start_panel(
+            session,
+            case_id=case.id,
+            organization_id=case.organization_id,
+            roles=list(roles),
+            ledger_version=version.version,
+            clinical_question=case.clinical_question,
+        )
+    except PanelConflict as conflict:
+        # A panel is already running on a different version of this case. Its answer is the one
+        # in flight; starting a second would ask the same specialists two questions at once.
+        logger.info("case %s already has a panel in flight: %s", case.id, conflict.detail)
+        return None
+
+    logger.info(
+        "case %s convened %d specialists on ledger version %d",
+        case.id,
+        len(started.jobs),
+        version.version,
+    )
+    return started
 
 
 @dataclass(frozen=True)

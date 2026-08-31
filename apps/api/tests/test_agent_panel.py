@@ -591,6 +591,115 @@ async def test_a_crashing_handler_still_lets_the_panel_dispatch(
     assert dispatched == 1, "a panel completed by a crashing specialist must still dispatch"
 
 
+# --- From an uploaded dossier to a running panel -----------------------------------------------
+
+
+async def test_a_settled_ledger_version_convenes_the_panel(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The step that was missing between an upload and an answer.
+
+    The chain ran upload -> parse -> extract -> record a ledger version, and stopped. Three
+    worker replicas sat idle while nothing routed the case to them, so a dossier only ever
+    reached a panel when somebody called the API by hand. Parallel execution was proven at
+    2.32x on a panel nothing was starting.
+    """
+    _, case = await seed_case(session_factory)
+
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        version = await latest_version(session, case_id=case.id)
+        started = await panel_service.convene_after_extraction(
+            session, case=stored, version=version, roles=list(ROLES)
+        )
+        await session.commit()
+
+    assert started is not None, "a complete ledger version must convene the panel"
+    async with session_factory() as session:
+        rows = await session.execute(
+            sa.select(AnalysisJob).where(
+                AnalysisJob.case_id == case.id,
+                AnalysisJob.job_type == JobType.RUN_AGENT,
+                AnalysisJob.status.in_(panel_service.LIVE_JOB_STATUSES),
+            )
+        )
+        jobs = rows.scalars().all()
+    assert {(job.payload or {}).get("agent_role") for job in jobs} == set(ROLES)
+    assert {job.payload["ledger_version"] for job in jobs} == {version.version}
+
+
+async def test_convening_twice_on_the_same_version_does_not_double_the_work(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Extraction can run again -- a corrected field, a re-uploaded page -- and must not buy a
+    second opinion on a question already being answered."""
+    _, case = await seed_case(session_factory)
+
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        version = await latest_version(session, case_id=case.id)
+        first = await panel_service.convene_after_extraction(
+            session, case=stored, version=version, roles=list(ROLES)
+        )
+        # Ids, not ORM instances: two sessions give two objects for one row.
+        first_jobs = {role: job.id for role, job in first.jobs.items()} if first else {}
+        await session.commit()
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        version = await latest_version(session, case_id=case.id)
+        second = await panel_service.convene_after_extraction(
+            session, case=stored, version=version, roles=list(ROLES)
+        )
+        await session.commit()
+
+    assert first is not None and second is not None
+    second_jobs = {role: job.id for role, job in second.jobs.items()}
+    assert second_jobs == first_jobs, "the same live jobs must answer both"
+    assert second.reused == set(ROLES)
+
+
+async def test_an_incomplete_case_does_not_convene_a_panel(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Blocking gaps are refused before the model is paid, not after.
+
+    The API route already refuses these at the door. Convening automatically has to apply the
+    same gate, or an upload missing its histology would silently spend three Pi runs producing
+    three refusals.
+    """
+    _, case = await seed_case(session_factory, text="**Sexe** : Homme\n**Age** : 70 ans\n")
+
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        version = await latest_version(session, case_id=case.id)
+        started = await panel_service.convene_after_extraction(
+            session, case=stored, version=version, roles=list(ROLES)
+        )
+        await session.commit()
+
+    assert started is None, "an incomplete case must not spend a Pi run"
+    async with session_factory() as session:
+        queued = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AnalysisJob)
+            .where(AnalysisJob.case_id == case.id, AnalysisJob.job_type == JobType.RUN_AGENT)
+        )
+    assert queued == 0
+
+
+async def test_no_configured_roles_means_no_automatic_panel(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Automatic convening is a deployment's choice, and an empty list turns it off."""
+    _, case = await seed_case(session_factory)
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        version = await latest_version(session, case_id=case.id)
+        assert await panel_service.convene_after_extraction(
+            session, case=stored, version=version, roles=[]
+        ) is None
+
+
 # --- Panel-scoped reading ---------------------------------------------------------------------
 
 
