@@ -5,6 +5,7 @@ process is invoked, how the JSONL session is read, and what happens when a run f
 """
 
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -168,7 +169,11 @@ def test_a_clinical_run_reads_its_own_config_directory_not_the_hosts(
     env = adapter._environment()
     home = Path(env["PI_CODING_AGENT_DIR"])
 
-    assert home == adapter.work_root / "pi-home"
+    # Process-local, and deliberately not under the work root: `PI_WORK_ROOT` is a volume every
+    # worker replica shares, and this directory is writable runtime state. Putting it there
+    # would swap a host-shared config for a fleet-shared one.
+    assert adapter.work_root not in home.parents
+    assert str(os.getpid()) in home.name, "one config home per process"
     assert home.is_dir(), "the runtime must not have to create it"
     assert not (home / "auth.json").exists(), "no stored credential may shadow the configured one"
     assert not (home / "trust.json").exists(), "trust must come from --approve, not from history"

@@ -16,8 +16,10 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -476,8 +478,18 @@ class PiAdapter:
         in `AZURE_OPENAI_API_KEY`. Measured on this machine: two keys of equal length, different
         values, and the stale one won. Pointing the run at a directory we own removes the
         precedence question entirely.
+
+        **Process-local, not under the work root.** `PI_WORK_ROOT` is a volume shared by every
+        `rcpia-worker` replica, and this directory is writable state: credentials, caches, and
+        whatever else the runtime decides to keep. Putting it there would hand one mutable
+        config directory to every concurrently running agent in the deployment -- replacing a
+        host-shared config with a fleet-shared one. A pid alone is not enough either, because
+        two containers can both hold pid 7; the host name distinguishes them.
         """
-        return self.work_root / "pi-home"
+        return (
+            Path(tempfile.gettempdir())
+            / f"rcpia-pi-home-{socket.gethostname()}-{os.getpid()}"
+        )
 
     def _environment(self) -> dict[str, str]:
         """The child's environment: the credential, the endpoint, and an isolated config dir.

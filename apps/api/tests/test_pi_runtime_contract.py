@@ -191,6 +191,10 @@ def test_a_run_without_approve_would_lose_the_brain(tmp_path: Path) -> None:
         check=False,
     )
 
+    # The absence means nothing unless the run actually happened: a crash, a failed
+    # authentication or an early timeout all produce an empty stdout and would pass silently.
+    assert completed.returncode == 0, completed.stderr[-500:]
+    assert completed.stdout.strip(), "the runtime produced no answer at all"
     assert CODEWORD not in completed.stdout, (
         "the codeword arrived without project approval, so `--approve` is not what makes the "
         "brain load and this pair of tests no longer proves the contract"

@@ -62,7 +62,7 @@ is what lets the worker container behave identically.
 | Variable | Value | Notes |
 |---|---|---|
 | `AZURE_OPENAI_BASE_URL` | `https://rcpia.services.ai.azure.com/openai/v1` | Pi reads **`BASE_URL`**, not `ENDPOINT` — the wrong name fails confusingly |
-| `AZURE_OPENAI_API_KEY` | from Foundry → Deployments → *API Key* | Passed to Pi as `--api-key`, never via a config file |
+| `AZURE_OPENAI_API_KEY` | from Foundry → Deployments → *API Key* | Passed to Pi in the child **environment**, never in the command line and never via a config file |
 | Model | the **deployment name**, e.g. `gpt-5.6-sol` | Azure routes by deployment. `gpt-5.6` alone does not exist |
 
 Deployments available in the workspace: `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.6-terra`,
@@ -100,10 +100,24 @@ superseded by both `-3` models.
 Verified working with a real call:
 
 ```bash
-pi --provider azure-openai-responses --model gpt-5.6-sol --api-key "$AZURE_OPENAI_API_KEY" \
+# The key travels in the environment, not in argv: command-line arguments are readable by
+# anything that can list the process table, and they are copied into crash dumps and
+# diagnostic captures.
+export AZURE_OPENAI_API_KEY AZURE_OPENAI_BASE_URL
+
+# `--approve` is not optional. Non-interactive modes show no trust prompt, and with no
+# saved decision Pi ignores project-local `.pi/` resources -- including APPEND_SYSTEM.md,
+# whose only job is to say *read brain.md*. Without it the agent runs with no clinical
+# brain and still answers plausibly, which is how this went unnoticed for months.
+pi --provider azure-openai-responses --model gpt-5.6-sol --approve \
    --no-skills --tools read --verbose -p "Reply with exactly: RCPIA-OK"
 # -> RCPIA-OK
 ```
+
+If that returns `401` while the key is correct, a stored credential is winning: Pi resolves
+the Azure key from `~/.pi/agent/auth.json` before the environment, and a stale entry there
+shadows the configured one. RCPia's adapter avoids this by pointing every run at its own
+`PI_CODING_AGENT_DIR`; to reproduce that by hand, set it to an empty directory.
 
 Two warnings appear and are expected:
 
