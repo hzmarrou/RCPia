@@ -20,6 +20,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -29,11 +30,16 @@ from typing import Any
 
 import anyio.to_thread
 
+from rcpia.agents.lifecycle import Phase, RunTimeline, TimeBudget, TimeoutLayer
 from rcpia.agents.schemas import TaskBundle
 
 # The design fixes ten minutes per agent run; the job lease is fifteen, so a timeout is
 # always recorded by the worker that owns the job rather than by a lease expiring.
 DEFAULT_TIMEOUT_SECONDS = 600.0
+
+# The job lease the queue grants while an agent runs, mirrored here so the three
+# budgets can be validated together. The queue remains its owner.
+DEFAULT_LEASE_SECONDS = 15 * 60
 
 JSON_FENCE = re.compile(r"^\s*```(?:json)?\s*(?P<body>.*?)\s*```\s*$", re.DOTALL)
 
@@ -152,6 +158,9 @@ class PiRunResult:
     duration_seconds: float
     stderr: str = ""
     session_id: str | None = None
+    # Phase names and clocks for this run. Carries no run content by construction: see
+    # `rcpia.agents.lifecycle`.
+    timeline: "RunTimeline | None" = None
 
     def output_json(self) -> dict[str, Any]:
         """Parse the agent's answer, tolerating a fenced code block around it."""
@@ -238,7 +247,12 @@ def _kill_tree(process: "subprocess.Popen[bytes]") -> None:
 
 
 def _run_with_tree_timeout(
-    command: list[str], *, cwd: str, env: dict[str, str], timeout: float
+    command: list[str],
+    *,
+    cwd: str,
+    env: dict[str, str],
+    timeout: float,
+    timeline: RunTimeline | None = None,
 ) -> "subprocess.CompletedProcess[bytes]":
     """`subprocess.run(timeout=...)`, except that the timeout ends the whole process tree.
 
@@ -253,6 +267,31 @@ def _run_with_tree_timeout(
         # Its own session, so the whole tree can be signalled at once.
         start_new_session = True
 
+    out_chunks: list[bytes] = []
+    err_chunks: list[bytes] = []
+
+    def pump(stream: Any, sink: list[bytes], *, is_stdout: bool) -> None:
+        """Drain one pipe as it is written, reading each line for its milestone.
+
+        Incremental reading is what makes the phase knowable while the process is still alive:
+        `communicate()` hands nothing over until the child exits, so a ten-minute wait and a
+        dead process looked identical. It also stops a child that fills an unread pipe buffer
+        from blocking on the write, which is a way to hang that looks exactly like a slow
+        provider and is not one.
+
+        The decoded line is read for a marker and then dropped. It is never stored or logged:
+        Pi echoes the prompt, and the prompt is the patient.
+        """
+        try:
+            for raw in iter(stream.readline, b""):
+                sink.append(raw)
+                if timeline is not None:
+                    timeline.observe(
+                        raw.decode("utf-8", "replace"), is_stdout=is_stdout, length=len(raw)
+                    )
+        except (ValueError, OSError):  # pragma: no cover - pipe closed under us
+            return
+
     with subprocess.Popen(  # noqa: S603
         command,
         cwd=cwd,
@@ -262,22 +301,43 @@ def _run_with_tree_timeout(
         creationflags=creationflags,
         start_new_session=start_new_session,
     ) as process:
+        if timeline is not None:
+            timeline.record(Phase.process_started)
+        pumps = [
+            threading.Thread(target=pump, args=(stream, sink), kwargs={"is_stdout": is_stdout},
+                             daemon=True)
+            for stream, sink, is_stdout in (
+                (process.stdout, out_chunks, True),
+                (process.stderr, err_chunks, False),
+            )
+            if stream is not None
+        ]
+        for thread in pumps:
+            thread.start()
+
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
+            process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            if timeline is not None:
+                timeline.timed_out_at = TimeoutLayer.process
+                timeline.record(Phase.timeout)
             _kill_tree(process)
-            try:
-                # The tree is dead, so this returns rather than waiting on a live writer. The
-                # grace period is a guard against a pipe held by something that survived
-                # `taskkill`, not part of the normal path.
-                stdout, stderr = process.communicate(timeout=_REAP_SECONDS)
-            except subprocess.TimeoutExpired:
-                stdout, stderr = b"", b""
+            # The tree is dead, so the pumps end on EOF. The grace period guards against a pipe
+            # held by something that survived `taskkill`, not the normal path.
+            for thread in pumps:
+                thread.join(_REAP_SECONDS)
             raise subprocess.TimeoutExpired(
-                command, timeout, output=stdout, stderr=stderr
+                command, timeout, output=b"".join(out_chunks), stderr=b"".join(err_chunks)
             ) from None
 
-    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        for thread in pumps:
+            thread.join(_REAP_SECONDS)
+        if timeline is not None:
+            timeline.record(Phase.process_exited)
+
+    return subprocess.CompletedProcess(
+        command, process.returncode, b"".join(out_chunks), b"".join(err_chunks)
+    )
 
 
 @dataclass
@@ -295,6 +355,23 @@ class PiAdapter:
     pi_command: tuple[str, ...] = ("pi",)
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     extra_env: dict[str, str] = field(default_factory=dict)
+    # How long one provider request may take. Strictly inside `timeout_seconds`, so the
+    # innermost deadline is the one that fires and the failure names a cause rather than a
+    # symptom. Defaults to half the process budget, leaving room for start-up and for the
+    # session to be written after the model answers.
+    provider_timeout_seconds: float | None = None
+    # The lease the job holds while this runs. Not enforced here -- the queue owns it -- but
+    # declared so the three budgets can be checked against each other in one place.
+    lease_seconds: float = DEFAULT_LEASE_SECONDS
+
+    def budget(self) -> TimeBudget:
+        """The nested deadlines, validated. Raises if they do not nest strictly."""
+        provider = self.provider_timeout_seconds or self.timeout_seconds / 2
+        return TimeBudget(
+            provider_seconds=provider,
+            process_seconds=self.timeout_seconds,
+            lease_seconds=self.lease_seconds,
+        )
 
     # ---------------------------------------------------------------- paths
 
@@ -453,6 +530,14 @@ class PiAdapter:
             # gets `--tools read` with `--no-skills`. Approving is not widening what the agent
             # may do; it is letting it read the instructions we wrote for it.
             "--approve",
+            # One JSON object per line on stdout, which is what makes a run's progress visible
+            # while it is still running. Measured against the real runtime, `--verbose` alone
+            # produced three bytes for an entire run, so nothing could be observed; this yields
+            # `session`, `agent_start`, `turn_start`, `message_start`, `message_end`,
+            # `agent_end`. The answer is still read from the session file, so the output path is
+            # unchanged.
+            "--mode",
+            "json",
             "-p",
             f"@{task_path}",
         ]
@@ -503,6 +588,16 @@ class PiAdapter:
         env = dict(os.environ)
         home = self.pi_home()
         home.mkdir(parents=True, exist_ok=True)
+
+        # **The one place RCPia can bound Pi's own retrying.** Owning this directory means the
+        # runtime's global settings are ours to write, so a clinical run is not subject to Pi's
+        # defaults -- agent-level retry enabled, three attempts, a 300-second idle timeout --
+        # nested inside our process timeout, inside the lease, inside the queue's attempts.
+        # Written every time rather than once, because the budget can change between runs and a
+        # stale settings file would silently apply the previous one.
+        (home / "settings.json").write_text(
+            json.dumps(self.budget().pi_settings(), indent=2), encoding="utf-8"
+        )
         env["PI_CODING_AGENT_DIR"] = str(home)
         if self.api_key:
             env["AZURE_OPENAI_API_KEY"] = self.api_key
@@ -519,6 +614,7 @@ class PiAdapter:
         agent_name: str,
         case_id: uuid.UUID,
         run_id: uuid.UUID | None = None,
+        job_id: uuid.UUID | None = None,
     ) -> PiRunResult:
         run_id = run_id or uuid.uuid4()
         agent_dir = self.agent_dir(agent_name)
@@ -547,6 +643,15 @@ class PiAdapter:
         # Pi runs in a worker thread rather than through asyncio's subprocess support:
         # psycopg's async driver requires the selector event loop on Windows, and that
         # loop cannot spawn subprocesses at all. A thread works the same everywhere.
+        timeline = RunTimeline(
+            run_id=run_id,
+            agent_role=agent_name,
+            job_id=job_id,
+            runtime_version=runtime_version(package_dir),
+            model=settings.model,
+            provider=settings.provider,
+        )
+
         started = time.monotonic()
         try:
             completed = await anyio.to_thread.run_sync(
@@ -556,12 +661,15 @@ class PiAdapter:
                     cwd=str(agent_dir),  # so .pi/APPEND_SYSTEM.md applies, loading brain.md
                     env=self._environment(),
                     timeout=self.timeout_seconds,
+                    timeline=timeline,
                 )
             )
         except subprocess.TimeoutExpired:
+            # Naming the phase and the layer is the difference between a report someone can act
+            # on and one that says only that time passed.
             raise PiRunFailed(
                 f"L'agent {agent_name} a dépassé le délai de "
-                f"{int(self.timeout_seconds)} s."
+                f"{int(self.timeout_seconds)} s. {timeline.summary()}"
             ) from None
 
         duration = time.monotonic() - started
@@ -578,6 +686,8 @@ class PiAdapter:
         # Read the session before judging the exit code: a run that failed partway may
         # still have written the transcript that explains why.
         written = session_path.read_bytes() if session_path.exists() else None
+        if written:
+            timeline.record(Phase.session_written)
 
         if returncode != 0:
             raise PiRunFailed(
