@@ -81,9 +81,23 @@ _EVENT_PHASES: dict[str, Phase] = {
 # true one.
 _LATEST_WINS: frozenset[Phase] = frozenset({Phase.assistant_message_completed})
 
-# Above this, a line cannot be one of the phase events above: they carry an id and a status,
-# not a transcript. Generous by an order of magnitude so a wordier future event still parses.
-_MAX_EVENT_BYTES = 8192
+# The event that carries the volume, skipped by name.
+#
+# **Not by size.** A size threshold was tried first and was wrong in the worst way: measured
+# against a real run, `message_start` reached 81 KB, `message_end` 81 KB and `agent_end` 116 KB,
+# because each carries the message it is announcing. An 8 KB cut therefore discarded exactly the
+# events that mark the answer, and `assistant_message_completed` silently fell back to an early
+# small event -- making generation look like two seconds and shutdown like fifty-five.
+#
+# `message_update` is the one that repeats: a single run emitted 3,266 of them. Naming it costs a
+# short regex over the first 200 characters and leaves every phase-bearing event parsed, however
+# large.
+_CHATTY_EVENT = "message_update"
+
+# `type` is the first key Pi writes, so the event can be identified without parsing the body.
+# The full parse remains as a fallback for a line that orders its keys differently.
+_TYPE_IN_HEAD = re.compile(r'^\s*\{\s*"type"\s*:\s*"([a-z_]+)"')
+_HEAD_CHARS = 200
 
 # Warnings and other prose Pi writes outside the JSON stream. Matched only to notice that the
 # runtime is alive; nothing is recorded from them.
@@ -158,21 +172,25 @@ class RunTimeline:
             self.stderr_bytes += length
         self.last_activity_at = time.monotonic() - self.started_at
 
-        # **The volume is skipped, not parsed.** `message_update` re-serialises the whole
-        # conversation on every token, so a run over a 93 KB bundle sends 80-137 MB of it --
-        # measured -- and decoding and parsing each of those lines costs real CPU on the hot
-        # path of the very stall this instrumentation exists to diagnose. No phase-bearing
-        # event is anywhere near this large, so an oversized line is counted as a sign of life
-        # and dropped unread.
-        if length > _MAX_EVENT_BYTES:
-            return
         stripped = line.strip()
         if not stripped or not stripped.startswith("{"):
             return
-        try:
-            event_type = json.loads(stripped).get("type")
-        except (ValueError, AttributeError):
+
+        # The type comes out of the first few characters, so the chatty event can be dropped
+        # without decoding the transcript it carries. That is where the volume is: one run
+        # emitted 3,266 `message_update` lines against roughly a dozen of everything else.
+        head = _TYPE_IN_HEAD.match(stripped[:_HEAD_CHARS])
+        if head is not None:
+            event_type: str | None = head.group(1)
+        else:
+            try:
+                event_type = json.loads(stripped).get("type")
+            except (ValueError, AttributeError):
+                return
+        if event_type == _CHATTY_EVENT:
+            # Counted as a sign of life above; its contents are never read.
             return
+
         phase = _EVENT_PHASES.get(str(event_type))
         if phase is not None:
             self.record(phase)

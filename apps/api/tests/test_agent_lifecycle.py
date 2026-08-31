@@ -6,6 +6,7 @@ and it has to say that **without recording a word of what the agent was reading*
 check both halves: that the phase is knowable, and that the content is not kept.
 """
 
+import json
 import re
 import time
 import uuid
@@ -130,6 +131,64 @@ def test_every_other_phase_keeps_its_first_occurrence() -> None:
     assert next(
         e.at for e in timeline.events if e.phase is Phase.provider_request_started
     ) == first
+
+
+def test_a_large_event_is_still_observed() -> None:
+    """The defect a size threshold caused, and the reason it was the wrong tool.
+
+    Measured against a real run: `message_start` reached 81 KB, `message_end` 81 KB and
+    `agent_end` 116 KB, because each carries the message it announces. An 8 KB cut therefore
+    discarded exactly the events that mark the answer, and `assistant_message_completed` fell
+    back to an early small event -- reporting two seconds of generation and fifty-five of
+    shutdown for a run that spent nearly all its time generating.
+    """
+    timeline = _timeline()
+    huge_answer = json.dumps({"type": "message_end", "message": {"content": "x" * 120_000}})
+    huge_end = json.dumps({"type": "agent_end", "messages": ["y" * 116_000]})
+    assert len(huge_answer) > 100_000 and len(huge_end) > 100_000
+
+    timeline.observe(huge_answer, is_stdout=True, length=len(huge_answer))
+    assert Phase.assistant_message_completed in {e.phase for e in timeline.events}, (
+        "a large message_end must still mark the answer as complete"
+    )
+    # `agent_end` carries no phase of its own, but it must not raise or be skipped by size.
+    timeline.observe(huge_end, is_stdout=True, length=len(huge_end))
+
+
+def test_the_chatty_event_is_skipped_by_name_however_small(  ) -> None:
+    """Skipping is by event name, not size, so a short `message_update` is skipped too."""
+    timeline = _timeline()
+    timeline.observe('{"type":"message_update","text":"ok"}', is_stdout=True, length=37)
+
+    assert timeline.events == [], "message_update must never move the phase"
+    assert timeline.last_activity_at > 0, "but it must still count as a sign of life"
+
+
+def test_the_final_answer_is_timed_even_when_a_tool_call_came_first() -> None:
+    """The two defects together: a small tool-call message, then the large real answer.
+
+    This is the shape of every real clinical run -- the agent reads `brain.md`, then answers --
+    and it is the shape both previous bugs got wrong.
+    """
+    timeline = _timeline()
+    tool_call = json.dumps({"type": "message_end", "message": {"tool": "read"}})
+    timeline.observe(tool_call, is_stdout=True, length=len(tool_call))
+    first = next(e.at for e in timeline.events if e.phase is Phase.assistant_message_completed)
+
+    time.sleep(0.02)
+    answer = json.dumps({"type": "message_end", "message": {"content": "z" * 90_000}})
+    timeline.observe(answer, is_stdout=True, length=len(answer))
+    last = next(e.at for e in timeline.events if e.phase is Phase.assistant_message_completed)
+
+    assert last > first, "the large final answer must replace the small tool-call message"
+
+
+def test_an_event_whose_keys_are_ordered_differently_still_parses() -> None:
+    """The fast path reads `type` from the head; the fallback exists for anything else."""
+    timeline = _timeline()
+    reordered = json.dumps({"id": "m1", "status": "ok", "type": "turn_start"})
+    timeline.observe(reordered, is_stdout=True, length=len(reordered))
+    assert timeline.phase is Phase.provider_request_started
 
 
 # --- Who retries -------------------------------------------------------------------------------
