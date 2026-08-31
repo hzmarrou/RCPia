@@ -74,6 +74,17 @@ _EVENT_PHASES: dict[str, Phase] = {
     "message_end": Phase.assistant_message_completed,
 }
 
+# Phases that mean "the last time this happened" rather than "the first".
+#
+# Only the assistant message: a tool-using run ends several of them, and the one worth timing is
+# the last, which is the answer. Every other phase happens once and its first occurrence is the
+# true one.
+_LATEST_WINS: frozenset[Phase] = frozenset({Phase.assistant_message_completed})
+
+# Above this, a line cannot be one of the phase events above: they carry an id and a status,
+# not a transcript. Generous by an order of magnitude so a wordier future event still parses.
+_MAX_EVENT_BYTES = 8192
+
 # Warnings and other prose Pi writes outside the JSON stream. Matched only to notice that the
 # runtime is alive; nothing is recorded from them.
 _NON_EVENT = re.compile(r"^\s*(?:Warning|Error)\b", re.I)
@@ -117,10 +128,21 @@ class RunTimeline:
     # ---------------------------------------------------------------- recording
 
     def record(self, phase: Phase) -> None:
-        """Note that a phase was reached, once."""
-        if any(event.phase is phase for event in self.events):
-            return
-        self.events.append(Event(phase=phase, at=time.monotonic() - self.started_at))
+        """Note that a phase was reached.
+
+        First occurrence wins, except for the phases in `_LATEST_WINS`. A run that uses a tool
+        produces several assistant messages -- the first is the tool call, and recording that
+        one made `assistant_message_completed` mean *"the agent decided to read brain.md"*,
+        about 2.6 seconds in, while the answer it was supposed to time arrived a minute later.
+        Timing the wrong message would have made an A/B compare tool-call latency.
+        """
+        at = time.monotonic() - self.started_at
+        for index, event in enumerate(self.events):
+            if event.phase is phase:
+                if phase in _LATEST_WINS:
+                    self.events[index] = Event(phase=phase, at=at)
+                return
+        self.events.append(Event(phase=phase, at=at))
         logger.info("agent run phase", extra={"rcpia_phase": self.as_log(phase)})
 
     def observe(self, line: str, *, is_stdout: bool, length: int) -> None:
@@ -136,6 +158,14 @@ class RunTimeline:
             self.stderr_bytes += length
         self.last_activity_at = time.monotonic() - self.started_at
 
+        # **The volume is skipped, not parsed.** `message_update` re-serialises the whole
+        # conversation on every token, so a run over a 93 KB bundle sends 80-137 MB of it --
+        # measured -- and decoding and parsing each of those lines costs real CPU on the hot
+        # path of the very stall this instrumentation exists to diagnose. No phase-bearing
+        # event is anywhere near this large, so an oversized line is counted as a sign of life
+        # and dropped unread.
+        if length > _MAX_EVENT_BYTES:
+            return
         stripped = line.strip()
         if not stripped or not stripped.startswith("{"):
             return

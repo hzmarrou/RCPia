@@ -23,6 +23,7 @@ import tempfile
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -40,6 +41,10 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 # The job lease the queue grants while an agent runs, mirrored here so the three
 # budgets can be validated together. The queue remains its owner.
 DEFAULT_LEASE_SECONDS = 15 * 60
+
+# How much of the event stream to keep for a failure message. The stream itself is
+# hundreds of megabytes and is not the answer; a few lines of it is a diagnostic.
+_STDOUT_TAIL_LINES = 40
 
 JSON_FENCE = re.compile(r"^\s*```(?:json)?\s*(?P<body>.*?)\s*```\s*$", re.DOTALL)
 
@@ -267,7 +272,10 @@ def _run_with_tree_timeout(
         # Its own session, so the whole tree can be signalled at once.
         start_new_session = True
 
-    out_chunks: list[bytes] = []
+    # stderr is small and carries the runtime's error text, so it is kept whole. stdout is the
+    # event stream and is bounded to its last few lines.
+    out_chunks: deque[bytes] = deque(maxlen=_STDOUT_TAIL_LINES)
+    tail = out_chunks
     err_chunks: list[bytes] = []
 
     def pump(stream: Any, sink: list[bytes], *, is_stdout: bool) -> None:
@@ -284,7 +292,16 @@ def _run_with_tree_timeout(
         """
         try:
             for raw in iter(stream.readline, b""):
-                sink.append(raw)
+                # **The stream is read, not kept.** `--mode json` re-serialises the accumulated
+                # conversation on every token, so one agent run over a 93 KB bundle emits
+                # 80-137 MB on stdout -- measured. Appending all of it held that in memory for
+                # no purpose: the answer is read from the session file, and stdout's only job
+                # here is to carry the phase. Only a bounded tail is retained, enough to put in
+                # a failure message.
+                if is_stdout:
+                    tail.append(raw)
+                else:
+                    sink.append(raw)
                 if timeline is not None:
                     timeline.observe(
                         raw.decode("utf-8", "replace"), is_stdout=is_stdout, length=len(raw)
@@ -307,7 +324,7 @@ def _run_with_tree_timeout(
             threading.Thread(target=pump, args=(stream, sink), kwargs={"is_stdout": is_stdout},
                              daemon=True)
             for stream, sink, is_stdout in (
-                (process.stdout, out_chunks, True),
+                (process.stdout, err_chunks, True),
                 (process.stderr, err_chunks, False),
             )
             if stream is not None
@@ -721,6 +738,9 @@ class PiAdapter:
             usage=parsed.usage,
             duration_seconds=duration,
             stderr=stderr,
+            # Carried out with the result so the phase timings reach the job record rather
+            # than living only in a log line. Contains no run content by construction.
+            timeline=timeline,
             session_id=parsed.session_id,
         )
 

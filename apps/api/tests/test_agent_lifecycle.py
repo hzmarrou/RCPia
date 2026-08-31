@@ -7,6 +7,7 @@ check both halves: that the phase is knowable, and that the content is not kept.
 """
 
 import re
+import time
 import uuid
 
 import pytest
@@ -98,6 +99,37 @@ def test_a_phase_is_recorded_once_so_a_chatty_run_does_not_rewrite_its_history()
     for _ in range(5):
         timeline.observe('{"type": "message_start"}', is_stdout=True, length=25)
     assert [event.phase for event in timeline.events] == [Phase.provider_first_event]
+
+
+def test_the_final_assistant_message_is_the_one_timed() -> None:
+    """A tool-using run ends several assistant messages, and only the last is the answer.
+
+    Measured on the corrected baseline: the first `message_end` arrived at 2.6 s -- the agent
+    deciding to read `brain.md` -- while the answer completed nearly a minute later. Timing the
+    first would have made an A/B compare tool-call latency instead of generation.
+    """
+    timeline = _timeline()
+    timeline.observe('{"type": "message_end"}', is_stdout=True, length=24)
+    first = next(e.at for e in timeline.events if e.phase is Phase.assistant_message_completed)
+
+    time.sleep(0.02)
+    timeline.observe('{"type": "message_end"}', is_stdout=True, length=24)
+    last = next(e.at for e in timeline.events if e.phase is Phase.assistant_message_completed)
+
+    assert last > first, "the later message must replace the earlier one"
+    assert sum(e.phase is Phase.assistant_message_completed for e in timeline.events) == 1
+
+
+def test_every_other_phase_keeps_its_first_occurrence() -> None:
+    """Only the assistant message means "the last one"; the rest happen once."""
+    timeline = _timeline()
+    timeline.observe('{"type": "turn_start"}', is_stdout=True, length=22)
+    first = next(e.at for e in timeline.events if e.phase is Phase.provider_request_started)
+    time.sleep(0.02)
+    timeline.observe('{"type": "turn_start"}', is_stdout=True, length=22)
+    assert next(
+        e.at for e in timeline.events if e.phase is Phase.provider_request_started
+    ) == first
 
 
 # --- Who retries -------------------------------------------------------------------------------
