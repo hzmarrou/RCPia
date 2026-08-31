@@ -105,6 +105,26 @@ ROLE_SETTING_QUESTIONS: dict[tuple[str, str], str] = {
         "Traitement endovésical de la TVNIM : instillations de BCG et de mitomycine, schéma "
         "d'entretien, conduite en cas d'échec du BCG, et optimisation pré-thérapeutique"
     ),
+    # Trimodal bladder preservation is the option this speciality owns and the other two do not:
+    # urology asks about cystectomy, medical oncology about cisplatin eligibility, and the
+    # per-setting question names `préservation vésicale trimodale` in one clause among four. The
+    # selection criteria, the dose and the concomitant radiosensitiser are what decide whether
+    # the option is real for a given patient, and none of them is reachable from the others'
+    # wording.
+    ("radiation_oncology", "bladder_mibc_non_metastatic"): (
+        "Préservation vésicale trimodale pour TVIM non métastatique : critères de sélection des "
+        "candidats, résection transuréthrale maximale, radiothérapie et radiosensibilisation "
+        "concomitante, dose et fractionnement, et surveillance après conservation"
+    ),
+    # Prostate is mapped on the unspecified-risk setting rather than on a risk band because that
+    # is the setting the dossiers reach: the risk group depends on Gleason, PSA and stage
+    # together, and those are exactly the fields the extraction most often leaves incomplete. A
+    # pair mapped on `prostate_localized_high_risk` would be correct and would almost never fire.
+    ("radiation_oncology", "prostate_nonmetastatic_unspecified_risk"): (
+        "Radiothérapie du cancer de la prostate non métastatique : radiothérapie externe et "
+        "curiethérapie, hypofractionnement, volumes cibles et irradiation ganglionnaire "
+        "pelvienne, durée de la suppression androgénique associée selon le groupe de risque"
+    ),
 }
 
 # One question per disease setting in the staging vocabulary. Each names the situation in the

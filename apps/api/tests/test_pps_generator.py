@@ -61,10 +61,10 @@ from rcpia.pps.render import render_markdown
 from rcpia.pps.schemas import (
     FORBIDDEN_IN_GENERATED_OUTPUT,
     CareFramework,
-    PanelAgreement,
-    PanelPoint,
     Decision,
     DocumentAssertsADecision,
+    PanelAgreement,
+    PanelPoint,
     PpsDocument,
     RationaleAppendix,
     Referral,

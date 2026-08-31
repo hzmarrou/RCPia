@@ -97,6 +97,42 @@ def test_decision_setting_flows_into_the_question() -> None:
 # --- The role-aware layer -------------------------------------------------------------------
 
 
+def test_the_three_wired_agents_ask_three_different_questions_on_the_same_patient() -> None:
+    """The defect this layer exists for, restated for the third agent.
+
+    Measured before the layer existed: urology and medical oncology were handed **identical**
+    passages 10 of 10 on one bladder dossier. A filter that permits more than the question asks
+    for permits nothing in practice. Adding a speciality without adding its question would
+    reproduce that, and the panel would report a convergence between two agents that read the
+    same page.
+    """
+    setting = "bladder_mibc_non_metastatic"
+    questions = {
+        role: question_for("bladder", setting, role)
+        for role in ("urology_oncology", "medical_oncology", "radiation_oncology")
+    }
+    assert len(set(questions.values())) == 3
+    # Each names the option it owns, and no other agent's question does.
+    assert "cystectomie" in questions["urology_oncology"].lower()
+    assert "cisplatine" in questions["medical_oncology"].lower()
+    assert "trimodale" in questions["radiation_oncology"].lower()
+
+
+def test_radiotherapy_asks_about_prostate_on_the_setting_the_dossiers_reach() -> None:
+    """Mapped on unspecified risk, not on a risk band.
+
+    The risk group needs Gleason, PSA and stage together, and those are the fields extraction
+    most often leaves incomplete. A pair mapped on `prostate_localized_high_risk` would be
+    correct and would almost never fire.
+    """
+    question = question_for(
+        "prostate", "prostate_nonmetastatic_unspecified_risk", "radiation_oncology"
+    )
+    assert question != SETTING_QUESTIONS["prostate_nonmetastatic_unspecified_risk"]
+    assert "curiethérapie" in question
+    assert "hypofractionnement" in question
+
+
 def test_every_mapped_role_is_a_real_agent_role() -> None:
     """A typo in a role key would fall back silently and look like a coverage gap.
 

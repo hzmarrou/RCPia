@@ -254,6 +254,29 @@ async def sign_in(client: AsyncClient, user: User) -> None:
 # --------------------------------------------------------------------------------------
 
 
+def test_every_wired_agent_folder_has_what_the_adapter_requires() -> None:
+    """`agent_dir` refuses a folder without `brain.md` or `.pi/APPEND_SYSTEM.md`.
+
+    The second file is the one that is easy to forget and impossible to notice: without it the
+    brain is never read, and the agent answers as a general model with the bundle in front of
+    it. That failure produces a plausible opinion rather than an error.
+    """
+    root = Path(__file__).resolve().parents[3] / "agents"
+    wired = [d for d in root.iterdir() if d.is_dir() and (d / "brain.md").is_file()]
+    assert {d.name for d in wired} >= {
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "rcp_synthesis",
+    }
+    for folder in wired:
+        assert (folder / ".pi" / "APPEND_SYSTEM.md").is_file(), folder.name
+        assert (folder / ".pi" / "settings.json").is_file(), folder.name
+        # A brain that never names the role it speaks for is the copy-paste failure.
+        assert (folder / "brain.md").read_text(encoding="utf-8").strip()
+
+
+
 async def test_the_bundle_carries_the_ledger_and_the_text_behind_each_value(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
