@@ -723,11 +723,50 @@ def check_synthesis(output: "SynthesisOutput", bundle: TaskBundle) -> None:
                 raise UnattestedAgreement(
                     f"La convergence cite {item.role}, dont aucun avis n'a ete fourni."
                 )
-            if _words(item.quote) not in haystack:
+            if not _attested(item.quote, haystack):
                 raise UnattestedAgreement(
                     f"La citation attribuee a {item.role} ne figure pas dans son avis : "
                     f"{item.quote[:80]!r}"
                 )
+
+
+# The ways a model marks "words omitted here" when it shortens a quotation.
+_ELLIPSIS = re.compile(r"\[\s*(?:\.{3,}|\u2026)\s*\]|\(\s*(?:\.{3,}|\u2026)\s*\)|\.{3,}|\u2026")
+
+# A fragment shorter than this proves nothing: two or three common words occur everywhere in a
+# clinical opinion, and allowing them would let an ellipsis stitch a claim out of scattered
+# vocabulary -- which is the fabrication this check exists to refuse.
+_MIN_FRAGMENT = 8
+
+
+def _attested(quote: str, haystack: str) -> bool:
+    """Whether this quotation really appears in that agent's opinion.
+
+    **An ellipsis is honest quoting, not evasion.** A specialist's recommendation runs to several
+    clauses, and a synthesis shortening one to its load-bearing halves -- *"proposer une
+    suppression androgénique immédiate [...] associée à une intensification"* -- is quoting
+    correctly. A plain substring test reads the gap as a mismatch and rejects it, and the whole
+    synthesis then fails: measured, a legitimate panel produced no fiche at all because of this.
+
+    So the fragments either side of an ellipsis are checked separately, and **in order**. That
+    keeps the guarantee the check exists for: every word attributed to an agent is one it wrote,
+    in the sequence it wrote them. What it stops requiring is that the agent wrote them without
+    a breath in between.
+    """
+    fragments = [words for part in _ELLIPSIS.split(quote) if (words := _words(part))]
+    if not fragments:
+        return False
+    if len(fragments) > 1 and any(len(f) < _MIN_FRAGMENT for f in fragments):
+        # An elision made of scraps is not a quotation of anything.
+        return False
+
+    position = 0
+    for fragment in fragments:
+        found = haystack.find(fragment, position)
+        if found == -1:
+            return False
+        position = found + len(fragment)
+    return True
 
 
 def _words(text: str) -> str:

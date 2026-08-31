@@ -456,3 +456,110 @@ def test_an_option_may_be_quoted_together_with_its_reason() -> None:
     )
 
     check_synthesis(output, _bundle_with(UROLOGY, specialist))
+
+
+def test_a_shortened_quotation_is_still_attested() -> None:
+    """A synthesis may elide the middle of a long recommendation.
+
+    Found by running a simulated metastatic prostate case: the urology agent wrote a
+    multi-clause recommendation, the synthesis quoted its two load-bearing halves joined by
+    `[...]`, and the substring test read the gap as a mismatch. The synthesis failed, retried,
+    failed again and gave up -- a legitimate panel produced no fiche at all, because a truthful
+    attribution was refused.
+    """
+    urology = AgentOpinion(
+        agent_role="urology_oncology",
+        recommendation=(
+            "Proposer une suppression androgénique immédiate, préférentiellement par "
+            "antagoniste de la GnRH, associée à une intensification par ARPI."
+        ),
+        rationale="Maladie métastatique hormonosensible de novo.",
+    )
+    medical = AgentOpinion(
+        agent_role="medical_oncology",
+        recommendation="Suppression androgénique et intensification sans délai.",
+        rationale="Volume métastatique élevé.",
+    )
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            convergences=[
+                {
+                    "point": "Suppression androgénique immédiate.",
+                    "agents_agreeing": ["urology_oncology", "medical_oncology"],
+                    "evidence_summary": "Les deux avis la proposent d'emblée.",
+                    "support": [
+                        {
+                            "role": "urology_oncology",
+                            "quote": (
+                                "proposer une suppression androgénique immédiate [...] "
+                                "associée à une intensification"
+                            ),
+                        },
+                        {
+                            "role": "medical_oncology",
+                            "quote": "Suppression androgénique et intensification sans délai.",
+                        },
+                    ],
+                }
+            ],
+        )
+    )
+    check_synthesis(output, _bundle_with(urology, medical))
+
+
+def test_an_ellipsis_cannot_stitch_a_claim_out_of_scattered_words() -> None:
+    """What the elision must not become: a licence to assemble.
+
+    Allowing fragments to be matched separately is only safe while each fragment is long enough
+    to mean something and they appear in the order they were written. Otherwise a synthesis
+    could quote three common words from opposite ends of an opinion and call it an agreement.
+    """
+    urology = AgentOpinion(
+        agent_role="urology_oncology",
+        recommendation=(
+            "Surveillance active proposée ; la cystectomie radicale n'est pas retenue à ce stade."
+        ),
+        rationale="Tumeur non infiltrante.",
+    )
+
+    medical = AgentOpinion(
+        agent_role="medical_oncology",
+        recommendation="Surveillance active proposée.",
+        rationale="Pas d'indication systémique.",
+    )
+    bundle = _bundle_with(urology, medical)
+
+    def convergence(quote: str) -> SynthesisOutput:
+        # A convergence needs two specialities by schema, so the second quote is truthful and
+        # only the urology one is under test.
+        return SynthesisOutput.model_validate(
+            an_output(
+                SYNTHESIS_ROLE,
+                convergences=[
+                    {
+                        "point": "Conduite retenue.",
+                        "agents_agreeing": ["urology_oncology", "medical_oncology"],
+                        "evidence_summary": "…",
+                        "support": [
+                            {"role": "urology_oncology", "quote": quote},
+                            {
+                                "role": "medical_oncology",
+                                "quote": "Surveillance active proposée.",
+                            },
+                        ],
+                    }
+                ],
+            )
+        )
+
+    for quote in (
+        # Words that all appear, in the wrong order.
+        "cystectomie radicale [...] Surveillance active",
+        # Fragments too short to carry a claim.
+        "la [...] est [...] retenue",
+        # An ellipsis around text the agent never wrote.
+        "Surveillance active proposée [...] chimiothérapie néoadjuvante",
+    ):
+        with pytest.raises(UnattestedAgreement):
+            check_synthesis(convergence(quote), bundle)
