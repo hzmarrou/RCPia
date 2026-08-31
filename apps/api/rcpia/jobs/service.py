@@ -126,21 +126,55 @@ async def claim_next(
 
 
 async def reap_expired_leases(session: AsyncSession) -> int:
-    """Fail jobs whose lease died with no attempts left. Returns how many were failed."""
+    """Recover jobs no worker can be holding. Returns how many were failed.
+
+    Two shapes, both meaning "running, but nobody is running it".
+
+    The first is the ordinary one: a lease that expired with no attempts left. The worker died,
+    the job was reclaimed as often as its budget allowed, and there is nothing further to try.
+
+    The second is a job in `running` that **holds no lease at all**, and it was a hole. Claiming
+    sets the status and the lease in one statement, so a running row without a lease was never
+    claimed by anyone -- yet `claim_next` will not take it, because its expired-lease branch
+    requires a lease to be set, and this reaper would not touch it either. Meanwhile
+    `start_analysis` and `start_panel` both count it as live, so that `(case, role)` could never
+    be analysed again. Measured in the working database: 342 such rows across 118 cases, the
+    oldest three weeks old, every one with `claimed_by`, `claim_token` and `lease_expires_at`
+    null. They were left by a measurement driver that marked jobs running itself instead of
+    claiming them -- not shipped code, but the queue having no way back from that state is this
+    module's own gap, and it blocked a real panel.
+
+    **Failed rather than requeued.** Nothing ever ran, so requeueing looks tempting; but silently
+    starting work that was abandoned weeks ago would spend real model time answering questions
+    nobody is waiting for. Failing it unblocks the case, says why, and asking again is one
+    request.
+    """
+    orphaned = sa.and_(
+        AnalysisJob.status == JobStatus.running,
+        AnalysisJob.lease_expires_at.is_(None),
+    )
+    exhausted = sa.and_(
+        AnalysisJob.status == JobStatus.running,
+        AnalysisJob.lease_expires_at.is_not(None),
+        AnalysisJob.lease_expires_at < DB_NOW,
+        AnalysisJob.attempts >= AnalysisJob.max_attempts,
+    )
     result = cast(
         sa.CursorResult[Any],
         await session.execute(
             sa.update(AnalysisJob)
-            .where(
-                AnalysisJob.status == JobStatus.running,
-                AnalysisJob.lease_expires_at.is_not(None),
-                AnalysisJob.lease_expires_at < DB_NOW,
-                AnalysisJob.attempts >= AnalysisJob.max_attempts,
-            )
+            .where(sa.or_(exhausted, orphaned))
             .values(
                 status=JobStatus.failed,
                 error_message=sa.func.coalesce(
-                    AnalysisJob.error_message, "Lease expired with no attempts remaining"
+                    AnalysisJob.error_message,
+                    sa.case(
+                        (
+                            AnalysisJob.lease_expires_at.is_(None),
+                            "Running with no lease: no worker ever claimed this job",
+                        ),
+                        else_="Lease expired with no attempts remaining",
+                    ),
                 ),
                 finished_at=DB_NOW,
                 claim_token=None,

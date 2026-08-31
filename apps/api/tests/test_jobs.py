@@ -226,6 +226,68 @@ async def test_exhausted_job_with_a_dead_lease_is_failed_not_reclaimed(
     assert failed.finished_at is not None
 
 
+async def test_a_running_job_that_holds_no_lease_is_recovered(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A `running` row with no lease is unclaimable *and* unreapable, so it blocks forever.
+
+    `claim_next` only reclaims a running job whose `lease_expires_at` is set and past, and
+    `reap_expired_leases` requires the same. A row that reaches `running` without a lease
+    therefore satisfies neither, while `start_analysis` and `start_panel` both count it as live
+    -- so that `(case, role)` can never be analysed again.
+
+    Found in the live database: **342 such rows across 118 cases**, the oldest from 17 August,
+    all with `claimed_by`, `claim_token` and `lease_expires_at` null. They came from a
+    measurement driver that marked jobs running itself rather than claiming them, which is not
+    shipped code -- but the queue having no way back from that state is the product's own gap,
+    and it blocked a panel measurement.
+
+    Recovery is failure rather than requeueing: nothing ever ran, but silently re-running work
+    abandoned weeks ago would spend real model time on questions nobody is waiting for. Failing
+    it unblocks the case, and asking again is one request.
+    """
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+
+    # The shape the driver left behind: running, but never claimed by anyone.
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, job_id)
+        assert job is not None
+        job.status = JobStatus.running
+        job.claimed_by = None
+        job.claim_token = None
+        job.lease_expires_at = None
+        await session.commit()
+
+    assert await claim(session_factory, "rescuer") is None, "it cannot be claimed"
+
+    async with session_factory() as session:
+        reaped = await service.reap_expired_leases(session)
+        await session.commit()
+
+    assert reaped == 1, "the reaper must recover a running job that holds no lease"
+    recovered = await read_job(session_factory, job_id)
+    assert recovered.status is JobStatus.failed
+    assert recovered.finished_at is not None
+    assert "lease" in (recovered.error_message or "").lower()
+
+
+async def test_a_healthy_running_job_is_left_alone(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The guard on the fix: a job genuinely under way must not be reaped out from under it."""
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+    assert await claim(session_factory, "worker") is not None
+
+    async with session_factory() as session:
+        reaped = await service.reap_expired_leases(session)
+        await session.commit()
+
+    assert reaped == 0
+    assert (await read_job(session_factory, job_id)).status is JobStatus.running
+
+
 async def test_stale_worker_cannot_complete_a_reclaimed_job(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
