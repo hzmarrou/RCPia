@@ -345,6 +345,50 @@ async def _synthesis_dedupe_key(
     return f"{JobType.RUN_AGENT}:{case_id}:{SYNTHESIS_ROLE}:{fingerprint}"
 
 
+async def _best_synthesis(session: AsyncSession, *, key: str) -> AnalysisJob | None:
+    """The synthesis a panel should attach to among the jobs sharing this key.
+
+    **Newest is not best.** A dedupe key can hold several jobs once none of them is live, because
+    the unique index only forbids a live duplicate -- so a key can carry an older synthesis that
+    succeeded beside a newer one that failed. Taking the newest would hand an arriving panel a
+    failure while the answer to its own question sat one row away, and an environment that ran an
+    earlier revision of this code is exactly where such a pair could come from.
+
+    The order is what the panel actually needs: an answer, then something still coming, then
+    nothing. Succeeded is read from `agent_runs` rather than from the job's status, because a job
+    can complete while the run it performed produced no usable opinion -- the same distinction
+    `panel_state` draws for specialists.
+    """
+    rows = await session.execute(
+        sa.select(AnalysisJob)
+        .where(AnalysisJob.dedupe_key == key)
+        .order_by(AnalysisJob.created_at.desc())
+    )
+    candidates = list(rows.scalars().all())
+    if not candidates:
+        return None
+
+    answered = set(
+        (
+            await session.execute(
+                sa.select(AgentRun.job_id).where(
+                    AgentRun.job_id.in_([job.id for job in candidates]),
+                    AgentRun.status == AgentRunStatus.succeeded,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for job in candidates:
+        if job.id in answered:
+            return job
+    for job in candidates:
+        if job.status in LIVE_JOB_STATUSES:
+            return job
+    return candidates[0]
+
+
 async def dispatch_synthesis_if_ready(
     session: AsyncSession, *, panel_id: uuid.UUID, finishing_job_id: uuid.UUID | None = None
 ) -> AnalysisJob | None:
@@ -397,12 +441,7 @@ async def dispatch_synthesis_if_ready(
     # holds more strongly for a cancelled one: someone stopped that work, and a panel arriving
     # afterwards must not quietly restart it. Either way the panel is left visibly without a
     # synthesis rather than invisibly given a second one.
-    existing = await session.scalar(
-        sa.select(AnalysisJob)
-        .where(AnalysisJob.dedupe_key == key)
-        .order_by(AnalysisJob.created_at.desc())
-        .limit(1)
-    )
+    existing = await _best_synthesis(session, key=key)
 
     # **The insert sits inside a savepoint**, because it can lose a race and this worker has
     # already recorded an agent run in this transaction. Letting the constraint fire outside

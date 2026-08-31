@@ -479,6 +479,63 @@ async def test_a_panel_attaching_after_the_shared_synthesis_finished_does_not_st
     assert {d.job_id for d in dispatches} == {syntheses[0].id}
 
 
+async def test_a_panel_prefers_the_synthesis_that_answered_over_the_newest_one(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Newest is not best.
+
+    Duplicate jobs can share a dedupe key once none of them is live -- the unique index only
+    forbids a live duplicate -- so a key can hold an older synthesis that succeeded and a newer
+    one that failed. Attaching a late panel to the newest would hand it a failure while the
+    answer to its own question sits one row away.
+    """
+    _, case = await seed_case(session_factory)
+    # Both panels are convened while the specialists are still live, which is the only way they
+    # come to share a job set: a settled job is not reusable, so a later panel would start its
+    # own and never reach this key at all.
+    panel_id, jobs, _ = await _start(session_factory, case, question="Opérable ?")
+    second_panel, shared, reused = await _start(
+        session_factory, case, question="Opérable ?"
+    )
+    assert shared == jobs and reused == set(ROLES)
+
+    for job_id in jobs.values():
+        await _settle(session_factory, job_id)
+
+    answered = await _dispatch(session_factory, panel_id)
+    assert answered is not None
+    await _settle(session_factory, answered)  # completed, with a succeeded run behind it
+
+    # A duplicate that arrived later and failed -- the shape an environment running an earlier
+    # revision could have left behind.
+    async with session_factory() as session:
+        original = await session.get(AnalysisJob, answered)
+        assert original is not None
+        session.add(
+            AnalysisJob(
+                case_id=original.case_id,
+                organization_id=original.organization_id,
+                job_type=JobType.RUN_AGENT,
+                payload=dict(original.payload),
+                dedupe_key=original.dedupe_key,
+                status=JobStatus.failed,
+            )
+        )
+        await session.commit()
+
+    # The second panel is reconciled only now, after both the answer and the duplicate exist.
+    await _dispatch(session_factory, second_panel)
+
+    async with session_factory() as session:
+        dispatch = await session.scalar(
+            sa.select(AnalysisPanelDispatch).where(
+                AnalysisPanelDispatch.panel_id == second_panel
+            )
+        )
+        assert dispatch is not None
+    assert dispatch.job_id == answered, "the panel must attach to the synthesis that answered"
+
+
 async def test_a_crashing_handler_still_lets_the_panel_dispatch(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
