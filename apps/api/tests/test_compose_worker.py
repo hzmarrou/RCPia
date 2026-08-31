@@ -49,6 +49,11 @@ def test_the_worker_is_built_from_the_pi_capable_image(compose: dict) -> None:
     assert re.search(r"ARG NODE_VERSION=\d+\.\d+\.\d+-", body), "Node needs an exact pin"
     assert 'nodejs=${NODE_VERSION}' in body, "the pin must actually be passed to apt"
 
+    # The image installs the runtime under /app/node_modules; the shim lives in its .bin. The
+    # adapter resolves the package directly, but PATH not carrying the shim was half of the
+    # defect that left the deployed worker unable to launch Pi at all.
+    assert "/app/node_modules/.bin" in body, "the npm bin directory must be reachable"
+
 
 def test_the_worker_runs_the_job_loop_and_reaches_the_database(compose: dict) -> None:
     worker = compose["services"][WORKER]

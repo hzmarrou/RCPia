@@ -57,7 +57,19 @@ PI_ENTRY = Path("dist") / "cli.js"
 # Where to look for the package, in order of preference. A repository-local install is a pinned
 # one; a global install is whatever the machine happens to have.
 def _package_roots(resolved_shim: Path | None) -> list[Path]:
-    roots = [Path.cwd() / "node_modules", Path.cwd().parent / "node_modules"]
+    """Where the pinned runtime might be installed, nearest first.
+
+    **Walks up rather than checking two fixed levels.** The manifest that pins the runtime sits
+    at the repository root, so `node_modules` does too -- but the process asking may be started
+    from anywhere beneath it: `/app` in the worker image, `apps/api` under pytest, the
+    repository root from a script. Checking only the current directory and its parent found the
+    package from one of those and not the others, which is a difference in working directory
+    masquerading as a missing installation.
+    """
+    roots: list[Path] = []
+    here = Path.cwd().resolve()
+    for directory in (here, *here.parents):
+        roots.append(directory / "node_modules")
     if resolved_shim is not None:
         # npm's layout: the shim sits beside the `node_modules` holding the package.
         roots.append(resolved_shim.parent / "node_modules")
@@ -371,12 +383,35 @@ class PiAdapter:
                 )
             return [node, str(entry)], entry.parent.parent
 
+        # **The package is searched for before the shim, but only when nothing more specific
+        # was configured.** `executable()` raises when `pi` is absent from PATH, and the
+        # deployed worker image puts only `/app/.venv/bin` there -- so resolving the shim first
+        # turned a perfectly good `npm ci` installation into `PiNotConfigured` before the direct
+        # entry point was ever considered. Proving by hand that Node can import the package
+        # inside the image is not the same as proving this function can launch it.
+        #
+        # An explicitly configured command still wins, because it is the only way to point this
+        # at something else on purpose -- a wrapper, a different install, or the fake runtime
+        # the unit tests run against. Preferring the repository package over *that* would make
+        # a test that asks for a stand-in silently call the real provider.
+        node = shutil.which("node")
+        bare_shim = len(self.pi_command) == 1 and not any(
+            separator in configured for separator in ("/", "\\")
+        )
+        if bare_shim:
+            package = _find_package(None)
+            if package is not None and node is not None:
+                return [node, str(package / PI_ENTRY)], package
+
+        # Otherwise, or when no repository-local package exists, use the configured command and
+        # let `executable()` produce the message that names what is missing.
         resolved = Path(self.executable())
         package = _find_package(resolved)
-        node = shutil.which("node")
-        if package is not None and node is not None:
+        if bare_shim and package is not None and node is not None:
             return [node, str(package / PI_ENTRY)], package
 
+        # Only the launch prefix: `build_command` appends the configured tail itself, and
+        # returning it here too would pass it twice.
         return [str(resolved)], package
 
     def build_command(
@@ -399,19 +434,66 @@ class PiAdapter:
             "--no-skills",
             # Provider, model and session path land in the session for the audit trail.
             "--verbose",
+            # **Without this the agent has no brain.** Pi's documentation is explicit: the
+            # non-interactive modes show no trust prompt, and with no saved decision
+            # `defaultProjectTrust` defaults to `ask`, which ignores project-local `.pi/`
+            # resources. `.pi/APPEND_SYSTEM.md` exists only to say *read brain.md*, so ignoring
+            # it silently downgrades a clinical specialist to a general-purpose agent holding
+            # the case bundle -- and the bundle alone is enough to make the answer look
+            # specialist, which is why nothing downstream noticed.
+            #
+            # Measured against the pinned runtime: the same folder answered *"aucune spécialité
+            # médicale ne m'a été assignée … aucun fichier"* without this flag, and named
+            # `brain.md` and its speciality with it.
+            #
+            # It is safe here for the reason the trust prompt exists: the folder is ours,
+            # mounted read-only, its name is validated against `SAFE_AGENT_NAME`, and the agent
+            # gets `--tools read` with `--no-skills`. Approving is not widening what the agent
+            # may do; it is letting it read the instructions we wrote for it.
+            "--approve",
             "-p",
             f"@{task_path}",
         ]
-        if self.api_key:
-            command += ["--api-key", self.api_key]
         command.append(
             "Complete the task in the attached task bundle file. "
             "Return only the final structured output."
         )
         return command
 
+    def pi_home(self) -> Path:
+        """The config directory a clinical run reads, which is ours and not the host's.
+
+        Pi defaults to `~/.pi/agent`, and everything in it changes how a run behaves: stored
+        provider credentials, `settings.json` (including `defaultProjectTrust`), `trust.json`,
+        and globally installed skills. On a developer machine that directory is full of
+        whatever they were last doing; in a container it is empty. The same command therefore
+        did different things in the two places, which is the opposite of what a clinical
+        harness should offer.
+
+        **This is not tidiness -- it was a live authentication failure.** Pi resolves the Azure
+        credential from stored auth before the environment, so a host holding an older key in
+        `auth.json` answered `401 invalid subscription key` while the configured key sat unused
+        in `AZURE_OPENAI_API_KEY`. Measured on this machine: two keys of equal length, different
+        values, and the stale one won. Pointing the run at a directory we own removes the
+        precedence question entirely.
+        """
+        return self.work_root / "pi-home"
+
     def _environment(self) -> dict[str, str]:
+        """The child's environment: the credential, the endpoint, and an isolated config dir.
+
+        The key travels here rather than in argv. Command-line arguments are readable by any
+        process that can list the process table, and they are copied into crash dumps, `ps`
+        output and diagnostic captures. An environment variable is not private either, but it
+        is not published to every reader on the host, and it is where Pi documents the Azure
+        credential belongs.
+        """
         env = dict(os.environ)
+        home = self.pi_home()
+        home.mkdir(parents=True, exist_ok=True)
+        env["PI_CODING_AGENT_DIR"] = str(home)
+        if self.api_key:
+            env["AZURE_OPENAI_API_KEY"] = self.api_key
         if self.base_url:
             # Pi reads AZURE_OPENAI_BASE_URL; the name matters, _ENDPOINT is ignored.
             env["AZURE_OPENAI_BASE_URL"] = self.base_url

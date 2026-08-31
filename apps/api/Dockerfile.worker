@@ -29,7 +29,11 @@ ENV UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX} \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH"
+    # `/app/node_modules/.bin` carries the `pi` shim installed by `npm ci`. The adapter
+    # finds the pinned package directly and does not need it, but a missing PATH entry was
+    # half of the defect that made the deployed worker unable to launch the runtime at
+    # all, so the shim stays reachable as a fallback.
+    PATH="/app/.venv/bin:/app/node_modules/.bin:$PATH"
 
 WORKDIR /app
 
