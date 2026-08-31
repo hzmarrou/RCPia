@@ -155,6 +155,13 @@ class BundleInputs(Strict):
     safety_constraints: list[str] = Field(default_factory=list)
     # Empty for every first pass. Populated only for `rcp_synthesis`.
     agent_opinions: list["AgentOpinion"] = Field(default_factory=list)
+    # Specialities the panel asked for that produced no usable opinion. Also synthesis-only.
+    #
+    # Stated rather than left to be noticed. The agent sees answers, never the request, so an
+    # absent speciality is indistinguishable from one nobody convened — and those two call for
+    # opposite things from a tumour board: chase the missing opinion, or do not go looking for
+    # an opinion that was never sought.
+    missing_opinions: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def citable_ids_are_unique(self) -> "BundleInputs":

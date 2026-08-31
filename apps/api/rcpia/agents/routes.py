@@ -13,13 +13,16 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
+from rcpia.agents import panel as panel_service
 from rcpia.agents.pi_adapter import SAFE_AGENT_NAME
+from rcpia.agents.schemas import SYNTHESIS_ROLE
 from rcpia.agents.service import DEFAULT_AGENT_ROLE
 from rcpia.auth.dependencies import CurrentUser, SessionDep, protected_router
 from rcpia.cases import completeness
 from rcpia.cases import ledger as ledger_service
 from rcpia.cases import service as case_service
 from rcpia.core.models import AgentRun, AnalysisJob, AuditEvent, JobStatus, UserRole
+from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.jobs import service as job_service
 from rcpia.jobs.models import JobType
 from rcpia.jobs.service import enqueue
@@ -50,6 +53,33 @@ class AnalysisJobRead(BaseModel):
     status: str
     agent_role: str
     created_at: datetime
+
+
+class PanelRequest(BaseModel):
+    """Which specialists to convene, and on what question.
+
+    `rcp_synthesis` is refused rather than filtered out. It is not a specialist -- it reads the
+    others and cannot run beside them -- and a request naming it has misunderstood what a panel
+    is, which is worth saying rather than silently correcting.
+    """
+
+    roles: list[str] = Field(min_length=1, max_length=12)
+    clinical_question: str | None = Field(default=None, max_length=2000)
+
+
+class PanelJobRead(BaseModel):
+    agent_role: str
+    job_id: uuid.UUID
+    status: str
+    # True when this panel is relying on a run that was already under way for an identical
+    # question at the same ledger version, rather than having started one.
+    reused: bool
+
+
+class PanelRead(BaseModel):
+    panel_id: uuid.UUID
+    ledger_version: int
+    jobs: list[PanelJobRead]
 
 
 class AgentRunRead(BaseModel):
@@ -194,6 +224,112 @@ async def start_analysis(
         status=str(job.status),
         agent_role=payload.agent_role,
         created_at=job.created_at,
+    )
+
+
+@router.post("/panel", response_model=PanelRead, status_code=status.HTTP_202_ACCEPTED)
+async def start_panel(
+    case_id: uuid.UUID,
+    payload: PanelRequest,
+    session: SessionDep,
+    user: CurrentUser,
+) -> PanelRead:
+    """Convene a panel of specialists on one version of this case.
+
+    Every job is enqueued in a single transaction and pinned to the same ledger version, so a
+    correction landing mid-panel cannot leave half the specialists analysing one patient and
+    half another. The synthesis is **not** enqueued here: it is dispatched once, by whichever
+    worker finishes the last specialist, from `rcpia.agents.panel`.
+
+    Concurrency is a matter of deployment, not of this request. These jobs are ordinary rows;
+    running them at the same time means running more than one `rcpia-worker`.
+    """
+    case = await _load_case(session, user, case_id)
+
+    roles = list(dict.fromkeys(payload.roles))
+    unknown = [role for role in roles if role not in AGENT_ROLES]
+    if unknown:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Spécialités inconnues : {', '.join(sorted(unknown))}.",
+        )
+    if SYNTHESIS_ROLE in roles:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "La synthèse RCP n'est pas une spécialité du panel : elle lit les avis rendus et "
+            "est lancée automatiquement une fois toutes les spécialités terminées.",
+        )
+
+    entries = await ledger_service.build_entries(session, case=case)
+    report = completeness.assess(entries, cancer_type=case.cancer_type)
+    if not report.can_run_analysis:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            " ; ".join(issue.message for issue in report.blocking),
+        )
+
+    version = await ledger_service.latest_version(session, case_id=case.id)
+    if version is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Aucune version du tableau de données : l'extraction n'a pas encore abouti.",
+        )
+
+    try:
+        started = await panel_service.start_panel(
+            session,
+            case_id=case.id,
+            organization_id=case.organization_id,
+            roles=roles,
+            ledger_version=version.version,
+            clinical_question=payload.clinical_question,
+            requested_by_user_id=user.id,
+        )
+    except panel_service.PanelConflict as conflict:
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, conflict.detail) from conflict
+    except IntegrityError as clash:
+        # A concurrent panel-start enqueued the same role between the compatibility read and
+        # the insert. Both requests wanted the same work; neither should create a second job.
+        await session.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Une demande concurrente vient de lancer ces analyses ; relancez la requête pour "
+            "obtenir les identifiants des travaux en cours.",
+        ) from clash
+
+    session.add(
+        AuditEvent(
+            organization_id=case.organization_id,
+            case_id=case.id,
+            actor_user_id=user.id,
+            event_type="agent.panel_requested",
+            entity_type="analysis_panels",
+            entity_id=started.panel.id,
+            payload={
+                "roles": roles,
+                "ledger_version": version.version,
+                "reused": sorted(started.reused),
+            },
+        )
+    )
+    await session.commit()
+
+    for job in started.jobs.values():
+        await session.refresh(job)
+
+    return PanelRead(
+        panel_id=started.panel.id,
+        ledger_version=version.version,
+        jobs=[
+            PanelJobRead(
+                agent_role=role,
+                job_id=started.jobs[role].id,
+                status=str(started.jobs[role].status),
+                reused=role in started.reused,
+            )
+            for role in roles
+        ],
     )
 
 

@@ -55,10 +55,44 @@ cp .env.example .env        # then fill in secrets
 
 # Everything in containers
 docker compose -f infra/docker-compose.yml up --build
-# web  -> http://localhost:3000
-# api  -> http://localhost:8000/health
-# db   -> localhost:5432 (pgvector/pgvector:pg17)
+# web    -> http://localhost:3000
+# api    -> http://localhost:8000/health
+# db     -> localhost:5432 (pgvector/pgvector:pg17)
+# worker -> 3 replicas, no port; they take jobs off the queue
 ```
+
+### Running a panel of specialists at once
+
+A panel is started with one request naming the specialities:
+
+```bash
+curl -X POST http://localhost:8000/cases/$CASE_ID/analysis/panel   -H 'Content-Type: application/json'   -d '{"roles": ["urology_oncology", "medical_oncology", "radiation_oncology"]}'
+```
+
+All of its jobs are enqueued in one transaction, pinned to the same version of the case's
+data. They then run **in parallel across worker containers** — each worker takes one job at a
+time, and PostgreSQL's `FOR UPDATE SKIP LOCKED` guarantees no two ever take the same one. To
+change how many run at once:
+
+```bash
+docker compose -f infra/docker-compose.yml up --scale rcpia-worker=3
+```
+
+`WORKER_REPLICAS` sets the same number without the flag. **Size it to the model provider, not
+to the machine:** each worker holds one Pi process and one concurrent request against Azure
+OpenAI, so the replica count has to stay under that deployment's concurrent-request and
+tokens-per-minute quota. `WORKER_JOB_TYPES=run_agent` restricts a worker to agent runs, which
+lets a small agent pool sit alongside a larger one doing parsing and extraction.
+
+The synthesis is **not** part of the panel and is never requested directly. It is dispatched
+once, automatically, by whichever worker finishes the last specialist — and only once every
+speciality the panel asked for has finished, including retries. A speciality that failed is
+passed to the synthesis by name, so a panel that lost an opinion is reported as incomplete
+rather than presented as a consensus.
+
+Workers run agents, so they use their own image (`apps/api/Dockerfile.worker`): the API image
+is Python-only, while an agent run needs Node and the pinned Pi runtime from the repository's
+top-level `package.json`.
 
 If another PostgreSQL already owns host port 5432, set `POSTGRES_PORT` (e.g.
 `POSTGRES_PORT=5433`) before running Compose. Only the host mapping changes; inside the

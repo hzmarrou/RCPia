@@ -15,6 +15,7 @@ snippet whose relevant sentence nobody can find.
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import sqlalchemy as sa
@@ -191,8 +192,15 @@ async def build_bundle(
     clinical_question: str | None = None,
     embedder: Embedder | None = None,
     reranker: Reranker | None = None,
+    panel_id: uuid.UUID | None = None,
+    missing_roles: Sequence[str] = (),
 ) -> BuiltBundle:
-    """Turn a stored ledger version into the file Pi is given."""
+    """Turn a stored ledger version into the file Pi is given.
+
+    `panel_id` scopes a synthesis to the opinions its own panel gathered. Without it the
+    synthesis reads the newest opinion per speciality across the whole case, which silently
+    mixes panels once a case has been analysed twice at two ledger versions.
+    """
     entries = entries_from_version(version)
     if not entries:
         raise LedgerNotReady(
@@ -208,7 +216,9 @@ async def build_bundle(
     passages: list[GuidelinePassage] = []
     evidence_notes: list[str] = []
     if agent_role == SYNTHESIS_ROLE:
-        opinions, passages, synthesis_notes = await prior_opinions(session, case_id=case.id)
+        opinions, passages, synthesis_notes = await prior_opinions(
+            session, case_id=case.id, panel_id=panel_id, missing_roles=missing_roles
+        )
         evidence_notes.extend(synthesis_notes)
     elif embedder is not None and reranker is not None:
         passages, evidence_notes = await guideline_passages_for(
@@ -329,6 +339,7 @@ async def build_bundle(
         safety_constraints=list(SAFETY_CONSTRAINTS),
         # Populated only for the synthesis role; every first pass leaves this empty.
         agent_opinions=opinions,
+        missing_opinions=list(missing_roles),
     )
 
     constraints = [

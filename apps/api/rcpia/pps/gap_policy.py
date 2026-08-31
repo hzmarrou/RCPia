@@ -198,19 +198,36 @@ POLICY: dict[tuple[str, str], bool] = {
     ("systemic_technique", "urology_oncology"): SUPPRESS,
     ("systemic_other", "urology_oncology"): SUPPRESS,
     # 2 — surgical technique. A chemotherapy specialist having no view on which diversion to
-    # build is the division of labour working.
+    # build is the division of labour working. Same for the radiation oncologist.
     ("surgery", "medical_oncology"): SUPPRESS,
+    ("surgery", "radiation_oncology"): SUPPRESS,
     # 3 — the urologist initiates the androgen-deprivation pathway, so its silence on that
-    # pathway is a hole in its own plan.
+    # pathway is a hole in its own plan. The radiation oncologist delivers ADT alongside
+    # EBRT, so its silence there is a hole in its own plan too.
     ("hormonal", "urology_oncology"): REPORT,
-    # 4 — staging completeness belongs to radiology and urology.
+    ("hormonal", "radiation_oncology"): REPORT,
+    # 4 — staging completeness belongs to radiology and urology. The radiation oncologist
+    # needs staging for target volumes.
     ("staging", "medical_oncology"): SUPPRESS,
-    # 5 and 6 — supportive care is shared ground; both specialities are expected to address it.
+    ("staging", "radiation_oncology"): REPORT,
+    # 5 and 6 — supportive care is shared ground; both original specialities are expected to
+    # address it. The radiation oncologist manages pain, nutrition during pelvic RT, and
+    # smoking cessation.
     ("supportive", "medical_oncology"): REPORT,
     ("supportive", "urology_oncology"): REPORT,
-    # 7 — radiotherapy is a shared decision in both directions.
+    ("supportive", "radiation_oncology"): REPORT,
+    # 7 — radiotherapy as a shared decision. Urology shares the bladder-preservation choice
+    # with radiation oncology, so urology silent on radiotherapy is a gap. But medical
+    # oncology silent on fractionation, dose, or target volumes is the division of labour:
+    # those are not its domain.
     ("radiotherapy", "urology_oncology"): REPORT,
-    ("radiotherapy", "medical_oncology"): REPORT,
+    ("radiotherapy", "medical_oncology"): SUPPRESS,
+    # 8 — systemic therapy. The radiation oncologist's pathway runs through irradiation, not
+    # chemotherapy. Its silence on systemic drug choice, administration, or general
+    # indication is division of labour.
+    ("systemic_choice", "radiation_oncology"): SUPPRESS,
+    ("systemic_technique", "radiation_oncology"): SUPPRESS,
+    ("systemic_other", "radiation_oncology"): SUPPRESS,
 }
 
 # What to do with a combination nobody has ruled on.

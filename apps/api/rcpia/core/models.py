@@ -717,6 +717,110 @@ class AnalysisJob(TimestampMixin, Base):
     )
 
 
+class AnalysisPanel(TimestampMixin, Base):
+    """One request to run a set of specialists together, on one version of one case.
+
+    **Append-only.** Nothing updates a row here. A panel is a statement about what was asked
+    for at a moment — these roles, this ledger version, this question — and rewriting it later
+    would destroy the only record of what the resulting fiche was actually answering.
+
+    The ledger version is the reason this table exists rather than a list in a job payload. A
+    panel that reported "analysed at version 4" while one of its agents had read version 3
+    would be presenting a comparison between two different patients as if it were one.
+    """
+
+    __tablename__ = "analysis_panels"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    case_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    # The version every job in this panel is pinned to, copied here so the panel can be read
+    # without reassembling it from its jobs.
+    ledger_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    requested_roles: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    clinical_question: Mapped[str | None] = mapped_column(Text)
+    requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column()
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "organization_id"],
+            ["cases.id", "cases.organization_id"],
+            ondelete="RESTRICT",
+            name="fk_analysis_panels_case_same_organization",
+        ),
+        CheckConstraint("ledger_version >= 1", name="panel_pins_a_real_version"),
+        Index("ix_analysis_panels_case_id_created_at", "case_id", "created_at"),
+    )
+
+
+class AnalysisPanelJob(TimestampMixin, Base):
+    """Which job this panel relies on for which speciality.
+
+    **A join table rather than a `panel_id` column on `analysis_jobs`,** because one job can
+    legitimately serve several panels: two panels asking the same speciality the same question
+    about the same ledger version want the same opinion, and running the agent twice would
+    spend a Pi run to produce a second copy of an answer already held. A column would force
+    that job to name one owner and lie to the other.
+
+    One row per (panel, role): a panel that named a speciality has exactly one job it is
+    waiting on for it, which is what makes the synthesis gate decidable.
+    """
+
+    __tablename__ = "analysis_panel_jobs"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    panel_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    agent_role: Mapped[str] = mapped_column(String(64), nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["panel_id"], ["analysis_panels.id"], ondelete="RESTRICT",
+            name="fk_analysis_panel_jobs_panel",
+        ),
+        ForeignKeyConstraint(
+            ["job_id"], ["analysis_jobs.id"], ondelete="RESTRICT",
+            name="fk_analysis_panel_jobs_job",
+        ),
+        UniqueConstraint("panel_id", "agent_role", name="uq_analysis_panel_jobs_panel_role"),
+        Index("ix_analysis_panel_jobs_job_id", "job_id"),
+    )
+
+
+class AnalysisPanelDispatch(TimestampMixin, Base):
+    """That a panel has dispatched a piece of follow-on work, recorded once and for all.
+
+    **This row is the idempotency guarantee, not a log of one.** The synthesis gate is
+    evaluated by whichever worker finishes the last specialist, and two specialists can finish
+    at the same instant on different workers. The unique constraint on `(panel_id,
+    dispatch_kind)` is what makes "exactly one synthesis per panel" a fact the database holds,
+    rather than a property of the order two transactions happened to commit in.
+    """
+
+    __tablename__ = "analysis_panel_dispatches"
+
+    SYNTHESIS = "synthesis"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    panel_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    dispatch_kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["panel_id"], ["analysis_panels.id"], ondelete="RESTRICT",
+            name="fk_analysis_panel_dispatches_panel",
+        ),
+        ForeignKeyConstraint(
+            ["job_id"], ["analysis_jobs.id"], ondelete="RESTRICT",
+            name="fk_analysis_panel_dispatches_job",
+        ),
+        UniqueConstraint(
+            "panel_id", "dispatch_kind", name="uq_analysis_panel_dispatches_panel_kind"
+        ),
+    )
+
+
 class AuditEvent(TimestampMixin, Base):
     """Append-only audit trail. Pi session logs are referenced here, never trusted as state."""
 

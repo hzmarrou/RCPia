@@ -29,7 +29,7 @@ from rcpia.agents.schemas import (
     AgentOutput,
     GuidelinePassage,
 )
-from rcpia.core.models import AgentRun, AgentRunStatus
+from rcpia.core.models import AgentRun, AgentRunStatus, AnalysisPanelJob
 
 # The label a constraint uses for each speciality. Kept here rather than imported from the PPS
 # renderer so a change to how a document reads cannot change what an agent is told.
@@ -80,14 +80,32 @@ def _passages_of(run: AgentRun) -> list[GuidelinePassage]:
 
 
 async def prior_opinions(
-    session: AsyncSession, *, case_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    case_id: uuid.UUID,
+    panel_id: uuid.UUID | None = None,
+    missing_roles: Sequence[str] = (),
 ) -> tuple[list[AgentOpinion], list[GuidelinePassage], list[str]]:
-    """Every specialist opinion on this case, with the evidence those specialists were given.
+    """The specialist opinions this synthesis is reconciling, and the evidence behind them.
+
+    **Scoped to a panel when one is given.** Without `panel_id` this returns the newest
+    successful opinion per speciality across the whole case, which is right for a case that has
+    only ever been analysed once and wrong the moment it has been analysed twice: a correction
+    creates a new ledger version, a second panel runs against it, and the case-wide query would
+    hand the new synthesis the *old* panel's opinion for any speciality that has not re-run
+    yet. The fiche would then report a convergence between two agents that read two different
+    patients. A panel names exactly the jobs it is waiting on, so scoping to it removes the
+    question.
+
+    `missing_roles` names specialities that were asked for and produced nothing. They are
+    reported to the agent rather than left to be inferred from an absence, because an agent
+    that is not told a speciality is missing has no way to distinguish it from one that was
+    never asked.
 
     Returns the opinions, the de-duplicated union of their passages, and notes for the
     synthesis agent's constraints saying which specialities it is actually reading.
     """
-    rows = await session.execute(
+    query = (
         sa.select(AgentRun)
         .where(
             AgentRun.case_id == case_id,
@@ -96,6 +114,15 @@ async def prior_opinions(
         )
         .order_by(AgentRun.created_at.desc())
     )
+    if panel_id is not None:
+        query = query.where(
+            AgentRun.job_id.in_(
+                sa.select(AnalysisPanelJob.job_id).where(
+                    AnalysisPanelJob.panel_id == panel_id
+                )
+            )
+        )
+    rows = await session.execute(query)
 
     seen: set[str] = set()
     opinions: list[AgentOpinion] = []
@@ -118,12 +145,12 @@ async def prior_opinions(
     # order and a difference between them is a difference of judgement, not of shuffling.
     opinions.sort(key=lambda opinion: opinion.agent_role)
 
-    return opinions, list(passages.values()), _notes(opinions)
+    return opinions, list(passages.values()), _notes(opinions, missing_roles)
 
 
-def _notes(opinions: Sequence[AgentOpinion]) -> list[str]:
+def _notes(opinions: Sequence[AgentOpinion], missing_roles: Sequence[str] = ()) -> list[str]:
     if not opinions:
-        return []
+        return list(_missing_note(missing_roles))
 
     named = ", ".join(
         ROLE_LABELS.get(opinion.agent_role, opinion.agent_role) for opinion in opinions
@@ -138,6 +165,8 @@ def _notes(opinions: Sequence[AgentOpinion]) -> list[str]:
         for opinion in opinions
         if opinion.recommendation_withheld
     ]
+    notes.extend(_missing_note(missing_roles))
+
     if withheld:
         # A specialist who declined to conclude has not taken a side. Counting that silence as
         # disagreement would invent a divergence, and counting it as assent would invent a
@@ -147,3 +176,20 @@ def _notes(opinions: Sequence[AgentOpinion]) -> list[str]:
             f"{', '.join(withheld)}. Une abstention n'est ni un accord ni un désaccord."
         )
     return notes
+
+
+def _missing_note(missing_roles: Sequence[str]) -> list[str]:
+    """Said in the agent's own constraints, because silence cannot carry it.
+
+    A speciality that was asked and produced nothing is not the same as one nobody asked, and
+    the difference decides whether the board should chase an opinion. The agent cannot see the
+    request, only the answers, so the gap has to be handed to it.
+    """
+    if not missing_roles:
+        return []
+    named = ", ".join(ROLE_LABELS.get(role, role) for role in missing_roles)
+    return [
+        f"Ces spécialités ont été sollicitées et n'ont produit aucun avis exploitable : "
+        f"{named}. Le panel est incomplet : ne présentez pas ses conclusions comme "
+        "l'accord de toutes les spécialités demandées."
+    ]

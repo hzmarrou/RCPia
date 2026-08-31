@@ -1,5 +1,21 @@
 # RCPia v1 local runtime.
-# Run from the repository root:  docker compose -f infra/docker-compose.yml up
+#
+# Run from the repository root:
+#     docker compose -f infra/docker-compose.yml up
+#
+# Specialists run concurrently by running several workers, not by running several agents inside
+# one. Each worker claims one job at a time; the queue's `FOR UPDATE SKIP LOCKED` guarantees no
+# two workers ever get the same one. To change how many run at once:
+#
+#     docker compose -f infra/docker-compose.yml up --scale rcpia-worker=3
+#
+# or set WORKER_REPLICAS in the environment. The default of 3 matches a panel of three
+# specialists, so one panel runs fully in parallel on a laptop.
+#
+# **Scale it to your model provider, not to your CPU.** Every worker holds one Pi process, and
+# each Pi run is one concurrent request against Azure OpenAI. No limit is assumed here: check
+# the deployment's own concurrent-request and tokens-per-minute quota and keep the replica
+# count below it, or the extra workers will turn a queue into a wall of 429s.
 name: rcpia
 
 services:
@@ -52,6 +68,49 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+
+  # The job worker. Same code as the API, plus Node and the pinned Pi runtime, because this is
+  # the process that actually runs an agent.
+  rcpia-worker:
+    build:
+      # The repository root, not apps/api: the image installs the agent runtime from the
+      # pinned package.json that lives there.
+      context: ..
+      dockerfile: apps/api/Dockerfile.worker
+      args:
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-https://pypi.org/simple}
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}
+    environment:
+      APP_ENV: local
+      DATABASE_URL: postgresql+psycopg://rcpia:rcpia@postgres:5432/rcpia
+      BLOB_PROVIDER: local
+      LOCAL_BLOB_ROOT: /data/blobs
+      PARSER_PROVIDER: llamaparse
+      LLAMAPARSE_API_KEY: ${LLAMAPARSE_API_KEY:-}
+      AGENTS_ROOT: /app/agents
+      # Pi task and session files are named case-role-run, so several workers writing into one
+      # volume never collide. Sharing it is what makes the session log of every run readable
+      # from one place afterwards.
+      PI_WORK_ROOT: /data/pi-work
+      AUTH_SECRET: ${AUTH_SECRET:-change-me}
+      AZURE_OPENAI_BASE_URL: ${AZURE_OPENAI_BASE_URL:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:-}
+      AZURE_RERANK_BASE_URL: ${AZURE_RERANK_BASE_URL:-}
+      # Optional: restrict this worker to some job types, e.g. "run_agent" for a pool sized to
+      # the model provider's limit, alongside a cheaper pool doing parsing and extraction.
+      WORKER_JOB_TYPES: ${WORKER_JOB_TYPES:-}
+    volumes:
+      - ../data/blobs:/data/blobs
+      - ../data/pi-work:/data/pi-work
+      - ../agents:/app/agents:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      # Overridden by `--scale rcpia-worker=N`.
+      replicas: ${WORKER_REPLICAS:-3}
+    restart: unless-stopped
 
   web:
     build:

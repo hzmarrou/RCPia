@@ -95,10 +95,13 @@ def test_supportive_care_is_shared_ground_in_both_directions() -> None:
     assert gap_policy.reports(point, ONCOLOGY)
 
 
-def test_radiotherapy_is_a_shared_decision_in_both_directions() -> None:
+def test_radiotherapy_is_a_shared_decision_for_urology_not_for_medical_oncology() -> None:
+    """Urology shares the bladder-preservation decision with radiation oncology, so its
+    silence on radiotherapy points is a gap. Medical oncology silent on fractionation,
+    dose, or target volumes is the division of labour — those are not its domain."""
     point = "Discussion de l'irradiation ganglionnaire pelvienne dans le schéma de radiothérapie."
     assert gap_policy.reports(point, UROLOGY)
-    assert gap_policy.reports(point, ONCOLOGY)
+    assert not gap_policy.reports(point, ONCOLOGY)
 
 
 # --- What happens to a combination nobody has ruled on ----------------------------------------
@@ -112,11 +115,51 @@ def test_an_unruled_combination_is_reported_and_says_so() -> None:
     """
     point = "Choix préférentiel d'une dérivation non continente de type Bricker."
     label, reported, ruled = gap_policy.explain(point, "radiation_oncology")
-    assert reported is gap_policy.REPORT
-    assert ruled is False
+    assert reported is gap_policy.SUPPRESS
+    # Radiation oncology is now ruled on surgery.
+    assert ruled is True
     assert label
 
+    # Medical oncology on surgery is also ruled.
     assert gap_policy.explain(point, ONCOLOGY)[2] is True
+
+
+def test_radiation_oncologist_silence_on_systemic_therapy_is_division_of_labour() -> None:
+    """The radiation oncologist's pathway runs through irradiation, not through chemotherapy.
+    A radiation oncologist silent on carboplatin substitution or immunotherapy exclusion is
+    staying in its lane."""
+    for point in (
+        "Le carboplatine ne doit pas remplacer le cisplatine en chimiothérapie néoadjuvante.",
+        "L'immunothérapie néoadjuvante hors essai clinique n'est pas retenue comme standard.",
+        "Absence d'indication actuelle à une chimiothérapie ou une immunothérapie systémique.",
+    ):
+        assert not gap_policy.reports(point, "radiation_oncology")
+
+
+def test_radiation_oncologist_silence_on_surgery_is_division_of_labour() -> None:
+    """The radiation oncologist does not choose between a Bricker and a neobladder."""
+    for point in (
+        "Choix préférentiel d'une dérivation non continente de type Bricker.",
+        "La cystectomie partielle n'est pas adaptée aux caractéristiques tumorales.",
+    ):
+        assert not gap_policy.reports(point, "radiation_oncology")
+
+
+def test_radiation_oncologist_silence_on_hormonal_and_supportive_and_staging_is_gap() -> None:
+    """ADT duration is core to the radiation oncologist's pathway. Supportive care is shared
+    ground. Staging determines target volumes."""
+    assert gap_policy.reports(
+        "Préférence pour un antagoniste de la GnRH afin d'éviter une flambée tumorale.",
+        "radiation_oncology",
+    )
+    assert gap_policy.reports(
+        "Mise en place de soins de support précoces avec aide au sevrage tabagique.",
+        "radiation_oncology",
+    )
+    assert gap_policy.reports(
+        "Décision thérapeutique définitive en attente du cTNM et de la résécabilité.",
+        "radiation_oncology",
+    )
 
 
 def test_a_point_in_no_subject_is_reported() -> None:
@@ -174,6 +217,7 @@ def test_a_gap_names_only_the_specialities_whose_silence_is_reportable() -> None
     )
     panel = build_panel(output, [UROLOGY, ONCOLOGY, SYNTHESIS_ROLE])
     gaps = [point for point in panel.points if point.kind == "gap"]
-    assert len(gaps) == 1
-    # `radiation_oncology` has no rule yet, so it defaults to reported; medical oncology has one.
-    assert "Oncologie médicale" not in gaps[0].attribution
+    assert len(gaps) == 0
+    # Both silent specialities are ruled: medical oncology suppresses surgery gaps, and
+    # radiation oncology is now ruled to suppress them too.
+    assert len(output.coverage_gaps) == 1

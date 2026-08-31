@@ -94,6 +94,12 @@ async def run_agent(
     """
     agent_role = str(job.payload.get("agent_role") or DEFAULT_AGENT_ROLE)
     clinical_question = job.payload.get("clinical_question") or None
+    # Written by the panel dispatcher, absent for a single-agent run. Read here rather than
+    # looked up, so the run analyses the panel it was dispatched for even if the case has
+    # since acquired another.
+    raw_panel = job.payload.get("panel_id")
+    panel_id = uuid.UUID(str(raw_panel)) if raw_panel else None
+    missing_roles = [str(role) for role in (job.payload.get("missing_roles") or [])]
 
     # Job delivery is at-least-once. A worker that answered and died before committing
     # would otherwise pay for a second opinion on the same question.
@@ -130,6 +136,8 @@ async def run_agent(
             agent_role=agent_role,
             version=version,
             clinical_question=clinical_question,
+            panel_id=panel_id,
+            missing_roles=missing_roles,
             embedder=embedder,
             reranker=reranker,
         )

@@ -1,0 +1,59 @@
+# RCPia job worker. The API image plus the agent runtime.
+#
+# **Why a second image rather than one.** The API never runs an agent -- it enqueues a job and
+# returns -- so putting Node and the Pi runtime in the API image would add a toolchain to every
+# web container to serve code that container never executes. The split also keeps the runtime
+# pin in one place: this file, and the `package.json` it copies.
+#
+# Build from the repository root, because the pinned runtime manifest lives there:
+#     docker build -f apps/api/Dockerfile.worker -t rcpia-worker .
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+ARG UV_DEFAULT_INDEX=https://pypi.org/simple
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+# Node 22 is the runtime Pi is published against.
+ARG NODE_MAJOR=22
+
+ENV UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX} \
+    NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY} \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get purge -y gnupg \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# The agent runtime, installed from the repository's own pinned manifest.
+#
+# `npm ci` and the lockfile, not `npm install`: `^0.80.3` floats to 0.80.10, which removed an
+# export this code calls, so an unpinned build produces a worker that fails at the first agent
+# run rather than at build time. The whole scope is pinned in package.json, not just the entry
+# package, because the four Pi packages are released together and mixing them breaks the same
+# way.
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev || npm install --omit=dev --no-audit --no-fund
+ENV NODE_PATH=/app/node_modules
+
+# Python dependency layer: cached until pyproject.toml/uv.lock change.
+COPY apps/api/pyproject.toml apps/api/uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
+
+COPY apps/api/README.md ./
+COPY apps/api/rcpia ./rcpia
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# One job at a time, by design. Concurrency comes from running several of these containers and
+# letting the queue's `FOR UPDATE SKIP LOCKED` hand each a different job -- never from running
+# several agents inside one worker, which would share a lease and a heartbeat between runs that
+# can each take minutes.
+CMD ["python", "-m", "rcpia.worker"]
