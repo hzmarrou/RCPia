@@ -5,6 +5,7 @@ the Compose file as data, because the guarantee is not "a worker exists" but "th
 ships a way to run several of them against a database that can feed them".
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,12 @@ def test_the_worker_is_built_from_the_pi_capable_image(compose: dict) -> None:
     assert "nodejs" in body, "the agent runtime is a Node program"
     assert "npm ci" in body, "the runtime must install from the lockfile, not float"
     assert "rcpia.worker" in body
+
+    # Both halves of the harness are pinned, not just the Pi packages. A major-version-only
+    # install floats inside that major, so two builds of one commit could run an agent on two
+    # different interpreters -- the thing the Pi pin exists to prevent, left open one layer down.
+    assert re.search(r"ARG NODE_VERSION=\d+\.\d+\.\d+-", body), "Node needs an exact pin"
+    assert 'nodejs=${NODE_VERSION}' in body, "the pin must actually be passed to apt"
 
 
 def test_the_worker_runs_the_job_loop_and_reaches_the_database(compose: dict) -> None:

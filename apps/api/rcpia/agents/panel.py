@@ -12,6 +12,7 @@ which jobs were asked for together, and when they have all finished. Both are re
 than inferred, because both decide what a tumour board is told.
 """
 
+import hashlib
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -276,6 +277,74 @@ async def panels_awaiting(session: AsyncSession, *, job_id: uuid.UUID) -> list[u
     return list(rows.scalars().all())
 
 
+async def reconcile(session: AsyncSession) -> list[uuid.UUID]:
+    """Dispatch every panel whose specialists have all settled and which has no synthesis yet.
+
+    **The gate cannot live only in the agent handler.** That handler runs the fast path -- it
+    knows the moment its own specialist finished -- but it is not the only way a job reaches a
+    terminal state. An unexpected exception is caught by the worker, which records the failure
+    itself and never calls back into the handler. A lease that expires with no attempts left is
+    failed by `reap_expired_leases`. A worker killed mid-run leaves its job to be reclaimed and
+    eventually exhausted. In each of those the specialist settles and the handler's gate never
+    sees it, so the panel waits for a job that will never report again.
+
+    This is the reconciliation the queue already applies to leases, applied to panels: cheap,
+    idempotent, and independent of how a job came to be finished. It runs on the worker's poll,
+    so a panel completed by a crash is dispatched within one poll interval rather than never.
+
+    Returns the panels it dispatched, for logging.
+    """
+    live = (
+        sa.select(AnalysisPanelJob.panel_id)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisPanelJob.job_id)
+        .where(AnalysisJob.status.in_(LIVE_JOB_STATUSES))
+    )
+    dispatched_already = sa.select(AnalysisPanelDispatch.panel_id).where(
+        AnalysisPanelDispatch.dispatch_kind == AnalysisPanelDispatch.SYNTHESIS
+    )
+    rows = await session.execute(
+        sa.select(AnalysisPanel.id)
+        .where(
+            AnalysisPanel.id.not_in(live),
+            AnalysisPanel.id.not_in(dispatched_already),
+            # A panel that recorded no jobs at all is not "complete", it is malformed.
+            AnalysisPanel.id.in_(sa.select(AnalysisPanelJob.panel_id)),
+        )
+        .order_by(AnalysisPanel.created_at)
+    )
+
+    dispatched: list[uuid.UUID] = []
+    for panel_id in rows.scalars().all():
+        if await dispatch_synthesis_if_ready(session, panel_id=panel_id) is not None:
+            dispatched.append(panel_id)
+    return dispatched
+
+
+async def _synthesis_dedupe_key(
+    session: AsyncSession, *, panel_id: uuid.UUID, case_id: uuid.UUID
+) -> str:
+    """Names the synthesis work: *reconciling these particular opinions*.
+
+    **Not `case:rcp_synthesis`.** That key said "one synthesis per case", which is wrong in both
+    directions once panels can share jobs. Two compatible panels reuse one set of specialists by
+    design; under a case-wide key the second panel's enqueue was refused, its dispatch row was
+    never written, and nothing would ever re-evaluate it -- its jobs were already terminal, so
+    that panel waited forever. And two panels convened over *different* role sets are two
+    different comparisons that both deserve an answer, which a case-wide key silently refused.
+
+    Keying on the job set gets both right: identical sets collapse to one synthesis that both
+    panels attach to, different sets each get their own. The fingerprint is short and stable --
+    the same jobs in any order produce the same key.
+    """
+    rows = await session.execute(
+        sa.select(AnalysisPanelJob.job_id).where(AnalysisPanelJob.panel_id == panel_id)
+    )
+    fingerprint = hashlib.sha256(
+        ",".join(sorted(str(job_id) for job_id in rows.scalars().all())).encode()
+    ).hexdigest()[:16]
+    return f"{JobType.RUN_AGENT}:{case_id}:{SYNTHESIS_ROLE}:{fingerprint}"
+
+
 async def dispatch_synthesis_if_ready(
     session: AsyncSession, *, panel_id: uuid.UUID, finishing_job_id: uuid.UUID | None = None
 ) -> AnalysisJob | None:
@@ -306,30 +375,40 @@ async def dispatch_synthesis_if_ready(
     # The synthesis is told which panel it is reconciling, so it reads exactly those opinions
     # and not whatever else the case has accumulated, and which of the requested specialities
     # produced nothing, so it cannot present a partial panel as a whole one.
-    #
-    # **Both inserts sit inside one savepoint**, because either can be the one that loses the
-    # race and they fail at different constraints. Two panels over the same case reach the same
-    # synthesis dedupe key, so the *job* insert is refused; one panel dispatched twice is
-    # refused by `uq_analysis_panel_dispatches_panel_kind`. Enqueuing outside the savepoint
-    # would let the first of those poison the transaction and discard the agent run this
-    # worker had just recorded.
+    key = await _synthesis_dedupe_key(session, panel_id=panel_id, case_id=panel.case_id)
+
+    # An existing live synthesis over the *same* opinions already answers this panel. Attaching
+    # to it is the whole reason the key is the job set: two compatible panels share their
+    # specialists by design, so reconciling those same opinions twice would spend a second Pi
+    # run to produce the same document.
+    existing = await session.scalar(
+        sa.select(AnalysisJob).where(
+            AnalysisJob.dedupe_key == key, AnalysisJob.status.in_(LIVE_JOB_STATUSES)
+        )
+    )
+
+    # **The insert sits inside a savepoint**, because it can lose a race and this worker has
+    # already recorded an agent run in this transaction. Letting the constraint fire outside
+    # would roll that back along with the dispatch.
     savepoint = await session.begin_nested()
     try:
-        job = await enqueue(
-            session,
-            case_id=panel.case_id,
-            organization_id=panel.organization_id,
-            job_type=JobType.RUN_AGENT,
-            payload={
-                "agent_role": SYNTHESIS_ROLE,
-                "clinical_question": panel.clinical_question,
-                "ledger_version": panel.ledger_version,
-                "panel_id": str(panel_id),
-                "requested_roles": list(panel.requested_roles or []),
-                "missing_roles": sorted(state.failed),
-            },
-            dedupe_key=f"{JobType.RUN_AGENT}:{panel.case_id}:{SYNTHESIS_ROLE}",
-        )
+        job = existing
+        if job is None:
+            job = await enqueue(
+                session,
+                case_id=panel.case_id,
+                organization_id=panel.organization_id,
+                job_type=JobType.RUN_AGENT,
+                payload={
+                    "agent_role": SYNTHESIS_ROLE,
+                    "clinical_question": panel.clinical_question,
+                    "ledger_version": panel.ledger_version,
+                    "panel_id": str(panel_id),
+                    "requested_roles": list(panel.requested_roles or []),
+                    "missing_roles": sorted(state.failed),
+                },
+                dedupe_key=key,
+            )
         session.add(
             AnalysisPanelDispatch(
                 panel_id=panel_id,
@@ -339,8 +418,9 @@ async def dispatch_synthesis_if_ready(
         )
         await savepoint.commit()
     except IntegrityError:
-        # Someone else already dispatched a synthesis this panel is covered by. Theirs is the
-        # one synthesis; rolling back to the savepoint keeps this worker's own writes.
+        # This panel was dispatched between the lock and the insert. Its dispatch row exists,
+        # which is all this call had to guarantee; rolling back to the savepoint keeps this
+        # worker's own writes.
         await savepoint.rollback()
         return None
     return job

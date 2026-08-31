@@ -78,7 +78,16 @@ def build_worker() -> Worker:
     parser = get_parser()
     blobs = get_blob_store()
     adapter = get_pi_adapter()
-    worker = Worker(get_session_factory(), job_types=_worker_job_types())
+    async def reconcile_panels(session) -> None:
+        """Catch any panel whose last specialist settled without the handler's gate running."""
+        for panel_id in await panel.reconcile(session):
+            logger.info("panel %s reconciled; synthesis queued", panel_id)
+
+    worker = Worker(
+        get_session_factory(),
+        job_types=_worker_job_types(),
+        housekeeping=reconcile_panels,
+    )
 
     async def handle_parse(session, job: AnalysisJob) -> JobOutcome | None:
         outcome = await parse_document(session, job, parser=parser, blobs=blobs)

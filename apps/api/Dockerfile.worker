@@ -11,8 +11,18 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 ARG UV_DEFAULT_INDEX=https://pypi.org/simple
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
-# Node 22 is the runtime Pi is published against.
+# Node 22 is the runtime Pi is published against, pinned to an exact build.
+#
+# The major alone would not be a pin. `apt-get install nodejs` inside major 22 floats to
+# whatever NodeSource published most recently, so two builds of the same commit could run
+# an agent on two different interpreters -- which is the thing the Pi version pin exists
+# to prevent. `runtime_version` records which Pi ran; this records which Node ran it.
+#
+# Bump deliberately. NodeSource eventually drops old point releases, so a build failing
+# on "Version '...' for 'nodejs' was not found" means this needs raising, not that the
+# pin is wrong.
 ARG NODE_MAJOR=22
+ARG NODE_VERSION=22.23.2-1nodesource1
 
 ENV UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX} \
     NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY} \
@@ -26,7 +36,8 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get install -y --no-install-recommends "nodejs=${NODE_VERSION}" \
+    && apt-mark hold nodejs \
     && apt-get purge -y gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*

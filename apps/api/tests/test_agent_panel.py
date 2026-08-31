@@ -384,6 +384,99 @@ async def test_a_failed_specialist_reaches_the_synthesis_as_explicitly_missing(
         assert state.failed == frozenset({"radiation_oncology"})
 
 
+async def test_two_panels_sharing_the_same_jobs_both_dispatch(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Sharing a specialist job must not cost the second panel its synthesis.
+
+    Two compatible panels deliberately reuse one set of specialist jobs. When those jobs finish,
+    both panels are complete and both need a synthesis. The synthesis dedupe key was case-wide,
+    so the second panel's enqueue was refused, its dispatch row was never written, and nothing
+    would ever re-evaluate it -- its jobs were already terminal. That panel waits forever.
+    """
+    _, case = await seed_case(session_factory)
+    first_panel, first_jobs, _ = await _start(session_factory, case, question="Opérable ?")
+    second_panel, second_jobs, reused = await _start(
+        session_factory, case, question="Opérable ?"
+    )
+    assert first_jobs == second_jobs and reused == set(ROLES)
+
+    for job_id in first_jobs.values():
+        await _settle(session_factory, job_id)
+
+    assert await _dispatch(session_factory, first_panel) is not None
+    assert await _dispatch(session_factory, second_panel) is not None, (
+        "the second panel must dispatch too"
+    )
+
+    async with session_factory() as session:
+        rows = await session.execute(
+            sa.select(AnalysisPanelDispatch).where(
+                AnalysisPanelDispatch.panel_id.in_([first_panel, second_panel])
+            )
+        )
+        records = rows.scalars().all()
+    assert len(records) == 2, "each panel records the synthesis it relies on"
+    # The panels share their specialists, so one synthesis answers both: reconciling the same
+    # opinions twice would spend a second Pi run to produce the same document.
+    assert len({record.job_id for record in records}) == 1
+
+
+async def test_a_crashing_handler_still_lets_the_panel_dispatch(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The gate must not depend on the handler returning normally.
+
+    An unexpected exception is caught by the worker, which records the failure itself. If that
+    exhausts the attempt budget the specialist is terminal and its panel is complete — but the
+    in-handler gate never ran, so nothing dispatched, and nothing will: the job is settled and
+    will not be claimed again.
+    """
+    _, case = await seed_case(session_factory)
+    panel_id, jobs, _ = await _start(session_factory, case)
+    for role in ROLES[:-1]:
+        await _settle(session_factory, jobs[role])
+
+    # Built the way the deployed worker is: the reconciliation sweep is not an extra, it is
+    # what makes dispatch independent of any handler having run.
+    worker = Worker(
+        session_factory,
+        name="crasher",
+        job_types=[JobType.RUN_AGENT],
+        housekeeping=panel_service.reconcile,
+    )
+
+    async def explode(session, job):
+        raise RuntimeError("the agent process died")
+
+    worker.register(JobType.RUN_AGENT, explode)
+    # Exhaust the budget so the failure is terminal rather than a retry.
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, jobs[ROLES[-1]])
+        assert job is not None
+        job.max_attempts = 1
+        await session.commit()
+
+    assert await worker.run_once() == jobs[ROLES[-1]]
+    # The crash is recorded by the worker, not by the handler, so nothing dispatched yet. The
+    # next poll reconciles it -- which is the whole point: within one poll, rather than never.
+    await worker.run_once()
+
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, jobs[ROLES[-1]])
+        assert job is not None
+        assert job.status is JobStatus.failed, "the crash must settle the job"
+        state = await panel_service.panel_state(session, panel_id=panel_id)
+        assert state.complete
+
+        dispatched = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AnalysisPanelDispatch)
+            .where(AnalysisPanelDispatch.panel_id == panel_id)
+        )
+    assert dispatched == 1, "a panel completed by a crashing specialist must still dispatch"
+
+
 # --- Panel-scoped reading ---------------------------------------------------------------------
 
 
