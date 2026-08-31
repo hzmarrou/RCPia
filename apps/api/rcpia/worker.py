@@ -23,6 +23,8 @@ from rcpia.cases.ledger import record_version
 from rcpia.core.config import get_settings
 from rcpia.core.db import get_session_factory
 from rcpia.core.models import AnalysisJob, Case, JobStatus
+from rcpia.evidence.embedding import EmbeddingError, build_embedder
+from rcpia.evidence.rerank import build_reranker
 from rcpia.jobs.models import JobOutcome, JobType
 from rcpia.jobs.service import enqueue
 from rcpia.jobs.worker import Worker
@@ -79,6 +81,15 @@ def build_worker() -> Worker:
     parser = get_parser()
     blobs = get_blob_store()
     adapter = get_pi_adapter()
+    # **The retriever, which the deployed worker was running without.** `run_agent` accepts it
+    # optionally and says so in the constraints when it is absent -- honest, but it meant every
+    # agent in a deployed worker answered with no guideline passages at all, while every
+    # measurement harness passed one and saw a grounded bundle. Built here with the parser and
+    # the adapter, so a missing Azure configuration stops the worker at startup with a message
+    # rather than quietly producing ungrounded clinical opinions.
+    settings = get_settings()
+    embedder = build_embedder(settings)
+    reranker = build_reranker(settings)
     async def reconcile_panels(session) -> None:
         """Catch any panel whose last specialist settled without the handler's gate running."""
         for panel_id in await panel.reconcile(session):
@@ -126,7 +137,10 @@ def build_worker() -> Worker:
         return outcome
 
     async def handle_agent(session, job: AnalysisJob) -> JobOutcome | None:
-        outcome = await run_agent(session, job, adapter=adapter, blobs=blobs)
+        outcome = await run_agent(
+            session, job, adapter=adapter, blobs=blobs,
+            embedder=embedder, reranker=reranker,
+        )
 
         # A specialist that has just settled may have been the last one a panel was waiting
         # for. The check runs here, in the handler's own transaction, so the dispatch commits
@@ -158,7 +172,7 @@ async def main() -> None:
 
     try:
         worker = build_worker()
-    except (ParserNotConfigured, PiNotConfigured) as exc:
+    except (ParserNotConfigured, PiNotConfigured, EmbeddingError) as exc:
         logger.error("worker cannot start: %s", exc)
         raise SystemExit(2) from exc
 

@@ -84,6 +84,27 @@ OpenAI, so the replica count has to stay under that deployment's concurrent-requ
 tokens-per-minute quota. `WORKER_JOB_TYPES=run_agent` restricts a worker to agent runs, which
 lets a small agent pool sit alongside a larger one doing parsing and extraction.
 
+### Analysis starts by itself
+
+Once a dossier is parsed, extracted and has a ledger version, the specialists are convened
+automatically -- there is no button. The chain is upload → parse → extract → ledger version →
+panel → synthesis → fiche.
+
+**That means every eligible upload spends model time without anyone asking.** Three specialists,
+roughly a minute each, on any dossier complete enough to analyse. It is the point of the system
+and it is also what a test upload costs, so it is a setting rather than a behaviour:
+
+```bash
+AUTO_PANEL_ROLES=urology_oncology,medical_oncology,radiation_oncology   # the default
+AUTO_PANEL_ROLES=                                                      # off; analysis is then
+                                                                       # only ever requested
+```
+
+A case that is missing a blocking field convenes nothing and costs nothing: automatic convening
+applies the same completeness gate as the manual endpoint, so an incomplete upload does not buy
+three refusals. Re-extraction records a new ledger version and reuses the jobs already answering
+that same question rather than starting a second panel.
+
 The synthesis is **not** part of the panel and is never requested directly. It is dispatched
 once, automatically, by whichever worker finishes the last specialist — and only once every
 speciality the panel asked for has finished, including retries. A speciality that failed is

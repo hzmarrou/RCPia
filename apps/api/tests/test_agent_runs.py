@@ -254,6 +254,27 @@ async def sign_in(client: AsyncClient, user: User) -> None:
 # --------------------------------------------------------------------------------------
 
 
+def test_the_deployed_worker_gives_its_agents_a_retriever(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`run_agent` takes the retriever optionally, and the worker was not passing one.
+
+    Without an embedder and a reranker `build_bundle` skips retrieval, so every agent in a
+    deployed worker answered with no guideline passages -- honestly labelled in its constraints,
+    and completely ungrounded. Every measurement harness passed one, so the difference never
+    showed up in anything that was measured.
+    """
+    import inspect
+
+    from rcpia import worker as worker_module
+
+    source = inspect.getsource(worker_module.build_worker)
+    assert "build_embedder" in source and "build_reranker" in source, (
+        "the worker must construct a retriever"
+    )
+    assert "embedder=embedder" in source and "reranker=reranker" in source, (
+        "and hand it to the agent handler"
+    )
+
+
 def test_every_wired_agent_folder_has_what_the_adapter_requires() -> None:
     """`agent_dir` refuses a folder without `brain.md` or `.pi/APPEND_SYSTEM.md`.
 

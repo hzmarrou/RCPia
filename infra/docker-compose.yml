@@ -100,6 +100,10 @@ services:
       # Optional: restrict this worker to some job types, e.g. "run_agent" for a pool sized to
       # the model provider's limit, alongside a cheaper pool doing parsing and extraction.
       WORKER_JOB_TYPES: ${WORKER_JOB_TYPES:-}
+      # Which specialists a settled ledger version convenes on its own. Empty turns automatic
+      # analysis off; the default spends three agent runs on every eligible upload. Passed
+      # through explicitly, or an operator setting it in .env would find it had no effect here.
+      AUTO_PANEL_ROLES: ${AUTO_PANEL_ROLES:-urology_oncology,medical_oncology,radiation_oncology}
     volumes:
       - ../data/blobs:/data/blobs
       - ../data/pi-work:/data/pi-work
