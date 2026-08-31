@@ -116,10 +116,21 @@ ROLE_SETTING_QUESTIONS: dict[tuple[str, str], str] = {
         "candidats, résection transuréthrale maximale, radiothérapie et radiosensibilisation "
         "concomitante, dose et fractionnement, et surveillance après conservation"
     ),
-    # Prostate is mapped on the unspecified-risk setting rather than on a risk band because that
-    # is the setting the dossiers reach: the risk group depends on Gleason, PSA and stage
-    # together, and those are exactly the fields the extraction most often leaves incomplete. A
-    # pair mapped on `prostate_localized_high_risk` would be correct and would almost never fire.
+    # **This pair does not currently fire, and the reasoning that chose it was wrong.** It was
+    # mapped on the unspecified-risk setting on the grounds that a risk band would rarely be
+    # derived — which is true — but measurement then showed that 38 of 40 stored prostate records
+    # derive *no setting at all*, not the unspecified-risk one. Kept because it is correct for a
+    # record that does derive it, and extraction is expected to improve; the patients it was
+    # meant to serve are reached by `ROLE_GENERIC_QUESTIONS` below instead.
+    # The two stored records that *do* derive a prostate setting land here, and all three
+    # specialities were sharing the per-setting question on them. Only radiotherapy is mapped:
+    # urology and medical oncology sharing a question on this setting predates this agent and
+    # is a gap in the table, not something wiring a third speciality should decide.
+    ("radiation_oncology", "prostate_locally_advanced_non_metastatic"): (
+        "Radiothérapie du cancer de la prostate localement avancé : radiothérapie externe avec "
+        "suppression androgénique longue, irradiation ganglionnaire pelvienne, volumes cibles et "
+        "dose, et alternatives à la chirurgie"
+    ),
     ("radiation_oncology", "prostate_nonmetastatic_unspecified_risk"): (
         "Radiothérapie du cancer de la prostate non métastatique : radiothérapie externe et "
         "curiethérapie, hypofractionnement, volumes cibles et irradiation ganglionnaire "
@@ -231,20 +242,61 @@ GENERIC_QUESTIONS: dict[str, str] = {
 }
 
 
+# The organ asked by a specialist, for the patients whose stage could not be derived.
+#
+# **This layer exists because the setting is missing far more often than the design assumed.**
+# Measured across the stored dossiers: every bladder record derives a setting — 36 muscle-
+# invasive, 18 non-muscle-invasive — but **38 of 40 prostate records derive none**, because the
+# risk group needs Gleason, PSA and stage together and those are the fields the extraction most
+# often leaves incomplete. Without this level all three specialists fell through to one identical
+# generic question on 38 of 40 prostate patients, which is precisely the defect the role layer
+# was built to remove: two specialists reading the same ten passages are not two opinions.
+#
+# The role-and-setting table above could not fix this on its own. A pair is keyed by a setting,
+# and there is no setting here to key it by.
+#
+# Only prostate is mapped, and only for the wired specialities, following the same discipline as
+# the table above: bladder derives a setting on every record measured, so a bladder entry would
+# be an untested string that never runs.
+ROLE_GENERIC_QUESTIONS: dict[tuple[str, str], str] = {
+    ("urology_oncology", "prostate"): (
+        "Traitement local du cancer de la prostate : prostatectomie totale et curage "
+        "ganglionnaire, surveillance active, thérapie focale, indications et contre-indications "
+        "chirurgicales selon le groupe de risque"
+    ),
+    ("medical_oncology", "prostate"): (
+        "Traitement systémique du cancer de la prostate : suppression androgénique, "
+        "intensification par inhibiteur du récepteur aux androgènes ou docétaxel, éligibilité et "
+        "contre-indications, santé osseuse sous hormonothérapie"
+    ),
+    ("radiation_oncology", "prostate"): (
+        "Radiothérapie du cancer de la prostate : radiothérapie externe et curiethérapie, "
+        "hypofractionnement, irradiation ganglionnaire pelvienne, radiothérapie adjuvante ou de "
+        "rattrapage après prostatectomie, durée de la suppression androgénique associée"
+    ),
+}
+
+
 def question_for(
     cancer_type: str, setting: str | None, agent_role: str | None = None
 ) -> str:
     """The search question for this patient, as asked by this specialist.
 
-    Three levels, most specific first:
+    Four levels, most specific first:
 
     1. **Setting and role** — what this specialist evaluates in this clinical situation.
     2. **Setting alone** — the situation, asked role-blind.
-    3. **The organ's generic question** — when no setting could be derived.
+    3. **Organ and role** — the specialist's own subject, when no setting could be derived.
+    4. **The organ's generic question** — when nothing else applies.
 
     Each fallback is a real search, not a failure: level 2 is what every agent asked before
-    roles were mapped, and level 3 is what every agent asked before settings were. An unmapped
+    roles were mapped, and level 4 is what every agent asked before settings were. An unmapped
     pair is therefore a gap in coverage rather than a defect, which is why nothing here raises.
+
+    **Level 3 sits below level 2 deliberately.** A question that names the patient's actual
+    clinical situation beats one that names only the speciality, even asked role-blind — the
+    setting is what the guidelines are organised by. Level 3 is for the patients who have no
+    derived setting at all, and on the stored prostate records that is almost all of them.
     """
     if setting is not None:
         if agent_role is not None:
@@ -254,6 +306,10 @@ def question_for(
         mapped = SETTING_QUESTIONS.get(setting)
         if mapped is not None:
             return mapped
+    if agent_role is not None:
+        by_organ = ROLE_GENERIC_QUESTIONS.get((agent_role, cancer_type))
+        if by_organ is not None:
+            return by_organ
     return GENERIC_QUESTIONS.get(
         cancer_type,
         f"Stratégie thérapeutique pour un cancer de type {cancer_type} : options de traitement, "

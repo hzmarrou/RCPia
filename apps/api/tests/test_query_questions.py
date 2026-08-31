@@ -13,6 +13,7 @@ from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.query import staging
 from rcpia.query.questions import (
     GENERIC_QUESTIONS,
+    ROLE_GENERIC_QUESTIONS,
     ROLE_SETTING_QUESTIONS,
     SETTING_QUESTIONS,
     question_for,
@@ -133,6 +134,45 @@ def test_radiotherapy_asks_about_prostate_on_the_setting_the_dossiers_reach() ->
     assert "hypofractionnement" in question
 
 
+def test_a_patient_with_no_derived_setting_still_gets_three_different_questions() -> None:
+    """The measured hole in the three-level design.
+
+    Every stored bladder record derives a setting, but **38 of 40 prostate records derive none**
+    — the risk group needs Gleason, PSA and stage together, and those are the fields extraction
+    most often leaves incomplete. Those patients fell straight past the role layer to one generic
+    organ question shared by every specialist, which is the identical-passages defect the layer
+    exists to remove, reappearing on the majority of one organ's dossiers.
+    """
+    asked = {
+        role: question_for("prostate", None, role)
+        for role in ("urology_oncology", "medical_oncology", "radiation_oncology")
+    }
+    assert len(set(asked.values())) == 3
+    assert "prostatectomie" in asked["urology_oncology"].lower()
+    assert "docétaxel" in asked["medical_oncology"].lower()
+    assert "curiethérapie" in asked["radiation_oncology"].lower()
+    # And none of them is the role-blind fallback that used to be returned here.
+    assert GENERIC_QUESTIONS["prostate"] not in set(asked.values())
+
+
+def test_a_derived_setting_still_beats_the_speciality_generic() -> None:
+    """Level 3 sits below level 2 on purpose.
+
+    A question naming the patient's actual clinical situation beats one naming only the
+    speciality, because the guidelines are organised by situation. An unmapped role on a mapped
+    setting must therefore keep getting the setting question.
+    """
+    assert question_for("bladder", "bladder_metastatic", "radiation_oncology") == (
+        SETTING_QUESTIONS["bladder_metastatic"]
+    )
+
+
+def test_an_unmapped_role_keeps_the_role_blind_fallback() -> None:
+    """Roles with no entry are the designed state, not a defect, and must not return nothing."""
+    assert question_for("prostate", None, "pathology") == GENERIC_QUESTIONS["prostate"]
+    assert question_for("prostate", None) == GENERIC_QUESTIONS["prostate"]
+
+
 def test_every_mapped_role_is_a_real_agent_role() -> None:
     """A typo in a role key would fall back silently and look like a coverage gap.
 
@@ -195,11 +235,30 @@ def test_the_surgical_and_systemic_questions_name_their_own_subject() -> None:
     assert "dérivation urinaire" not in medical
 
 
-def test_role_is_ignored_when_no_setting_was_derived() -> None:
-    """Without a setting there is nothing to specialise, so every role gets the same broad
-    question — the honest answer for a record that determined nothing."""
+def test_a_role_without_a_setting_is_specialised_where_the_table_can_and_broad_where_it_cannot(
+) -> None:
+    """This assertion used to read the other way, and the measurement is why it changed.
+
+    The reasoning was that without a setting there is nothing to specialise, so every role
+    should get the same broad question — the honest answer for a record that determined nothing.
+    It was honest about the record and wrong about the consequence: **38 of 40 stored prostate
+    records derive no setting**, so "every role gets the same question" was not a rare fallback,
+    it was the normal case for that organ. Three specialists reading the same ten passages are
+    not three opinions.
+
+    A speciality is still not invented where none is mapped: a role with no entry gets the broad
+    question exactly as before.
+    """
+    mapped = {
+        role for role, organ in ROLE_GENERIC_QUESTIONS if organ == "prostate"
+    }
+    assert mapped, "the prostate fallback is what this test exists to protect"
     for role in sorted(AGENT_ROLES):
-        assert question_for("prostate", None, role) == GENERIC_QUESTIONS["prostate"]
+        question = question_for("prostate", None, role)
+        if role in mapped:
+            assert question != GENERIC_QUESTIONS["prostate"]
+        else:
+            assert question == GENERIC_QUESTIONS["prostate"]
 
 
 def test_an_unknown_role_falls_back_to_the_setting_question() -> None:
