@@ -422,6 +422,63 @@ async def test_two_panels_sharing_the_same_jobs_both_dispatch(
     assert len({record.job_id for record in records}) == 1
 
 
+async def test_a_panel_attaching_after_the_shared_synthesis_finished_does_not_start_another(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The second panel can arrive after the first panel's synthesis has already run.
+
+    Both panels share one job set, so one synthesis answers both — but the live-job lookup that
+    finds it stops matching the moment that job completes, and the dedupe index only forbids a
+    *live* duplicate. A panel dispatched by a later reconciliation sweep therefore enqueues a
+    second synthesis over identical opinions: a second Pi run producing the same document, and
+    two `rcp_synthesis` runs on one case for the fiche to choose between.
+    """
+    _, case = await seed_case(session_factory)
+    first_panel, jobs, _ = await _start(session_factory, case, question="Opérable ?")
+    second_panel, shared, reused = await _start(
+        session_factory, case, question="Opérable ?"
+    )
+    assert shared == jobs and reused == set(ROLES)
+
+    for job_id in jobs.values():
+        await _settle(session_factory, job_id)
+
+    synthesis_job = await _dispatch(session_factory, first_panel)
+    assert synthesis_job is not None
+
+    # The shared synthesis runs and finishes before the second panel is reconciled.
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, synthesis_job)
+        assert job is not None
+        job.status = JobStatus.completed
+        await session.commit()
+
+    await _dispatch(session_factory, second_panel)
+
+    async with session_factory() as session:
+        rows = await session.execute(
+            sa.select(AnalysisJob).where(
+                AnalysisJob.case_id == case.id,
+                AnalysisJob.job_type == JobType.RUN_AGENT,
+                AnalysisJob.payload["agent_role"].astext == SYNTHESIS_ROLE,
+            )
+        )
+        syntheses = rows.scalars().all()
+        dispatches = (
+            await session.execute(
+                sa.select(AnalysisPanelDispatch).where(
+                    AnalysisPanelDispatch.panel_id.in_([first_panel, second_panel])
+                )
+            )
+        ).scalars().all()
+
+    assert len(syntheses) == 1, (
+        f"one job set deserves one synthesis, found {len(syntheses)}"
+    )
+    assert len(dispatches) == 2, "both panels must record which synthesis answers them"
+    assert {d.job_id for d in dispatches} == {syntheses[0].id}
+
+
 async def test_a_crashing_handler_still_lets_the_panel_dispatch(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

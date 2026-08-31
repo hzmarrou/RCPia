@@ -377,14 +377,31 @@ async def dispatch_synthesis_if_ready(
     # produced nothing, so it cannot present a partial panel as a whole one.
     key = await _synthesis_dedupe_key(session, panel_id=panel_id, case_id=panel.case_id)
 
-    # An existing live synthesis over the *same* opinions already answers this panel. Attaching
-    # to it is the whole reason the key is the job set: two compatible panels share their
-    # specialists by design, so reconciling those same opinions twice would spend a second Pi
-    # run to produce the same document.
+    # Any existing synthesis over the *same* opinions already answers this panel. Attaching to it
+    # is the whole reason the key is the job set: two compatible panels share their specialists
+    # by design, so reconciling those same opinions twice would spend a second Pi run to produce
+    # the same document.
+    #
+    # **Status is deliberately not filtered.** Restricting this to live jobs looked right and was
+    # not: the partial unique index only forbids a *live* duplicate, so once the shared synthesis
+    # completed the lookup stopped matching and the index stopped objecting, and a panel
+    # reconciled a moment later queued a second run over identical opinions. The second panel can
+    # easily arrive after the first has finished — a reconciliation sweep on another worker is
+    # exactly that path.
+    #
+    # A finished synthesis is a legitimate answer for this panel because the fingerprint is the
+    # job set: identical jobs mean identical opinions, identical roles, and therefore the same
+    # document. A *failed* one is attached to as well, and that is also right — it is the same
+    # failure this panel would have had, and re-running it is a retry decision governed by the
+    # job's own attempt budget, not something a second panel should trigger silently. The same
+    # holds more strongly for a cancelled one: someone stopped that work, and a panel arriving
+    # afterwards must not quietly restart it. Either way the panel is left visibly without a
+    # synthesis rather than invisibly given a second one.
     existing = await session.scalar(
-        sa.select(AnalysisJob).where(
-            AnalysisJob.dedupe_key == key, AnalysisJob.status.in_(LIVE_JOB_STATUSES)
-        )
+        sa.select(AnalysisJob)
+        .where(AnalysisJob.dedupe_key == key)
+        .order_by(AnalysisJob.created_at.desc())
+        .limit(1)
     )
 
     # **The insert sits inside a savepoint**, because it can lose a race and this worker has
