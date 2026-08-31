@@ -107,6 +107,15 @@ OpenAI, so the replica count has to stay under that deployment's concurrent-requ
 tokens-per-minute quota. `WORKER_JOB_TYPES=run_agent` restricts a worker to agent runs, which
 lets a small agent pool sit alongside a larger one doing parsing and extraction.
 
+### Before a demo, or after a build
+
+```bash
+python -m rcpia.ops.smoke     # nine checks, exit 0 when the deployment can produce a fiche
+```
+
+`docs/runbook-smoke.md` carries the full sequence, including the upload-to-fiche run that spends
+real model time, and `python -m rcpia.ops.dev_reset` for clearing what smoke runs leave behind.
+
 ### Analysis starts by itself
 
 Once a dossier is parsed, extracted and has a ledger version, the specialists are convened
