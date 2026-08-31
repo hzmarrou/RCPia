@@ -308,6 +308,12 @@ class PanelAgreement(Strict):
     # and the illusion strengthens as agents are added, because seven names look like all of
     # them. A reader cannot weigh a silence without knowing who was never asked to speak.
     absent: list[str] = Field(default_factory=list)
+    # Kept apart from `absent`, because they are different facts and they ask different things
+    # of the board. A speciality nobody wired has no opinion to recover. One that was asked and
+    # whose run failed has an opinion that a re-run would produce, and the decision below was
+    # taken without it. Folding the second into the first makes the fiche assert that nobody
+    # asked, which is not true and is worse than the silence it replaced.
+    failed: list[str] = Field(default_factory=list)
 
 
 class PpsDocument(Strict):

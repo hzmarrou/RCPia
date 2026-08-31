@@ -128,22 +128,42 @@ def agent_label(role: str) -> str:
     return AGENT_LABELS.get(role, role.replace("_", " ").capitalize())
 
 
-def _panel_shortfall(roles: Sequence[str]) -> str:
-    """The sentence naming which of the expected specialities were never asked.
+def panel_shortfall(
+    roles: Sequence[str], failed_roles: Sequence[str] = ()
+) -> tuple[list[str], list[str]]:
+    """The expected specialities that did not contribute, split by why.
+
+    Returned in roster order rather than sorted, so the lists read the way a board is convened.
+    """
+    seated = {role for role in roles if role != SYNTHESIS_ROLE}
+    attempted = set(failed_roles)
+    absent = [
+        role for role in EXPECTED_PANEL if role not in seated and role not in attempted
+    ]
+    failed = [role for role in EXPECTED_PANEL if role not in seated and role in attempted]
+    return absent, failed
+
+
+def _panel_shortfall(roles: Sequence[str], failed_roles: Sequence[str] = ()) -> str:
+    """The sentence naming which of the expected specialities did not contribute, and why.
 
     Empty when the panel is complete, so a full board is not made to carry a disclaimer about
     nothing.
     """
-    seated = {role for role in roles if role != SYNTHESIS_ROLE}
-    absent = [role for role in EXPECTED_PANEL if role not in seated]
-    if not absent:
+    absent, failed = panel_shortfall(roles, failed_roles)
+    if not absent and not failed:
         return ""
-    return (
-        f". Panel incomplet : {len(EXPECTED_PANEL) - len(absent)} spécialité(s) sur "
-        f"{len(EXPECTED_PANEL)}. Non sollicitées : "
-        + ", ".join(agent_label(role) for role in absent)
-        + "."
-    )
+    seated = len(EXPECTED_PANEL) - len(absent) - len(failed)
+    out = f". Panel incomplet : {seated} spécialité(s) sur {len(EXPECTED_PANEL)}"
+    if absent:
+        out += " — non sollicitées : " + ", ".join(agent_label(role) for role in absent)
+    if failed:
+        # Named separately and in stronger terms: this opinion was expected, the document was
+        # assembled without it, and a re-run would produce it.
+        out += " — sollicitées mais en échec technique : " + ", ".join(
+            agent_label(role) for role in failed
+        )
+    return out + "."
 
 
 def _values(entries: list[LedgerEntry]) -> dict[str, str | None]:
@@ -344,7 +364,11 @@ def build_social(values: dict[str, str | None]) -> SocialAssessment:
 
 
 def build_framework(
-    *, agent_roles: list[str], models: list[str], sources: Sequence[str] = ()
+    *,
+    agent_roles: list[str],
+    models: list[str],
+    sources: Sequence[str] = (),
+    failed_roles: Sequence[str] = (),
 ) -> CareFramework:
     """Section 6 states what RCPia knows about its own basis.
 
@@ -379,7 +403,7 @@ def build_framework(
             # Said here as well as in the panel block, because a single-agent fiche has no panel
             # block: this field would then be the only statement of who was consulted, and one
             # speciality standing alone reads as the whole of what RCPia had to offer.
-            + _panel_shortfall(agent_roles)
+            + _panel_shortfall(agent_roles, failed_roles)
             if agent_roles
             else "RCP à constituer."
         ),
@@ -541,7 +565,9 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
     return entries
 
 
-def build_panel(output: AgentOutput, roles: Sequence[str]) -> PanelAgreement:
+def build_panel(
+    output: AgentOutput, roles: Sequence[str], failed_roles: Sequence[str] = ()
+) -> PanelAgreement:
     """The synthesis's comparison, flattened for the reader.
 
     **Attribution is spelled out rather than implied.** The first synthesis run recorded a
@@ -606,15 +632,14 @@ def build_panel(output: AgentOutput, roles: Sequence[str]) -> PanelAgreement:
         )
 
     contributed = [role for role in roles if role != SYNTHESIS_ROLE]
+    absent, failed = panel_shortfall(roles, failed_roles)
     return PanelAgreement(
         points=points,
         # The synthesis is the agent doing the comparing, not one of the opinions compared.
         # Listing it here read as a third speciality having agreed with the other two.
         specialities=[agent_label(role) for role in contributed],
-        # In roster order rather than sorted, so the list reads the way a board is convened.
-        absent=[
-            agent_label(role) for role in EXPECTED_PANEL if role not in set(contributed)
-        ],
+        absent=[agent_label(role) for role in absent],
+        failed=[agent_label(role) for role in failed],
     )
 
 
@@ -647,6 +672,30 @@ async def latest_runs(
     return runs
 
 
+async def failed_roles(session: AsyncSession, *, case_id: uuid.UUID) -> list[str]:
+    """Roles that were asked for an opinion and produced none.
+
+    `latest_runs` selects successes, so a crashed agent leaves no trace in the document. That
+    was a silent omission until the fiche began stating which specialities did not contribute:
+    from then on a failed run is reported as a speciality nobody consulted, which is a positive
+    claim and a false one. The board would read *not asked* where the truth is *asked, and the
+    answer never came back*.
+
+    A role with an older success and a newer failure is not listed: its opinion is in the
+    document, and the fiche says elsewhere when the analysis is out of date.
+    """
+    rows = await session.execute(
+        sa.select(AgentRun.agent_role, AgentRun.status).where(AgentRun.case_id == case_id)
+    )
+    attempted: set[str] = set()
+    succeeded: set[str] = set()
+    for role, status in rows.all():
+        attempted.add(role)
+        if status == AgentRunStatus.succeeded:
+            succeeded.add(role)
+    return sorted(attempted - succeeded)
+
+
 async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
     """Assemble the provisional PPS for a case from its stored ledger and agent runs.
 
@@ -658,6 +707,7 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
     should be re-run.
     """
     runs = await latest_runs(session, case_id=case.id)
+    crashed = await failed_roles(session, case_id=case.id)
     if not runs:
         raise NothingToReport(
             "Aucun avis d'agent n'a abouti pour ce dossier : lancez une analyse avant de "
@@ -724,7 +774,7 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
         decision=build_decision(values, contested=contested),
         # Only a synthesis has a panel to report on; a single opinion yields an empty
         # block and the renderer prints nothing.
-        panel=build_panel(lead_output, roles),
+        panel=build_panel(lead_output, roles, crashed),
         treatments=build_treatments(lead_output),
         support=build_support(values, agent_roles=roles, contested=contested),
         social=build_social(values),
@@ -732,6 +782,7 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
             agent_roles=roles,
             models=models,
             sources=_guideline_sources(lead_run),
+            failed_roles=crashed,
         ),
         missing=build_missing(report, lead_output),
         evidence=build_evidence(lead_run, lead_output),

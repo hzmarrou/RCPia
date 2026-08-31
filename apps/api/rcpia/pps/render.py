@@ -182,7 +182,11 @@ def _panel(document: PpsDocument) -> list[str]:
     the whole block — and with it the sentence saying which specialities were never consulted,
     exactly when the document looks most settled.
     """
-    if not document.panel.points and not document.panel.specialities:
+    if (
+        not document.panel.points
+        and not document.panel.specialities
+        and not document.panel.failed
+    ):
         return []
 
     out = ["**Concordance du panel — lectures non validées**", ""]
@@ -191,14 +195,39 @@ def _panel(document: PpsDocument) -> list[str]:
             "Avis comparés : " + ", ".join(document.panel.specialities) + ".",
             "",
         ]
-    if document.panel.absent:
+    if document.panel.absent or document.panel.failed:
         # The count, not only the names: "2 of 8" is what stops the list reading as the roster.
         seated = len(document.panel.specialities)
-        total = seated + len(document.panel.absent)
+        total = seated + len(document.panel.absent) + len(document.panel.failed)
+        out += [f"> ⚠️ **Panel incomplet : {seated} spécialité(s) sur {total}.**", ""]
+    if document.panel.absent:
         out += [
-            f"> ⚠️ **Panel incomplet : {seated} spécialité(s) sur {total}.** Non sollicitées à "
-            "ce jour : " + ", ".join(document.panel.absent) + ". Leur silence dans ce document "
-            "ne signifie pas qu'elles n'ont rien à dire : elles n'ont pas été interrogées.",
+            "> Non sollicitées à ce jour : "
+            + ", ".join(document.panel.absent)
+            + ". Leur silence dans ce document ne signifie pas qu'elles n'ont rien à dire : "
+            "elles n'ont pas été interrogées.",
+            "",
+        ]
+    if document.panel.failed:
+        # A different sentence, because it asks something different of the reader. Nobody can
+        # recover the opinion of a speciality that was never wired; this one exists to be
+        # recovered, and the document below was assembled without it.
+        # Agreement matters in a document a clinician reads: one speciality failing is the
+        # common case, and "ces spécialités ont été sollicitées" after a single name reads as
+        # carelessness in exactly the sentence that has to be believed.
+        many = len(document.panel.failed) > 1
+        out += [
+            "> ⚠️ **Avis attendu et non obtenu : "
+            + ", ".join(document.panel.failed)
+            + ".** "
+            + (
+                "Ces spécialités ont été sollicitées et leur analyse a échoué."
+                if many
+                else "Cette spécialité a été sollicitée et son analyse a échoué."
+            )
+            + " Le présent document a été établi sans "
+            + ("leur avis" if many else "son avis")
+            + " ; relancez l'analyse avant de vous appuyer sur ce panel.",
             "",
         ]
     if not document.panel.points:

@@ -61,6 +61,8 @@ from rcpia.pps.render import render_markdown
 from rcpia.pps.schemas import (
     FORBIDDEN_IN_GENERATED_OUTPUT,
     CareFramework,
+    PanelAgreement,
+    PanelPoint,
     Decision,
     DocumentAssertsADecision,
     PpsDocument,
@@ -1386,6 +1388,87 @@ def test_the_panel_names_the_specialities_that_were_never_asked() -> None:
     ]
     # The synthesis is not a speciality, so it is neither seated nor missing.
     assert "Rcp synthesis" not in panel.absent
+
+
+def test_an_agent_that_was_asked_and_crashed_is_not_an_agent_nobody_asked() -> None:
+    """`latest_runs` selects successes, so a crashed agent leaves no trace in the document.
+
+    That was a silent omission until the fiche began naming which specialities did not
+    contribute. From then on it became a positive claim, and a false one: the board would read
+    *not asked* where the truth is *asked, and the answer never came back*. Nobody can recover
+    the opinion of a speciality that was never wired; this one exists to be recovered.
+    """
+    panel = build_panel(
+        _synthesis(),
+        ["rcp_synthesis", "urology_oncology", "medical_oncology"],
+        ["radiation_oncology"],
+    )
+    assert panel.failed == ["Radiothérapie"]
+    assert "Radiothérapie" not in panel.absent
+    # The denominator is unchanged: eight are expected however the shortfall is explained.
+    assert len(panel.specialities) + len(panel.absent) + len(panel.failed) == len(
+        EXPECTED_PANEL
+    )
+
+
+def test_the_fiche_asks_for_a_re_run_only_where_an_opinion_was_expected() -> None:
+    """The two sentences ask different things of the reader, so they are two sentences."""
+    document = _minimal_document()
+    document.panel = PanelAgreement(
+        points=[PanelPoint(kind="gap", point="p", attribution="a")],
+        specialities=["Oncologie urologique"],
+        absent=["Nutrition clinique"],
+        failed=["Radiothérapie"],
+    )
+    body = render_markdown(document)
+    assert "Panel incomplet : 1 spécialité(s) sur 3" in body
+    assert "Non sollicitées à ce jour : Nutrition clinique" in body
+    assert "Avis attendu et non obtenu : Radiothérapie" in body
+    assert "relancez l'analyse" in body
+
+
+async def test_a_failed_run_reaches_the_fiche_as_a_missing_answer(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Through the database, because the distinction is drawn by a query, not by a caller.
+
+    A crashed run is invisible to `latest_runs`, so without this the fiche states that the
+    speciality was never consulted -- on a case where it was consulted and the analysis failed.
+    """
+    _, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+
+    async with session_factory() as session:
+        version = (
+            await session.execute(
+                sa.select(CaseLedgerVersion)
+                .where(CaseLedgerVersion.case_id == case.id)
+                .order_by(CaseLedgerVersion.version.desc())
+            )
+        ).scalars().first()
+        assert version is not None
+        session.add(
+            AgentRun(
+                case_id=case.id,
+                organization_id=case.organization_id,
+                agent_role="radiation_oncology",
+                status=AgentRunStatus.failed,
+                ledger_version_id=version.id,
+                ledger_version=version.version,
+                bundle={},
+                error_message="le processus ne s'est pas terminé",
+            )
+        )
+        await session.commit()
+
+    document = await build_document(session_factory, case)
+    assert "Radiothérapie" in document.framework.participants
+    assert "échec technique" in document.framework.participants
+    # Named as a failure, not folded into the specialities nobody asked.
+    assert "non sollicitées : Radiothérapie" not in document.framework.participants
 
 
 def test_a_complete_panel_carries_no_shortfall() -> None:
