@@ -8,17 +8,19 @@ of urinary diversion is staying in its own domain, and printing that costs the b
 and buries the silences that matter. Measured across fifteen dossiers, roughly three quarters of
 the 34 gaps were of that second kind.
 
-**Why it is a table and not a computation.** The obvious mechanical rule — *an agent may address
-any point it can ground in evidence it is allowed to read* — was implemented and measured before
-being adopted, and it fails. Guideline documents are not scoped by speciality: the AUA MIBC
+**Why it is a declaration and not a computation.** The obvious mechanical rule — *an agent may
+address any point it can ground in evidence it is allowed to read* — was implemented and measured
+before being adopted, and it fails. Guideline documents are not scoped by speciality: the AUA MIBC
 guideline covers surgery and chemotherapy together, so the medical oncology agent's own bundle
-contains passages naming `bricker` and `entérocystoplastie`. It suppressed 35% of gaps and kept
-the wrong ones. The corpus cannot settle this, because the guidelines do not divide the way a
-tumour board divides. So the boundary is a clinical judgement, recorded here.
+contains passages naming `bricker` and `entérocystoplastie`. It suppressed 35% of gaps and kept the
+wrong ones. The corpus cannot settle this, because the guidelines do not divide the way a tumour
+board divides. So the boundary is a clinical judgement, recorded here.
 
-**The judgement behind each row** was given by a clinician against the measured inventory in
-`docs/reviews/coverage-gap-decision.md`. The governing question was always: *is an agent of the
-silent speciality expected to hold a view on this subject?*
+**The judgement behind each remit** was given by a clinician — in the agent's own brain, whose
+*"Vous évaluez"* and *"Vous ne décidez pas"* sections are exactly this statement — and checked
+against the measured inventory in `docs/reviews/coverage-gap-decision.md`. The governing question
+was always the same one: *is an agent of the silent speciality expected to hold a view on this
+subject?* Asked of the speciality once, rather than of every pair it can appear in.
 
 **The split that matters.** Systemic therapy divides in two, and the division is the whole
 point. When the urology agent proposes a pathway that runs through a drug — neoadjuvant
@@ -138,23 +140,69 @@ RADIOTHERAPY = Subject(
     }),
 )
 
-STAGING = Subject(
-    key="staging",
-    label="Stadification, imagerie et anatomopathologie",
+# **Split from one `staging` subject, because two specialities disown each other's half of it.**
+# The radiology brain says *"vous ne décidez pas de l'interprétation des lames
+# anatomopathologiques"*; the pathology brain says *"vous ne décidez pas de la stadification
+# clinique (cTNM) à partir de l'imagerie"*. Their remits are stated as disjoint, and a single
+# `staging` subject merges exactly the two things they are disjoint about — so it could not say
+# that the pathologist's silence on an MRI finding is the division of labour while its silence
+# on a Gleason score is a hole.
+IMAGING = Subject(
+    key="imaging",
+    label="Imagerie et stadification clinique",
     terms=frozenset({
-        "ctnm", "ptnm", "tnm", "stade", "gleason", "isup", "histologique",
-        "anatomopathologique", "biopsie", "relecture", "irm", "scintigraphie", "psma",
-        "imagerie", "resecabilite",
+        "ctnm", "irm", "tdm", "scanner", "uroscanner", "scintigraphie", "psma", "tep",
+        "imagerie", "radiologique", "pirads", "resecabilite", "adenopathie",
+        "adenopathies", "tnm", "stade",
     }),
 )
 
-SUPPORTIVE = Subject(
-    key="supportive",
-    label="Soins de support, nutrition, gériatrie",
+HISTOPATHOLOGY = Subject(
+    key="histopathology",
+    label="Anatomopathologie",
     terms=frozenset({
-        "nutritionnel", "nutritionnelle", "denutrition", "cachexie", "geriatrique",
-        "oncogeriatrique", "fragilite", "palliatif", "palliative", "tabagique", "sevrage",
-        "support", "douleur", "sociale",
+        "ptnm", "gleason", "isup", "histologique", "histologie", "anatomopathologique",
+        "anatomopathologie", "biopsie", "biopsies", "carottes", "relecture",
+        "immunohistochimie", "emboles", "variante", "variantes",
+    }),
+)
+
+# **Split from one `supportive` subject, because three specialities would otherwise be
+# indistinguishable.** Nutrition, oncogeriatrics and palliative care all hold supportive-care
+# remits, and merged they produce three identical lines on a fiche saying a point was unaddressed
+# by three agents, none of which distinguishes *"the nutritionist said nothing about cachexia"*
+# from *"the palliative agent said nothing about pain"*.
+#
+# Nutrition is tested first of the three deliberately. The oncogeriatric brain evaluates
+# nutritional state as part of its own assessment, while the nutrition brain says it does *not*
+# perform the global geriatric assessment — so the overlap runs one way, and classifying an
+# ambiguous point as `nutrition` keeps both specialities answerable for it, where `frailty`
+# would excuse the nutritionist. The more conservative reading is the one that stays visible.
+NUTRITION = Subject(
+    key="nutrition",
+    label="Nutrition clinique",
+    terms=frozenset({
+        "nutritionnel", "nutritionnelle", "nutrition", "denutrition", "denutri", "cachexie",
+        "sarcopenie", "albuminemie", "prealbumine", "mna", "amaigrissement", "dietetique",
+    }),
+)
+
+FRAILTY = Subject(
+    key="frailty",
+    label="Oncogériatrie et fragilité",
+    terms=frozenset({
+        "geriatrique", "oncogeriatrique", "geriatrie", "fragilite", "fragile", "g8", "adl",
+        "iadl", "autonomie", "cognitive", "cognitif", "chute", "chutes", "comorbidites",
+    }),
+)
+
+PALLIATIVE = Subject(
+    key="palliative",
+    label="Soins de support et palliatifs",
+    terms=frozenset({
+        "palliatif", "palliative", "palliatifs", "tabagique", "sevrage", "support",
+        "douleur", "douloureuse", "antalgique", "antalgie", "symptomes", "sociale",
+        "psychologique", "pallia",
     }),
 )
 
@@ -177,8 +225,18 @@ CYTOTOXICS = frozenset({
 # radiotherapy precede the systemic subjects so that "adjuvant after cystectomy" is read as the
 # systemic decision it is, only once the surgical subjects have declined it.
 SUBJECTS: tuple[Subject, ...] = (
-    SUPPORTIVE,
+    # The three supportive subjects keep the precedence the single `supportive` subject had.
+    NUTRITION,
+    FRAILTY,
+    PALLIATIVE,
     RADIOTHERAPY,
+    # Named investigations precede the treatment pathways that share their anatomy words: a
+    # bone scan is an investigation, and `osseuse` in the hormonal set would otherwise read
+    # "scintigraphie osseuse" as a statement about bone health under androgen deprivation.
+    # Radiotherapy still wins, so "volumes cibles définis sur la TDM de simulation" stays a
+    # radiotherapy decision.
+    IMAGING,
+    HISTOPATHOLOGY,
     # The explicit drug decision is tested before anything that merely mentions a drug.
     SYSTEMIC_CHOICE,
     # Hormonal therapy precedes the technique subject, because its own vocabulary of sequencing
@@ -191,7 +249,6 @@ SUBJECTS: tuple[Subject, ...] = (
     SYSTEMIC_TECHNIQUE,
     SYSTEMIC_OTHER,
     SURGERY,
-    STAGING,
 )
 
 # --- the policy -------------------------------------------------------------------------------
@@ -199,65 +256,78 @@ SUBJECTS: tuple[Subject, ...] = (
 REPORT = True
 SUPPRESS = False
 
-# (subject, silent speciality) -> whether the board sees it.
+# What each speciality is expected to hold a view on.
 #
-# Given by a clinician against the measured inventory. Where a subject is reportable whichever
-# speciality stayed silent, both entries say so rather than the table carrying a wildcard: the
-# next five specialities will add rows here, and a wildcard would silently answer for them.
-POLICY: dict[tuple[str, str], bool] = {
-    # 1a — the urologist proposes a pathway that runs through a drug, so the drug decision is
-    # part of its own plan. This is the carboplatin case the whole category exists for.
-    ("systemic_choice", "urology_oncology"): REPORT,
-    # 1b — how a drug is administered, and what comes second in advanced disease. The
-    # urologist's plan does not turn on these.
-    ("systemic_technique", "urology_oncology"): SUPPRESS,
-    ("systemic_other", "urology_oncology"): SUPPRESS,
-    # 2 — surgical technique. A chemotherapy specialist having no view on which diversion to
-    # build is the division of labour working. Same for the radiation oncologist.
-    ("surgery", "medical_oncology"): SUPPRESS,
-    ("surgery", "radiation_oncology"): SUPPRESS,
-    # 3 — the urologist initiates the androgen-deprivation pathway, so its silence on that
-    # pathway is a hole in its own plan. The radiation oncologist delivers ADT alongside
-    # EBRT, so its silence there is a hole in its own plan too.
-    ("hormonal", "urology_oncology"): REPORT,
-    ("hormonal", "radiation_oncology"): REPORT,
-    # 4 — staging completeness belongs to radiology and urology. The radiation oncologist
-    # needs staging for target volumes.
-    ("staging", "medical_oncology"): SUPPRESS,
-    ("staging", "radiation_oncology"): REPORT,
-    # 5 and 6 — supportive care is shared ground; both original specialities are expected to
-    # address it. The radiation oncologist manages pain, nutrition during pelvic RT, and
-    # smoking cessation.
-    ("supportive", "medical_oncology"): REPORT,
-    ("supportive", "urology_oncology"): REPORT,
-    ("supportive", "radiation_oncology"): REPORT,
-    # 7 — radiotherapy as a shared decision. Urology shares the bladder-preservation choice
-    # with radiation oncology, so urology silent on radiotherapy is a gap. But medical
-    # oncology silent on fractionation, dose, or target volumes is the division of labour:
-    # those are not its domain.
-    ("radiotherapy", "urology_oncology"): REPORT,
-    ("radiotherapy", "medical_oncology"): SUPPRESS,
-    # The radiation oncologist silent on a radiotherapy point raised by someone else. This is
-    # the speciality that owns the subject saying nothing about it -- the shape the whole
-    # category exists to catch, and the radiotherapy equivalent of the carboplatin case. It was
-    # reaching the board on the default rather than on a rule, which is how
-    # `("radiotherapy", "medical_oncology")` came to be wrong: a verdict nobody had given,
-    # reading as one that had been.
-    ("radiotherapy", "radiation_oncology"): REPORT,
-    # 8 — systemic therapy. The radiation oncologist's pathway runs through irradiation, not
-    # chemotherapy. Its silence on systemic drug choice, administration, or general
-    # indication is division of labour.
-    ("systemic_choice", "radiation_oncology"): SUPPRESS,
-    ("systemic_technique", "radiation_oncology"): SUPPRESS,
-    ("systemic_other", "radiation_oncology"): SUPPRESS,
+# **One declaration per speciality, not one ruling per pair.** The first version of this policy
+# was a grid of `(subject, silent speciality)` verdicts. Measured against itself, that grid
+# turned out to carry no cell-specific information at all: every one of its eighteen rulings was
+# reproducible from a single set per speciality, because the question being answered was never
+# about the pair. It was always *is this subject inside that speciality's remit* — a property of
+# the speciality alone. The grid was the expensive way of writing it down, it grows as
+# specialities × subjects, and its omissions are invisible: a missing cell looks exactly like a
+# cell nobody has reached yet.
+#
+# **And the remit is already written, by a clinician, in the agent's own brain.** Every brain in
+# `docs/implementation/` has the same two sections — *"Vous évaluez … Cela inclut :"* and *"Vous
+# ne décidez pas :"*. That is the remit. The sets below are transcriptions of those sections into
+# subject keys, and they belong beside the brain they came from; keeping them here is what lets
+# the two drift, and reviewing them together is what stops it.
+#
+# A speciality with no entry is not ruled on: its silences reach the board, which is what the
+# five unwired specialities need until their remit is reviewed.
+REMIT: dict[str, frozenset[str]] = {
+    # Proposes the surgical pathway and initiates androgen deprivation, so the drug decision
+    # inside a pathway it is proposing — *which* drug, and whether the patient can take it — is
+    # part of its own plan. Bladder preservation is the alternative to the cystectomy it offers,
+    # so radiotherapy is shared ground. How a drug is administered, and what comes second in
+    # advanced disease, are not: its plan does not turn on them.
+    "urology_oncology": frozenset({
+        "surgery", "systemic_choice", "hormonal", "radiotherapy", "imaging",
+        "histopathology", "nutrition", "frailty", "palliative",
+    }),
+    # Owns systemic therapy in all three of its senses. Surgical technique, target volumes and
+    # the reading of a slide belong to others.
+    "medical_oncology": frozenset({
+        "systemic_choice", "systemic_technique", "systemic_other", "hormonal",
+        "nutrition", "frailty", "palliative",
+    }),
+    # *"Vous évaluez la place de la radiothérapie … l'association radiothérapie-hormonothérapie:
+    # durée de l'ADT selon le risque"*, and staging because target volumes depend on it.
+    # *"Vous ne décidez pas de la technique chirurgicale … du choix des protocoles de
+    # chimiothérapie ou d'immunothérapie systémique."*
+    "radiation_oncology": frozenset({
+        "radiotherapy", "hormonal", "imaging", "histopathology",
+        "nutrition", "frailty", "palliative",
+    }),
+    # --- Declared from the written brains, not yet exercised by a run. ------------------------
+    #
+    # These five are transcribed from brains a clinician wrote and have not been measured
+    # against a batch, because their agents are not wired. They are here rather than absent so
+    # that wiring an agent is one reviewed declaration instead of eight rulings asked afterwards
+    # — and so the transcription can be checked against the brain before it decides anything.
+    #
+    # *"Vous ne décidez pas de l'interprétation des lames anatomopathologiques."*
+    "radiology": frozenset({"imaging"}),
+    # *"Vous ne décidez pas de la stadification clinique (cTNM) à partir de l'imagerie."*
+    "pathology": frozenset({"histopathology"}),
+    # Evaluates nutritional state as part of its own assessment — MNA, albuminaemia, weight
+    # loss — so its remit covers nutrition as well as frailty.
+    "geriatric_frailty": frozenset({"frailty", "nutrition"}),
+    # *"Vous ne décidez pas … de l'évaluation gériatrique globale (G8, ADL — mais vous en tenez
+    # compte)."* Taking something into account is not holding a view on it, so the overlap with
+    # oncogeriatrics runs one way only.
+    "nutrition": frozenset({"nutrition"}),
+    # Pain, symptoms, Pallia-10, social assessment. *"Vous ne décidez pas … de l'évaluation
+    # gériatrique standardisée."*
+    "palliative_supportive": frozenset({"palliative"}),
 }
 
-# What to do with a combination nobody has ruled on.
+# What to do with a silence nobody has ruled on.
 #
 # **Reported, not suppressed.** Hiding a gap because no one has decided it would be a silent
 # choice made by an omission, and this project's rule throughout is that absence is visible.
 # A wrongly reported gap costs a line on a page; a wrongly hidden one costs the thing the
-# category was built to catch. The five specialities still to be wired will land here first.
+# category was built to catch.
 UNRULED = REPORT
 
 
@@ -302,15 +372,26 @@ def subject_of(point: str) -> Subject:
 
 def reports(point: str, silent_role: str) -> bool:
     """Whether this silence should reach the board."""
-    return POLICY.get((subject_of(point).key, silent_role), UNRULED)
+    return explain(point, silent_role)[1]
 
 
 def explain(point: str, silent_role: str) -> tuple[str, bool, bool]:
-    """Subject label, whether it is reported, and whether a rule actually covered it.
+    """Subject label, whether it is reported, and whether a remit actually decided it.
 
     The third value separates *decided* from *defaulted*, so a run can report how much of its
     output rests on judgements nobody has made yet.
+
+    **An unclassified point is never suppressed by a remit.** A remit says which subjects a
+    speciality owns, and it cannot speak to a subject the taxonomy has not named — so a point
+    landing in `other` is reported whoever stayed silent, and counts as undecided. Suppressing
+    it instead would let the vocabulary quietly rule on clinical content by failing to
+    recognise it, which is the one way this policy could hide a gap without anyone choosing to.
     """
     subject = subject_of(point)
-    key = (subject.key, silent_role)
-    return subject.label, POLICY.get(key, UNRULED), key in POLICY
+    if subject is OTHER:
+        return subject.label, UNRULED, False
+
+    remit = REMIT.get(silent_role)
+    if remit is None:
+        return subject.label, UNRULED, False
+    return subject.label, subject.key in remit, True

@@ -15,6 +15,7 @@ from rcpia.pps.generator import build_panel
 
 UROLOGY = "urology_oncology"
 ONCOLOGY = "medical_oncology"
+RADIATION = "radiation_oncology"
 
 
 # --- The subject a point belongs to -----------------------------------------------------------
@@ -215,6 +216,118 @@ def test_a_point_in_no_subject_is_reported() -> None:
     point = "Un point sans vocabulaire reconnu."
     assert gap_policy.subject_of(point) is gap_policy.OTHER
     assert gap_policy.reports(point, UROLOGY)
+
+
+# --- The remit, and the splits that make it expressible ---------------------------------------
+
+
+def test_every_ruling_the_grid_carried_is_reproduced_by_the_remit() -> None:
+    """The refactor's whole claim, locked in.
+
+    The policy used to be a grid of `(subject, silent speciality)` verdicts. It turned out to
+    carry no cell-specific information: every ruling followed from one set per speciality,
+    because the question was never about the pair. These are the eighteen verdicts the grid gave,
+    restated as inputs and outputs, so a change to a remit that quietly reverses one of them
+    fails here.
+    """
+    grid = {
+        ("systemic_choice", UROLOGY): True,
+        ("systemic_technique", UROLOGY): False,
+        ("systemic_other", UROLOGY): False,
+        ("surgery", ONCOLOGY): False,
+        ("surgery", RADIATION): False,
+        ("hormonal", UROLOGY): True,
+        ("hormonal", RADIATION): True,
+        ("supportive", ONCOLOGY): True,
+        ("supportive", UROLOGY): True,
+        ("supportive", RADIATION): True,
+        ("radiotherapy", UROLOGY): True,
+        ("radiotherapy", ONCOLOGY): False,
+        ("radiotherapy", RADIATION): True,
+        ("systemic_choice", RADIATION): False,
+        ("systemic_technique", RADIATION): False,
+        ("systemic_other", RADIATION): False,
+        ("staging", ONCOLOGY): False,
+        ("staging", RADIATION): True,
+    }
+    # `supportive` and `staging` were each split, so the old verdict must hold for every subject
+    # they became -- that is what makes the split behaviour-preserving rather than merely finer.
+    became = {
+        "supportive": ("nutrition", "frailty", "palliative"),
+        "staging": ("imaging", "histopathology"),
+    }
+    for (subject, role), expected in grid.items():
+        for key in became.get(subject, (subject,)):
+            assert (key in gap_policy.REMIT[role]) is expected, f"{key} / {role}"
+
+
+def test_radiology_and_pathology_disown_each_others_half_of_staging() -> None:
+    """The reason `staging` had to be split.
+
+    The radiology brain says it does not decide the reading of pathology slides; the pathology
+    brain says it does not decide clinical staging from imaging. One `staging` subject merged
+    exactly the two things they are stated to be disjoint about, so it could not tell a hole
+    from the division of labour for either of them.
+    """
+    slide = "Relecture des lames et du score de Gleason avant décision thérapeutique."
+    scan = "Compléter la stadification par une IRM prostatique et une scintigraphie osseuse."
+    assert gap_policy.subject_of(slide).key == "histopathology"
+    assert gap_policy.subject_of(scan).key == "imaging"
+
+    assert gap_policy.reports(slide, "pathology")
+    assert not gap_policy.reports(slide, "radiology")
+    assert gap_policy.reports(scan, "radiology")
+    assert not gap_policy.reports(scan, "pathology")
+
+
+def test_the_three_supportive_specialities_are_told_apart() -> None:
+    """The reason `supportive` had to be split.
+
+    Merged, a point about pain reported nutrition, oncogeriatrics and palliative care as all
+    three silent -- three lines saying nothing, because the subject could not distinguish them.
+    """
+    pain = "Évaluation de la douleur et adaptation du palier antalgique."
+    cachexia = "Dénutrition sévère avec cachexie : support nutritionnel oral à instaurer."
+    frailty = "Score G8 inférieur à 14 : évaluation gériatrique approfondie nécessaire."
+
+    assert gap_policy.reports(pain, "palliative_supportive")
+    assert not gap_policy.reports(pain, "nutrition")
+    assert gap_policy.reports(cachexia, "nutrition")
+    assert not gap_policy.reports(cachexia, "palliative_supportive")
+    assert gap_policy.reports(frailty, "geriatric_frailty")
+    assert not gap_policy.reports(frailty, "nutrition")
+
+
+def test_the_nutrition_overlap_runs_one_way_because_the_brains_say_so() -> None:
+    """Oncogeriatrics evaluates MNA and albuminaemia as part of its own assessment, so nutrition
+    is inside its remit. The nutrition brain says it does *not* perform the global geriatric
+    assessment -- taking something into account is not holding a view on it."""
+    assert "nutrition" in gap_policy.REMIT["geriatric_frailty"]
+    assert "frailty" not in gap_policy.REMIT["nutrition"]
+
+
+def test_an_unclassified_point_is_never_suppressed_by_a_remit() -> None:
+    """A remit names the subjects a speciality owns, and cannot speak to one nobody has named.
+
+    Suppressing an unrecognised point would let the vocabulary rule on clinical content by
+    failing to recognise it -- the one way this policy could hide a gap without anyone choosing
+    to. The live examples are real: constitutional genetic testing, JJ stent management,
+    preoperative respiratory assessment.
+    """
+    point = "Demande de tests génétiques constitutionnels et d'analyse moléculaire tumorale."
+    assert gap_policy.subject_of(point) is gap_policy.OTHER
+    for role in gap_policy.REMIT:
+        _, reported, ruled = gap_policy.explain(point, role)
+        assert reported is gap_policy.REPORT, role
+        assert ruled is False, role
+
+
+def test_a_speciality_with_no_declared_remit_is_not_ruled_on() -> None:
+    """Roles the corpus knows but no panel has convened yet must stay visible."""
+    point = "Choix préférentiel d'une dérivation non continente de type Bricker."
+    _, reported, ruled = gap_policy.explain(point, "renal_safety")
+    assert reported is gap_policy.REPORT
+    assert ruled is False
 
 
 # --- The fiche ---------------------------------------------------------------------------------

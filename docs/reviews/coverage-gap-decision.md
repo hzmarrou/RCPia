@@ -443,7 +443,102 @@ the clinician rather than a classification defect.
 
 ---
 
-## 9. An interactive version
+## 9. The grid was the wrong shape: one remit per speciality
+
+Asked whether a clinician has to rule on every finding forever, the answer turned out to be no,
+and the evidence was already in the table.
+
+**The grid carried no cell-specific information.** Tested directly: every one of its eighteen
+`(subject, silent speciality)` verdicts is reproducible from a single set per speciality, with
+zero exceptions. The question being answered was never about the pair. It was always *is this
+subject inside that speciality's remit* — a property of the speciality alone. The grid was the
+expensive way of writing that down: it grows as specialities x subjects, and its omissions are
+invisible, because a missing cell looks exactly like a cell nobody has reached yet.
+
+**And the remit is already written, by a clinician, in the agent's own brain.** Every brain has
+the same two sections — *"Vous évaluez … Cela inclut :"* and *"Vous ne décidez pas :"*. The
+radiation oncology brain says it evaluates the indication for external beam radiotherapy, target
+volumes, fractionation and dose, and the associated ADT duration, and that it does not decide
+surgical technique, resectability, or systemic protocols. Map that onto subject keys and it *is*
+the remit the table encoded. The policy was a hand-transcription of a document that already
+existed, into a second vocabulary that could then drift from the first.
+
+So the rule is one line:
+
+> **A silence is reported when the subject is inside the silent speciality's own remit.**
+
+At eight specialities that is eight declarations instead of ninety-six cells, each reviewed
+beside the brain it came from.
+
+### 9a. Two subjects had to be split first
+
+Applying the remit to the five unwired brains showed the mechanism generalises and the
+*taxonomy* did not. Three specialities collapsed onto `supportive` and two onto `staging`:
+
+| Agent | Remit under the old taxonomy |
+|---|---|
+| radiology | `staging` |
+| pathology | `staging` |
+| geriatric_frailty | `supportive` |
+| nutrition | `supportive` |
+| palliative_supportive | `supportive` |
+
+Merged, a point about pain would report nutrition, oncogeriatrics and palliative care as all
+three silent: three lines on a fiche, none of which distinguishes *"the nutritionist said
+nothing about cachexia"* from *"the palliative agent said nothing about pain"*.
+
+Worse for the other pair, because the brains explicitly contradict the merge. Radiology: *"vous
+ne décidez pas de l'interprétation des lames anatomopathologiques."* Pathology: *"vous ne
+décidez pas de la stadification clinique (cTNM) à partir de l'imagerie."* Their remits are
+stated as disjoint, and `staging` merged exactly the two things they are disjoint about.
+
+The splits are drawn by the brains, not invented: `staging` becomes **`imaging`** and
+**`histopathology`**; `supportive` becomes **`nutrition`**, **`frailty`** and **`palliative`**.
+The asymmetries then become expressible — oncogeriatrics evaluates MNA and albuminaemia as part
+of its own assessment so its remit includes nutrition, while the nutrition brain says it does
+not perform the global geriatric assessment, so the overlap runs one way only.
+
+This is the same rule that produced the 1a/1b split of systemic therapy, arriving again: **a
+cell that wants to say "it depends" is telling you the subject is wrong, not the rule.**
+
+### 9b. Proved behaviour-preserving, not assumed
+
+Every verdict the policy gives on the fifteen-dossier batch was recorded before the refactor and
+compared after it:
+
+- **69 gap/silent pairs, 0 verdicts changed.**
+- 38 reported, 31 suppressed (45% filtered) — identical.
+- One pair moved from *defaulted* to *decided*: `(hormonal, medical_oncology)`, which the grid
+  had left open and the remit answers, because holding a view on androgen-deprivation modality
+  is plainly medical oncology's.
+
+Two classification defects surfaced while splitting, both of the kind already seen twice:
+*"scintigraphie osseuse"* was claimed by the hormonal pathway on the word `osseuse` — a bone
+scan read as a statement about bone health — and `extension` was too ordinary a French word to
+carry a subject at all. Named investigations are now tested before the treatment pathways that
+share their anatomy words, with radiotherapy still ahead of imaging so *"volumes cibles définis
+sur la TDM de simulation"* stays a radiotherapy decision.
+
+### 9c. What this does not solve
+
+**The subject taxonomy still needs a human.** `other` holds eight live pairs — constitutional
+genetic testing, JJ stent management, preoperative respiratory assessment, an incidental
+testicular ectopia — and those are real subjects nobody has named. Each new one is a judgement,
+but it is one judgement per subject rather than one per pair, and an unclassified point is never
+suppressed by a remit: a remit names the subjects a speciality owns and cannot speak to a
+subject the vocabulary has not recognised. Suppressing it would let the term lists rule on
+clinical content by failing to read it, which is the one way this policy could hide a gap
+without anyone choosing to.
+
+**The five unwired remits are transcriptions, not measurements.** They are declared from written
+brains and have never been exercised by a run — no gap in this batch lands in `imaging`,
+`histopathology`, `nutrition` or `frailty`, because those agents are not wired. They are
+recorded now so that wiring an agent is one reviewed declaration rather than eight rulings asked
+afterwards, and they should be read against their brains before they decide anything.
+
+---
+
+## 10. An interactive version
 
 The same questions, with the evidence folded away and the answers copyable, are published
 at the artifact link held by the project owner. Either form works; the answers are what matter.
