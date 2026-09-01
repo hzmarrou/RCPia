@@ -64,7 +64,21 @@ curl -s -c /tmp/jar -X POST localhost:8000/auth/login -H 'Content-Type: applicat
 # a case, then the dossier
 CASE=$(curl -s -b /tmp/jar -X POST localhost:8000/cases -H 'Content-Type: application/json' \
   -d '{"reference":"SMOKE-01","cancer_type":"bladder"}' | python -c "import sys,json;print(json.load(sys.stdin)['id'])")
-curl -s -b /tmp/jar -X POST "localhost:8000/cases/$CASE/documents" -F "file=@<dossier>.docx"
+curl -s -o /tmp/upload.json -w 'upload http=%{http_code}\n' \
+  -b /tmp/jar -X POST "localhost:8000/cases/$CASE/documents" -F "file=@<dossier>.docx"
+```
+
+**Check that line printed `http=201`, and stop if it did not.** An upload can fail without the
+rest of the chain saying anything: the case exists, the runbook continues, and nothing is ever
+parsed. `-s` alone hides it, which is why the status code is printed rather than discarded.
+`http=000` means curl abandoned the request before the server saw it — an unreadable path, or a
+`;type=` suffix on the `-F` argument, which curl rejects rather than sends.
+
+Confirm the document actually landed before spending model time on the panel:
+
+```sql
+SELECT count(*) FROM uploaded_documents d JOIN cases c ON c.id = d.case_id
+WHERE c.reference = 'SMOKE-01';   -- expect 1
 ```
 
 Then watch the chain settle:
