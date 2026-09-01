@@ -76,6 +76,12 @@ class NarrativeExtraction:
     # Wall time of the model call, so the cost of the second pass is measured rather than
     # estimated. Zero when no call was made.
     seconds: float = 0.0
+    # **Whether the pass ran at all, which the counts alone cannot say.** An empty result
+    # has two causes that look identical in an audit record and mean opposite things: the
+    # model was asked and found nothing, or no model was configured and nothing was asked.
+    # Fifteen deployed extractions recorded zero wanted and zero found while the worker was
+    # passing no adapter, and the record read like a clean run.
+    ran: bool = False
 
     @property
     def notes(self) -> list[str]:

@@ -139,6 +139,10 @@ async def extract_case_facts(
                 # changed can be explained — and a fill rate measured — without re-running
                 # anything. The field names are recorded, not just the counts: "it filled four
                 # fields" and "it filled the grade" are different facts about a run.
+                # False means the second pass never ran -- no model runtime configured, or
+                # no adapter passed by the caller. Without it, a worker wired without an
+                # adapter is indistinguishable from a dossier whose form answered everything.
+                "narrative_ran": narrative.ran,
                 "narrative_wanted": len(narrative.still_missing) + len(narrative.candidates),
                 "narrative_facts": len(narrative.candidates),
                 "narrative_filled": sorted(
@@ -174,7 +178,10 @@ async def _narrative_pass(
     """
     reader = reader_for(adapter, case.id)
     if reader is None:
-        return NarrativeExtraction()
+        # No model runtime, so nothing was asked. Recorded as such: the counts alone cannot
+        # tell "asked and found nothing" from "never asked", and the second reads like a
+        # clean run in an audit trail.
+        return NarrativeExtraction(ran=False)
 
     found: dict[str, str | None] = {}
     for candidate in candidates:
@@ -187,7 +194,9 @@ async def _narrative_pass(
         if _needs_narrative_reading(found.get(spec.key), spec.key)
     ]
     if not wanted:
-        return NarrativeExtraction()
+        # A genuinely empty ask: the form answered every field, so the pass ran and had
+        # nothing to do.
+        return NarrativeExtraction(ran=True)
 
     # A field cannot be both *already found* and *still wanted*. The first run of this pass on
     # dossier 8 listed `gleason = RAS` under the fields already read while also asking for
@@ -200,7 +209,7 @@ async def _narrative_pass(
     text = "\n\n".join(passage.text for passage in passages)
 
     result = await extract(reader, dossier_text=text, known=known, wanted=wanted)
-    return _made_traceable(result, passages)
+    return _made_traceable(replace(result, ran=True), passages)
 
 
 @dataclass(frozen=True)
@@ -285,6 +294,10 @@ def _made_traceable(
         rejected=rejected,
         raw_response=result.raw_response,
         seconds=result.seconds,
+        # Rebuilt field by field, so a flag added to the dataclass and forgotten here would
+        # silently reset to its default -- which for `ran` means a pass that ran reporting
+        # that it did not.
+        ran=result.ran,
     )
 
 

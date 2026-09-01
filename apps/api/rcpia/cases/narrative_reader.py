@@ -25,7 +25,7 @@ from pathlib import Path
 
 import anyio.to_thread
 
-from rcpia.agents.pi_adapter import AgentSettings, PiAdapter
+from rcpia.agents.pi_adapter import AgentSettings, PiAdapter, parse_session
 
 EXTRACTION_AGENT = "extraction"
 
@@ -68,7 +68,7 @@ class PiNarrativeReader:
 
         # A worker thread rather than asyncio's subprocess support: psycopg's async driver
         # requires the selector event loop on Windows, and that loop cannot spawn subprocesses.
-        completed = await anyio.to_thread.run_sync(
+        await anyio.to_thread.run_sync(
             partial(
                 subprocess.run,
                 command,
@@ -79,11 +79,19 @@ class PiNarrativeReader:
             )
         )
 
-        raw = completed.stdout
-        text = raw if isinstance(raw, str) else bytes(raw or b"").decode(
-            "utf-8", errors="replace"
-        )
-        return text.strip()
+        # **The answer comes from the session file, not stdout.** `build_command` runs the
+        # runtime with `--mode json`, so stdout is a stream of lifecycle events -- `session`,
+        # `message_start`, `message_end` -- and never the model's reply. Returning it handed
+        # `parse_response` a wall of event JSON, which parsed as no facts and no rejections:
+        # a real 29-second call on the one dossier this pass exists for, recorded as though
+        # the dossier had nothing to give.
+        #
+        # `parse_session` is the same reader the clinical path uses, so both take the answer
+        # from the same place and a change to the runtime's output cannot move one without
+        # the other.
+        if not session_path.is_file():
+            return ""
+        return parse_session(session_path.read_bytes()).output_text.strip()
 
 
 def reader_for(

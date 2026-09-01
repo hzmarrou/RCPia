@@ -158,6 +158,36 @@ async def check_database(session: AsyncSession) -> list[Check]:
             + ("  <- a succeeded run with zero passages means the worker has no retriever"
                if ungrounded else ""),
         ))
+    recent_extractions = (
+        await session.execute(
+            sa.text(
+                "SELECT payload->>'narrative_ran' AS ran "
+                "FROM audit_events WHERE event_type = 'case.facts_extracted' "
+                "ORDER BY created_at DESC LIMIT 5"
+            )
+        )
+    ).all()
+    if not recent_extractions:
+        checks.append(
+            Check("extraction read the prose too", False, "no extractions to inspect")
+        )
+    else:
+        # `narrative_ran` is false when no model was asked at all. The deployed worker passed
+        # no adapter for fifteen dossiers and the audit record showed zero fields wanted and
+        # zero filled, which is exactly what a dossier whose form answered everything looks
+        # like. The two are now distinguishable, and this is the check that reads it.
+        never_ran = [row for row in recent_extractions if row.ran != "true"]
+        checks.append(
+            Check(
+                "extraction read the prose too",
+                not never_ran,
+                f"last {len(recent_extractions)} extractions: "
+                + ", ".join(str(row.ran) for row in recent_extractions)
+                + ("  <- false means the narrative second pass never ran, so a diagnosis "
+                   "written in a sentence was never read"
+                   if never_ran else ""),
+            )
+        )
     return checks
 
 

@@ -117,7 +117,14 @@ def build_worker() -> Worker:
         return outcome
 
     async def handle_extract(session, job: AnalysisJob) -> JobOutcome | None:
-        outcome = await extract_case_facts(session, job)
+        # **The narrative pass, which the deployed worker was running without.** `adapter`
+        # is optional so that an environment with no model runtime still produces a ledger,
+        # and omitting it here made the second pass return empty on every dossier: fifteen
+        # extractions recorded `narrative_wanted: 0`, which reads as "nothing needed
+        # filling" and meant "nothing was asked". The same shape as the agents that ran with
+        # no brain and the worker that retrieved no passages -- built, tested, and never
+        # connected to the code that runs.
+        outcome = await extract_case_facts(session, job, adapter=adapter)
         if outcome is None:
             case = await session.get(Case, job.case_id)
             if case is not None:
