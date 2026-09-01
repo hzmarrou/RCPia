@@ -30,6 +30,30 @@ MAX_TEXT = 4000
 # has made exactly the same claim as one writing "snip-999".
 CITATION_IN_PROSE = re.compile(r"\b(?:snip|ev)-\d{1,6}\b", re.IGNORECASE)
 
+# The other id RCPia hands out, and the one the prose scan could not see: a corpus passage,
+# named after where it came from --
+# `eau.bladder-mibc.2026.6-8-1-b-radiation-therapy.01.1198`.
+#
+# Measured: a radiation oncology run failed three times as an ungrounded recommendation
+# while its rationale carried five of these, every one of them a real id from its own
+# bundle. The recommendation genuinely was ungrounded -- grounding is the structured
+# channel -- but the diagnosis was wrong, and a wrong diagnosis sends the next person
+# looking at retrieval, which was working.
+#
+# Anchored on an alphabetic source prefix (`eau`, `aua`, `nccn`, `afu`) and a numeric tail,
+# with at least four dotted segments between them, so that a decimal, a section number and
+# an ordinary French sentence cannot be read as a citation.
+CORPUS_ID_IN_PROSE = re.compile(
+    r"\b[a-z]{2,}[a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*){2,}\.\d{1,6}\b", re.IGNORECASE
+)
+
+
+def citations_in_prose(text: str) -> set[str]:
+    """Every id-shaped string in one piece of free text, folded for comparison."""
+    return {found.casefold() for found in CITATION_IN_PROSE.findall(text)} | {
+        found.casefold() for found in CORPUS_ID_IN_PROSE.findall(text)
+    }
+
 
 class Strict(BaseModel):
     """Reject unknown fields everywhere in this module."""
@@ -610,6 +634,21 @@ class UngroundedRecommendation(ValueError):
     """The agent recommended something without citing any of the evidence it was given."""
 
 
+class CitationInWrongChannel(ValueError):
+    """The agent wrote a real citation into prose instead of `evidence_references`.
+
+    Separate from `UngroundedRecommendation` because the two ask for different fixes. An
+    ungrounded recommendation may mean retrieval gave the agent nothing worth citing; a
+    citation in the wrong channel means the agent read the evidence, chose the right
+    passage, and put the reference where nothing can check it. Reporting the second as the
+    first sends the next reader to the retriever, which is not where the fault is.
+
+    This does not make prose citations count as grounding. A recommendation is grounded
+    through `evidence_references` and nowhere else -- the structured channel is what a
+    reviewer can resolve, and what the fiche renders.
+    """
+
+
 def _prose_of(output: AgentOutput) -> list[str]:
     """Every free-text field an agent could write a citation into."""
     return [
@@ -649,11 +688,7 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
     # Matched case-insensitively: an id is only miscased or fabricated, and a reviewer
     # reading "SNIP-001" would find snip-001 without difficulty.
     allowed_folded = {identifier.casefold() for identifier in allowed}
-    in_prose = {
-        found.casefold()
-        for text in _prose_of(output)
-        for found in CITATION_IN_PROSE.findall(text)
-    }
+    in_prose = {found for text in _prose_of(output) for found in citations_in_prose(text)}
 
     invented = sorted(
         {
@@ -667,6 +702,36 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
         raise UncitedEvidence(
             "L'agent a cité des preuves qui ne lui ont pas été fournies : "
             + ", ".join(invented)
+        )
+
+    # A real id, written where nothing can resolve it. Checked before grounding so the
+    # failure names what the agent actually did: an answer whose references are all in the
+    # prose reports as an ungrounded recommendation, which is true and misleading at once.
+    #
+    # Two exemptions, both measured against the runs this check would have rejected.
+    #
+    # An id already present in a structured channel is not misplaced -- an alternative
+    # carries its evidence in `evidence_ids`, and repeating it in the surrounding sentence
+    # is prose about a citation, not a citation hidden in prose.
+    #
+    # And only *guideline passages* are subject to this at all. A source snippet is a fact
+    # from this patient's own dossier, and `key_facts_used` exists precisely to name those
+    # in prose: two otherwise healthy runs, carrying eight and six references each, listed
+    # twenty-odd `snip-NNN` there. Reading that as a misplaced citation would fail an
+    # agent for using the field as intended.
+    structured = {identifier.casefold() for identifier in (on_recommendation | on_options)}
+    passages = {passage.id.casefold() for passage in bundle.inputs.guideline_passages}
+    misplaced = sorted(
+        identifier
+        for identifier in in_prose
+        if identifier in passages and identifier not in structured
+    )
+    if misplaced:
+        raise CitationInWrongChannel(
+            "citation placed in prose instead of evidence_references — "
+            "l'agent a cité des preuves dans le texte au lieu de les porter dans "
+            "`evidence_references`, où elles peuvent être vérifiées : "
+            + ", ".join(misplaced)
         )
 
     # Citing nothing is honest only when there was nothing to cite. With evidence in the
