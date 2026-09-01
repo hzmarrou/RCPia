@@ -346,16 +346,18 @@ async def _candidates_for(
 
     candidates: list[FactCandidate] = []
     for position, chunk in enumerate(chunks):
-        # A label can end one chunk with its report opening the next, so each chunk is
-        # given a look at the one after it.
-        following = chunks[position + 1] if position + 1 < len(chunks) else None
+        # A label can end one chunk with its report opening the next, and an imaging report
+        # runs across as many chunks as it has paragraphs, so each chunk is given the rest
+        # of the document to read into. Extraction stops at the next label it recognises,
+        # not at the chunk boundary.
         candidates.extend(
             extract_from_text(
                 chunk.text,
                 chunk_id=chunk.id,
                 document_id=document.id,
-                following_text=following.text if following else None,
-                following_chunk_id=following.id if following else None,
+                following_chunks=[
+                    (later.text, later.id) for later in chunks[position + 1 :]
+                ],
             )
         )
     return candidates
