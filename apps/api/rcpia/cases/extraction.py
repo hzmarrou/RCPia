@@ -43,6 +43,33 @@ BARE_SCORE_PATTERNS: dict[str, re.Pattern[str]] = {
     "who_status": re.compile(r"\bOMS\s+([0-4])\b", re.IGNORECASE),
 }
 
+# The clinical T stage a urologist writes inside the rectal-examination line.
+#
+#     Toucher rectal : T2a apex droit
+#     Toucher rectal : induration de la base gauche classé T2b.
+#
+# `T` followed by 1-4 and an optional a/b/c, as its own word. Bounded deliberately: `T2`
+# also appears throughout mpMRI reports as a sequence name ("hyposignal T2"), which is why
+# this is read only from `digital_rectal_exam` and never from the dossier at large.
+CLINICAL_T_IN_PROSE = re.compile(r"\b(c?T[1-4][a-c]?)\b")
+
+def clinical_t_from_rectal_exam(value: str) -> str | None:
+    """The cT a urologist wrote in the rectal-examination line, or nothing.
+
+    **Never inferred.** Five of the seven dossiers with a `Toucher rectal` line describe the
+    finding and stop -- "prostate ferme de plus de 60 g", "prostate dure à la palpation, de
+    paroi postérieure irrégulière". Those are the examining urologist's observations, and the
+    stage they imply is the judgment they chose not to record. Reading one out would
+    manufacture a nomogram input from a physical finding, which is the failure the whole
+    calculator layer exists to prevent.
+
+    So this returns a value only where a stage token is literally present.
+    """
+    match = CLINICAL_T_IN_PROSE.search(value)
+    if match is None:
+        return None
+    return match.group(1).lstrip("cC")
+
 # Words that name an imaging study. A label line naming one starts a *new* report and
 # therefore ends the previous one, whether or not the catalogue knows it.
 #
@@ -284,6 +311,23 @@ def extract_from_text(
                 technique_only=technique_only,
             )
         )
+
+        # The clinical T a urologist wrote inside the rectal-examination line. Emitted as its
+        # own field rather than parsed later, so the value carries the excerpt it came from
+        # and a reviewer can see the sentence that staged the patient.
+        if field_spec.key == "digital_rectal_exam" and not absent:
+            staged = clinical_t_from_rectal_exam(value)
+            if staged is not None:
+                candidates.append(
+                    FactCandidate(
+                        key="ct_dre",
+                        value=staged,
+                        excerpt=excerpt[:MAX_VALUE_LENGTH],
+                        chunk_id=source_chunk,
+                        document_id=document_id,
+                        chunk_ids=spanned,
+                    )
+                )
 
         # `Autres : ALAT : 5` also occurs under a *recognised* label.
         if _looks_like_label_line(value):

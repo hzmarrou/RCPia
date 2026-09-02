@@ -909,3 +909,52 @@ def test_a_stage_inside_the_examination_text_is_not_read_yet() -> None:
     }
 
     assert "ctnm" not in candidates
+
+
+# --------------------------------------------------------------------------------------
+# The clinical T a urologist writes inside the rectal-examination line
+# --------------------------------------------------------------------------------------
+
+
+def test_a_stage_written_in_the_rectal_exam_line_is_read() -> None:
+    """Briganti 2012 takes the DRE-derived clinical T. Two of the seven dossiers carrying a
+    `Toucher rectal` line state it mid-sentence, where the label reader walked past it — and
+    for four prostate dossiers it was the only Briganti input the ledger lacked."""
+    candidates = {c.key: c for c in extract_from_text("Toucher rectal : T2a apex droit")}
+
+    assert candidates["ct_dre"].value == "T2a"
+    # The rectal examination itself is still recorded in full.
+    assert "apex droit" in (candidates["digital_rectal_exam"].value or "")
+
+
+def test_a_stage_the_urologist_classified_is_read() -> None:
+    """`classé T2b` — the urologist stating a classification, not describing a finding."""
+    text = "Toucher rectal : induration de la base gauche classé T2b."
+    candidates = {c.key: c for c in extract_from_text(text)}
+
+    assert candidates["ct_dre"].value == "T2b"
+
+
+def test_a_described_prostate_is_not_staged() -> None:
+    """**The rule that matters.** Five of the seven dossiers describe the finding and stop.
+    Turning "prostate ferme de plus de 60 g" into a cT is the clinical judgment the examining
+    urologist made and chose not to record, and inferring it would manufacture a nomogram
+    input out of a physical finding."""
+    for described in (
+        "Toucher rectal : prostate ferme de plus de 60 g.",
+        "Toucher rectal : prostate dure à la palpation, de paroi postérieure irrégulière.",
+        "Toucher rectal : RAS",
+    ):
+        candidates = {c.key: c for c in extract_from_text(described)}
+        assert "ct_dre" not in candidates, described
+
+
+def test_a_stage_is_read_only_from_the_rectal_examination() -> None:
+    """`T2` is a magnetic-resonance sequence name as well as a stage, and mpMRI reports are
+    full of it — "plage en hyposignal T2". A rule reading stages from the dossier at large
+    would take a sequence name for a clinical stage, and an imaging-derived stage is the wrong
+    input here in any case: EAU §4.5 says clinical stage comes from the rectal examination."""
+    text = "IRM prostatique multiparamétrique : plage en hyposignal T2 de la zone périphérique."
+    candidates = {c.key: c for c in extract_from_text(text)}
+
+    assert "ct_dre" not in candidates

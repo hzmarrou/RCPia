@@ -300,6 +300,33 @@ FIELDS: tuple[FactField, ...] = (
         "ctnm", ("ctnm", "stade clinique"),
         FactCategory.pathology,
     ),
+    # **The clinical T alone, from the digital rectal examination, and nothing else.**
+    #
+    # Briganti 2012 takes PSA, this stage, the primary and secondary biopsy Gleason patterns
+    # and the percentage of positive systematic cores. It does **not** take cN or cM: those
+    # are not regression inputs, and requiring a complete `ctnm` string before the nomogram
+    # would run made it refuse every dossier for a variable the model never asked for.
+    #
+    # Kept apart from `ctnm` for the same reason `ctnm` is kept apart from `ptnm`: the source
+    # decides whether the value may be used. EAU §4.5 is explicit — *"Clinical stage should be
+    # based on digital rectal examination only; additional staging information based on
+    # imaging or pathology should be reported separately."* A T stage read off an mpMRI is a
+    # real fact and the wrong input here; the narrative pass filled exactly that on one
+    # dossier (`T3aNOMx`, quoted from an MRI report) and it must not reach a nomogram.
+    #
+    # No dossier carries a label for it. Two of the seven with a `Toucher rectal` line state
+    # the stage inside the sentence:
+    #
+    #     dossier 3   Toucher rectal : T2a apex droit
+    #     dossier 7   Toucher rectal : induration de la base gauche classé T2b.
+    #
+    # The other five describe the finding and stop — "prostate ferme de plus de 60 g". Those
+    # must stay empty. Turning a description into a cT is the clinical judgment the examining
+    # urologist made and did not write down.
+    FactField(
+        "ct_dre", ("stade clinique tr",),
+        FactCategory.examination, cancer_types=(PROSTATE,),
+    ),
     # Likewise `Grade`: prostate grades with Gleason and ISUP below, and 8/8 real prostate
     # dossiers reported their grade missing while the value sat in the text.
     FactField("grade", ("grade",), FactCategory.pathology, required_for=(BLADDER,)),
