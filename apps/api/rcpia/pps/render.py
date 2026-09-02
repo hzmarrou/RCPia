@@ -347,6 +347,8 @@ def render_markdown(document: PpsDocument) -> str:
             "raisonnement complet figure en annexe.",
             "",
         ]
+    out += _nomograms(document)
+
     for index, step in enumerate(document.treatments.steps, start=1):
         out += _step(step, index)
 
@@ -476,6 +478,88 @@ def _evidence_register(document: PpsDocument) -> list[str]:
             f"| `{_escape(entry.id)}` | {_escape(entry.quote)} | {_escape(entry.supports)} |"
         )
     return [*out, ""]
+
+
+# How each endpoint is named for a reader. The keys are the calculators' own, which are
+# English and terse because they are code; a tumour board reads French.
+ENDPOINT_LABELS = {
+    "lymph_node_invasion_percent": "Envahissement ganglionnaire",
+    "lni_percent": "Envahissement ganglionnaire",
+    "ocd_percent": "Maladie confinée à l'organe",
+    "ece_percent": "Extension extracapsulaire",
+    "svi_percent": "Invasion des vésicules séminales",
+    "progression_free_5y_percent": "Survie sans progression à 5 ans",
+}
+
+# The calculators name their inputs in the published models' terms, which are English and
+# terse because they are code. The same names on a tumour-board document would be the one
+# place this project speaks to clinicians in the vocabulary of its own schema.
+INPUT_LABELS = {
+    "age_years": "âge",
+    "psa_ng_ml": "PSA",
+    "clinical_t_stage_dre": "stade clinique T (TR)",
+    "gleason_primary": "Gleason primaire",
+    "gleason_secondary": "Gleason secondaire",
+    "gleason_grade_group": "groupe ISUP",
+    "systematic_positive_cores": "carottes positives",
+    "systematic_negative_cores": "carottes négatives",
+    "systematic_total_cores": "carottes totales",
+    "positive_systematic_cores_percent": "carottes positives (%)",
+    "hormone_therapy": "antécédent d'hormonothérapie",
+    "radiation_therapy": "antécédent de radiothérapie",
+}
+
+
+def _field_label(key: str) -> str:
+    return INPUT_LABELS.get(key, key.replace("_", " "))
+
+
+def _nomograms(document: PpsDocument) -> list[str]:
+    """Computed risks, printed with the model that produced them and its limits.
+
+    **Never a bare percentage.** A figure on a tumour-board document is indistinguishable
+    from an estimate unless it carries its source, and the whole reason this layer exists is
+    that a language model asked for a probability will produce a convincing one. So the model
+    name, the inputs it used and its limitation travel with the number.
+
+    A refusal prints too, naming the measurement it lacks — that is an instruction to the
+    board, where an absent row is merely a silence nobody questions.
+    """
+    if not document.nomograms:
+        return []
+
+    out: list[str] = ["**Scores calculés**", ""]
+    for figure in document.nomograms:
+        if figure.estimates:
+            rows = [
+                (
+                    ENDPOINT_LABELS.get(key, key),
+                    f"{value:.1f} %".replace(".", ","),
+                )
+                for key, value in figure.estimates.items()
+            ]
+            out += [f"*{_inline(figure.display_name)}*", ""]
+            out += _table(rows)
+            out.append("")
+            if figure.inputs_used:
+                used = ", ".join(
+                    f"{_inline(_field_label(key))} {_inline(value)}"
+                    for key, value in figure.inputs_used.items()
+                    if not key.endswith("_used") and not key.startswith("model_")
+                )
+                out += [f"Données utilisées : {used}.", ""]
+        else:
+            missing = ", ".join(
+                _inline(_field_label(item)) for item in figure.missing_fields
+            )
+            out += [
+                f"*{_inline(figure.display_name)}* — non calculé"
+                + (f" : donnée manquante ({missing})." if missing else "."),
+                "",
+            ]
+        if figure.limitation:
+            out += [f"> {_inline(figure.limitation)}", ""]
+    return out
 
 
 def _appendices(document: PpsDocument) -> list[str]:

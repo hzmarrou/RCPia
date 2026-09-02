@@ -166,6 +166,36 @@ class EvidenceEntry(Strict):
     page: int | None = None
 
 
+class NomogramFigure(Strict):
+    """One validated calculator's answer, as the board reads it.
+
+    **A computed figure, never an agent's estimate.** The clinician asked for exactly this
+    separation — *nous voulons éviter que le modèle estime lui-même un risque sans utiliser le
+    calculateur validé* — and a number printed on a tumour-board document is where that
+    distinction either holds or is lost, because a plausible estimate and a nomogram's output
+    look identical on the page.
+
+    So the figure never appears without its model, its version and its limitation. Briganti
+    2012's coefficients were reconstructed from a published graphic rather than released as an
+    equation; a reader who cannot see that cannot weigh the number.
+
+    **A refusal is printed too.** "MSKCC : manque l'antécédent d'hormonothérapie" tells the
+    board what to obtain, and is more use to them than an absent row they never think to ask
+    about.
+    """
+
+    display_name: str
+    status: str
+    # Endpoint label to percentage, already rounded for display. Several for MSKCC: organ
+    # confinement drives nerve-sparing and nodal involvement drives the dissection, and those
+    # are separate decisions that a single number would collapse.
+    estimates: dict[str, float] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    inputs_used: dict[str, str] = Field(default_factory=dict)
+    limitation: str = ""
+    source_url: str = ""
+
+
 class RationaleAppendix(Strict):
     """One agent's reasoning, at most one A4 page — the cap the design fixes."""
 
@@ -344,6 +374,10 @@ class PpsDocument(Strict):
     # Empty unless a synthesis agent reconciled several specialists.
     panel: PanelAgreement = Field(default_factory=PanelAgreement)
     treatments: Treatments
+    # Printed inside section 3, before the proposals: the nodal-invasion risk is what decides
+    # whether an extended dissection is proposed, and reading the proposal before its input is
+    # backwards. Empty for a bladder case, where the prostate models do not apply.
+    nomograms: list[NomogramFigure] = Field(default_factory=list)
     support: SupportCare
     social: SocialAssessment
     framework: CareFramework

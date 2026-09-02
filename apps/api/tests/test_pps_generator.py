@@ -1513,3 +1513,94 @@ def test_the_rendered_block_states_that_silence_is_not_consent() -> None:
     # The block belongs before the plan: a reader should know what was disputed before
     # reading what is proposed.
     assert body.index("Concordance du panel") < body.index("PROPOSITIONS DE TRAITEMENTS")
+
+
+# --------------------------------------------------------------------------------------
+# Computed scores on the fiche
+# --------------------------------------------------------------------------------------
+
+PROSTATE_FACTS = {
+    "age": "70",
+    "psa_total": "7.53",
+    "gleason": "7 (3+4)",
+    "ct_dre": "T2a",
+    "cores_positive": "5",
+    "cores_total": "21",
+    "hormone_therapy": "Non",
+    "radiation_therapy": "Non",
+}
+
+
+def test_a_computed_score_reaches_the_fiche_with_its_model_named() -> None:
+    """**A percentage on a tumour-board document is indistinguishable from an estimate**
+    unless it carries its source, and the whole reason this layer exists is that a language
+    model asked for a probability produces a convincing one."""
+    from rcpia.pps.generator import build_nomograms
+
+    figures = build_nomograms(dict(PROSTATE_FACTS), cancer_type="prostate")
+    briganti = next(f for f in figures if "Briganti" in f.display_name)
+
+    assert briganti.estimates["lymph_node_invasion_percent"] == pytest.approx(3.06, abs=0.01)
+    assert briganti.inputs_used["psa_ng_ml"] == "7.53"
+
+
+def test_the_reconstruction_caveat_is_printed_not_stored() -> None:
+    """Briganti 2012's coefficients were read off a published graphic rather than released as
+    an equation. A reader who cannot see that cannot weigh the number, so it travels onto the
+    page rather than living in a docstring."""
+    from rcpia.pps.generator import build_nomograms
+    from rcpia.pps.render import _nomograms
+
+    class Document:
+        nomograms = build_nomograms(dict(PROSTATE_FACTS), cancer_type="prostate")
+
+    rendered = "\n".join(_nomograms(Document()))
+
+    assert "Coefficients reconstruits" in rendered
+    assert "non une décision" in rendered
+
+
+def test_a_refusal_is_printed_and_names_what_is_missing() -> None:
+    """An absent row is a silence nobody questions; "manque l'antécédent d'hormonothérapie"
+    is an instruction the board can act on."""
+    from rcpia.pps.generator import build_nomograms
+    from rcpia.pps.render import _nomograms
+
+    silent = {k: v for k, v in PROSTATE_FACTS.items() if "therapy" not in k}
+
+    class Document:
+        nomograms = build_nomograms(silent, cancer_type="prostate")
+
+    rendered = "\n".join(_nomograms(Document()))
+
+    assert "non calculé" in rendered
+    assert "antécédent d'hormonothérapie" in rendered
+
+
+def test_the_board_reads_french_not_schema_keys() -> None:
+    """The calculators name their inputs in the published models' terms, which are code. The
+    fiche is the one place those must not appear."""
+    from rcpia.pps.generator import build_nomograms
+    from rcpia.pps.render import _nomograms
+
+    class Document:
+        nomograms = build_nomograms(dict(PROSTATE_FACTS), cancer_type="prostate")
+
+    rendered = "\n".join(_nomograms(Document()))
+
+    assert "psa_ng_ml" not in rendered
+    assert "hormone_therapy" not in rendered
+    assert "PSA 7.53" in rendered
+
+
+def test_a_bladder_fiche_carries_no_prostate_score() -> None:
+    """Briganti and the MSKCC prostate models have nothing to say about a bladder tumour, and
+    an empty block prints nothing at all."""
+    from rcpia.pps.generator import build_nomograms
+    from rcpia.pps.render import _nomograms
+
+    class Document:
+        nomograms = build_nomograms({"psa_total": "7.5"}, cancer_type="bladder")
+
+    assert Document.nomograms == []
+    assert _nomograms(Document()) == []

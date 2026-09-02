@@ -30,6 +30,7 @@ from rcpia.agents.schemas import (
 from rcpia.cases import completeness
 from rcpia.cases.ledger import AMBER, LedgerEntry, display_label, latest_version
 from rcpia.core.models import AgentRun, AgentRunStatus, Case, CaseLedgerVersion
+from rcpia.nomograms import evaluate_all
 from rcpia.pps import gap_policy
 from rcpia.pps.schemas import (
     CareFramework,
@@ -37,6 +38,7 @@ from rcpia.pps.schemas import (
     EvidenceEntry,
     Field2,
     MissingItem,
+    NomogramFigure,
     PanelAgreement,
     PanelPoint,
     PpsDocument,
@@ -342,6 +344,32 @@ def build_support(
         location=None,
         status=support_rules.COMPLETED_BY_RCP,
     )
+
+
+def build_nomograms(
+    values: dict[str, str | None], *, cancer_type: str
+) -> list[NomogramFigure]:
+    """Run the validated calculators over the ledger this document was built from.
+
+    Computed here rather than read off an agent's answer: the point of the layer is that the
+    number on the page is the nomogram's, not a model's impression of it, and the only way to
+    guarantee that is to compute it from the ledger ourselves.
+    """
+    facts = {key: value for key, value in values.items() if value}
+    figures: list[NomogramFigure] = []
+    for result in evaluate_all(facts, cancer_type=cancer_type):
+        figures.append(
+            NomogramFigure(
+                display_name=result.display_name,
+                status=str(result.status),
+                estimates=dict(result.estimates),
+                missing_fields=list(result.missing_fields),
+                inputs_used=dict(result.inputs_used),
+                limitation=result.provenance.limitation if result.provenance else "",
+                source_url=result.provenance.source_url if result.provenance else "",
+            )
+        )
+    return figures
 
 
 def build_social(values: dict[str, str | None]) -> SocialAssessment:
@@ -776,6 +804,7 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
         # block and the renderer prints nothing.
         panel=build_panel(lead_output, roles, crashed),
         treatments=build_treatments(lead_output),
+        nomograms=build_nomograms(values, cancer_type=str(case.cancer_type)),
         support=build_support(values, agent_roles=roles, contested=contested),
         social=build_social(values),
         framework=build_framework(
