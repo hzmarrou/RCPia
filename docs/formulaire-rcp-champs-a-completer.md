@@ -1,8 +1,25 @@
-# Données manquantes à recueillir dans les nouveaux dossiers
+# Champs du formulaire RCP à compléter à la source
 
-À l'attention des cliniciens qui constituent la nouvelle série de dossiers RCP.
+À l'attention des cliniciens qui remplissent le formulaire, **avant** que le dossier n'arrive
+dans RCPia.
 
-## Pourquoi ce document
+## Ce document ne remplace pas l'application
+
+RCPia signale déjà les manques : après le dépôt d'un dossier, le tableau de données affiche
+**en rouge** les champs absents et **en orange** les valeurs incertaines ou contradictoires,
+chaque ligne pouvant être corrigée à l'écran. Lorsqu'un manque rend l'analyse impossible, la
+RCP n'est pas lancée du tout tant que le champ n'est pas renseigné.
+
+Ce document porte sur l'étape d'avant : **le formulaire papier**. Un champ rempli à la source
+coûte quelques secondes ; le même champ retrouvé après coup demande de rouvrir le dossier,
+parfois de rappeler un confrère, souvent le jour de la RCP.
+
+Deux champs ne peuvent d'ailleurs pas être réclamés par l'application aujourd'hui : la
+**radiothérapie antérieure** n'a pas encore de case dans le tableau de données, et les
+**scores chiffrés** renseignés « RAS » s'affichent comme renseignés alors qu'ils ne le sont
+pas. Pour ceux-là, la saisie initiale est le seul filet.
+
+## Ce que nous avons mesuré
 
 RCPia a analysé quinze dossiers réels. Les agents spécialistes ont refusé de conclure dans
 **8 avis sur 42** — non pas par prudence excessive, ni par défaut technique, mais parce que
@@ -145,8 +162,26 @@ l'éligibilité au cisplatine, à la chirurgie lourde et à la radiochimiothéra
 
 Un chiffre, ou la mention explicite « non réalisé », lève l'ambiguïté.
 
-Même remarque pour **IPSS** (`RAS` dans 11 dossiers), **albuminémie** (`RAS` dans 12) et
-**DFG** (`RAS` dans 10).
+Même remarque pour **IPSS** (`RAS` dans 11 dossiers), **albuminémie** (`RAS` dans 12), **DFG**
+(`RAS` dans 10), **MNA**, **ADL** et **IIEF-5**.
+
+**Pourquoi l'application ne vous le signale pas encore.** RCPia sait déjà que « RAS » ne peut
+pas répondre à un type histologique, un grade de Gleason ou un stade : ces champs passent au
+rouge. Mais un score chiffré marqué « RAS » s'affiche aujourd'hui comme renseigné, donc sans
+alerte. La distinction manquante est simple :
+
+- « RAS » est une réponse valable pour un **symptôme** — pas d'hématurie, pas d'allergie, pas
+  d'antécédent familial ;
+- « RAS » n'est pas une réponse pour une **mesure** : un score est un chiffre, ou il n'a pas été
+  réalisé.
+
+Le point est signalé côté développement. En attendant, un score chiffré à la saisie évite
+l'ambiguïté entièrement.
+
+**Cas particulier : le nombre de carottes positives.** Quatre dossiers portent `RAS` sur ce
+champ. Impossible de savoir s'il faut lire « aucune carotte positive » ou « nombre non
+relevé » — et pour un nomogramme, ces deux lectures donnent des résultats très différents.
+Merci d'écrire le chiffre, fût-il zéro.
 
 ---
 
@@ -209,6 +244,8 @@ doit s'abstenir plutôt que de raisonner comme en première intention.
 
 Le système n'attend pas un dossier parfait. Il est conçu pour dire ce qui manque plutôt que
 pour combler les vides, et un dossier incomplet produit un avis provisoire utile assorti d'une
-liste de ce qu'il faut obtenir.
+liste de ce qu'il faut obtenir. L'application affiche ces manques en rouge et permet de les
+corriger à l'écran.
 
-Les champs ci-dessus sont ceux qui, à eux seuls, transforment un refus en recommandation.
+Les champs ci-dessus sont ceux qui, à eux seuls, transforment un refus en recommandation — et
+ceux pour lesquels la saisie initiale évite un aller-retour le jour de la RCP.
