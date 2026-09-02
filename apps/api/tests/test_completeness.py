@@ -218,3 +218,53 @@ def test_the_ras_rule_covers_every_blocking_field() -> None:
             assert not absence_answers(key), (
                 f"{key} blocks analysis for {cancer_type} but would accept RAS"
             )
+
+
+def test_a_score_is_a_number_or_it_was_not_done() -> None:
+    """**The second half of the rule.** The identity fields were the first: `RAS` cannot answer
+    a histology. Nor can it answer a score, and an agent put it better than we would --
+    *« Score G8 chiffré ; "RAS" n'est pas interprétable comme résultat. »*
+
+    Measured before the change: `g8_score` read `RAS` in fourteen dossiers of fifteen and
+    rendered as filled in, so no clinician was ever prompted while the specialists asked for it
+    repeatedly.
+    """
+    for key in ("g8_score", "ipss", "mna", "adl", "iief5", "who_status", "pallia10"):
+        assert not absence_answers(key), f"{key} must not accept RAS as a score"
+
+
+def test_an_ambiguous_core_count_is_not_an_answer() -> None:
+    """Worse than absent. Nothing distinguishes "no positive cores" from "not counted", and a
+    nomogram taking the percentage as an input gives very different answers for the two."""
+    assert not absence_answers("cores_positive")
+
+
+def test_ras_still_answers_a_negative_result() -> None:
+    """**Where the rule stops.** An ECBU reading `RAS` is a sterile sample -- a result, not an
+    empty box -- and treating it as missing would ask a clinician to re-enter something they
+    already answered. `pregnancy` is a yes/no question, not a measurement."""
+    assert absence_answers("urine_culture")
+    assert absence_answers("pregnancy")
+    assert absence_answers("allergies")
+    assert absence_answers("family_history")
+
+
+def test_the_new_score_rule_blocks_nothing() -> None:
+    """`BLOCKING_FIELDS` is a separate and much smaller set. Making a score visible must not
+    stop an analysis: a missing G8 is worth asking about and is not a reason to refuse a
+    dossier."""
+    blocking = set(BLOCKING_FIELDS[CancerType.prostate]) | set(BLOCKING_FIELDS[CancerType.bladder])
+
+    for key in ("g8_score", "ipss", "mna", "adl", "iief5", "who_status", "cores_positive"):
+        assert key not in blocking, f"{key} must not become a blocking field"
+
+
+def test_prior_radiotherapy_is_a_field_the_ledger_can_hold() -> None:
+    """MSKCC disqualifies on prior hormone therapy *or* prior radiotherapy and asks both
+    explicitly. `hormone_therapy` existed; this did not, so the answer had nowhere to go and
+    the page could not even show it in red."""
+    from rcpia.cases.fact_schema import FIELDS_BY_KEY
+
+    assert "radiation_therapy" in FIELDS_BY_KEY
+    assert FIELDS_BY_KEY["radiation_therapy"].applies_to(CancerType.prostate)
+    assert FIELDS_BY_KEY["radiation_therapy"].applies_to(CancerType.bladder)

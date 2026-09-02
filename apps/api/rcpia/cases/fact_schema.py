@@ -378,6 +378,19 @@ FIELDS: tuple[FactField, ...] = (
     # Treatment already under way. The query builder reads androgen deprivation out of free
     # text to decide castration resistance; a named field is a better source than prose.
     FactField("hormone_therapy", ("hormonothérapie", "hormonotherapie"), FactCategory.history),
+    # **The other question MSKCC asks before anything else.** Its pre-prostatectomy calculator
+    # disqualifies a patient who has had either prior hormone therapy or prior radiotherapy,
+    # and asks both explicitly before accepting any clinical input.
+    #
+    # `hormone_therapy` already existed; this did not, so the ledger could not hold the answer
+    # and the page could not even show it in red. Two dossiers hold every other input the model
+    # needs and produce no figure for want of these two answers.
+    FactField(
+        "radiation_therapy",
+        ("radiothérapie", "radiotherapie", "antécédent de radiothérapie",
+         "antecedent de radiotherapie", "radiothérapie antérieure"),
+        FactCategory.history,
+    ),
     FactField("procedure_performed", ("geste",), FactCategory.history),
     # Ureteral stents: obstruction management, and directly relevant to renal function and to
     # whether a platinum agent can be considered.
@@ -468,8 +481,36 @@ ABSENCE_IS_NOT_AN_ANSWER: frozenset[str] = frozenset(
         # hand-written list: muscle invasion decides between conservative treatment and
         # cystectomy, and its answer is Oui or Non. "Rien à signaler" is neither.
         "muscle_invasion",
+        # **A score is a number, or it was not done.** The identity fields above were the
+        # first half of the rule; these are the second, and an agent put it better than we
+        # would: *« Score G8 chiffré ; "RAS" n'est pas interprétable comme résultat. »*
+        #
+        # Measured: `g8_score` reads `RAS` in fourteen dossiers of fifteen and rendered as
+        # filled in, so nobody was ever prompted for it, while the specialists asked for it
+        # repeatedly. Frailty decides eligibility for cisplatin, for major surgery and for
+        # chemoradiation in patients aged 64 to 79.
+        #
+        # These are *not* blocking fields -- `BLOCKING_FIELDS` is a separate and much smaller
+        # set -- so this makes them visible and correctable, and stops no analysis.
+        "pallia10",
+        "g8_score",
+        "iief5",
+        "ipss",
+        "mna",
+        "adl",
+        "who_status",
+        # Ambiguous rather than merely absent, which is worse: nothing distinguishes "no
+        # positive cores" from "not counted", and the two give very different answers from a
+        # nomogram that takes the percentage as an input.
+        "cores_positive",
     }
 )
+
+# **Where the rule stops, and why.** `RAS` remains a legitimate answer for a symptom -- no
+# haematuria, no allergy, no family history -- and for a test whose negative result is itself
+# a finding. An ECBU reading `RAS` means a sterile sample, which is a result; reading it as an
+# empty box would ask a clinician to re-enter something they already answered. The same holds
+# for `pregnancy`, which is a yes/no question and not a measurement.
 
 
 def absence_answers(key: str) -> bool:
