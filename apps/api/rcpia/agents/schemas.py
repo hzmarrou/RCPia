@@ -128,6 +128,45 @@ class ConflictingField(Strict):
     source_ids: list[str] = Field(default_factory=list)
 
 
+class NomogramReading(Strict):
+    """What a validated calculator said about this patient, or why it said nothing.
+
+    **The clinician's requirement, verbatim:**
+
+        Nous voulons éviter que le modèle estime lui-même un risque sans utiliser le
+        calculateur validé.
+
+    A language model asked for a lymph-node invasion probability will produce a number:
+    plausible, confident, and not the nomogram's. Nothing downstream could tell, because it
+    arrives in the same shape as a real one. So the figure is computed deterministically and
+    handed to the agent, and the constraints forbid it producing one of its own.
+
+    **A refusal is carried too, not filtered out.** "Briganti 2023 needs the mpMRI index-lesion
+    diameter" tells a tumour board what to obtain; showing only the models that produced a
+    number would silently drop that sentence, and would also let an agent assume no calculator
+    applied when in fact one was two fields away.
+
+    These ids are not citable evidence and deliberately do not appear in `citable_ids()`: a
+    nomogram is a computation over this patient's own ledger, not a source to quote.
+    """
+
+    model_id: str | None = None
+    display_name: str
+    status: str
+    # Endpoint name to percentage, display-rounded. Several for MSKCC, one for Briganti:
+    # collapsing them would lose the one the surgeon needs, since organ confinement drives
+    # nerve-sparing and nodal involvement drives the lymph-node dissection.
+    estimates: dict[str, float] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
+    inputs_used: dict[str, str] = Field(default_factory=dict)
+    # What the number does not mean, and where its arithmetic came from. Briganti 2012's
+    # coefficients were reconstructed from a published graphic rather than released as an
+    # equation, and a reader who cannot see that cannot weigh the figure.
+    limitation: str = ""
+    source_url: str = ""
+
+
 class LedgerField(Strict):
     """One field of the case ledger as the agent sees it.
 
@@ -176,6 +215,10 @@ class BundleInputs(Strict):
     guideline_passages: list[GuidelinePassage] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
     conflicting_fields: list[ConflictingField] = Field(default_factory=list)
+    # Computed from this patient's own ledger by a published model, never estimated. Carries
+    # refusals as well as figures: a model that names the one measurement it lacks tells the
+    # board what to obtain.
+    nomograms: list[NomogramReading] = Field(default_factory=list)
     safety_constraints: list[str] = Field(default_factory=list)
     # Empty for every first pass. Populated only for `rcp_synthesis`.
     agent_opinions: list["AgentOpinion"] = Field(default_factory=list)

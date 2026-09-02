@@ -120,7 +120,55 @@ def check_runtime() -> list[Check]:
         ))
     except ValueError as exc:
         checks.append(Check("timeouts nest", False, str(exc)))
+    checks.append(check_calculators())
     return checks
+
+
+def check_calculators() -> Check:
+    """A calculator an agent cannot reach is the failure this project keeps repeating.
+
+    The agent brains, the retriever and the narrative extraction pass were each built, tested
+    and left unconnected, and each cost weeks before anyone noticed. None of them announced
+    itself: the system produced confident output that merely happened to be poorer. So the
+    check is not "do the nomograms import" but "does a patient the models fit actually reach
+    them, through the same call the bundle makes".
+    """
+    from rcpia.nomograms import evaluate_all
+
+    # A prostate patient with every Briganti 2012 input present. If this yields no figure,
+    # either the wiring is broken or the models stopped applying to the patients they are for.
+    facts = {
+        "age": "70",
+        "psa_total": "7.53",
+        "gleason": "7 (3+4)",
+        "ct_dre": "T2a",
+        "cores_positive": "5",
+        "cores_total": "21",
+        "hormone_therapy": "Non",
+        "radiation_therapy": "Non",
+    }
+    try:
+        results = evaluate_all(facts, cancer_type="prostate")
+    except Exception as exc:  # noqa: BLE001 - a smoke check reports, it does not raise
+        return Check("calculators reachable", False, f"{type(exc).__name__}: {exc}")
+
+    computed = [item for item in results if item.estimates]
+    if not results:
+        return Check("calculators reachable", False, "no calculator answered at all")
+    if not computed:
+        return Check(
+            "calculators reachable",
+            False,
+            "every calculator refused a complete patient: "
+            + "; ".join(item.explain()[:70] for item in results),
+        )
+    return Check(
+        "calculators reachable",
+        True,
+        ", ".join(
+            f"{item.model_id} {sorted(item.estimates.values())[0]:g}%" for item in computed
+        ),
+    )
 
 
 async def check_database(session: AsyncSession) -> list[Check]:

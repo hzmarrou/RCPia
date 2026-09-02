@@ -296,3 +296,52 @@ def test_every_model_answers_including_the_ones_that_refuse() -> None:
 
     assert {r.model_family for r in results} == {"briganti", "mskcc"}
     assert all(r.explain() for r in results)
+
+
+# --------------------------------------------------------------------------------------
+# Reaching the agents
+# --------------------------------------------------------------------------------------
+
+
+def test_the_bundle_carries_the_calculators() -> None:
+    """**The wiring, read off the code that builds the bundle.**
+
+    A calculator no agent can reach is the fourth capability this project would have built,
+    tested and left unconnected -- after the agent brains, the retriever and the narrative
+    extraction pass, each of which cost weeks before anyone noticed. No behavioural test
+    catches that shape, because every unit test calls the thing directly.
+    """
+    import inspect
+
+    from rcpia.agents import bundle as bundle_module
+
+    source = inspect.getsource(bundle_module.build_bundle)
+    assert "evaluate_all(facts, cancer_type=" in source, (
+        "build_bundle must run the calculators over the ledger"
+    )
+    assert "nomograms=nomograms" in source, "and hand the readings to the agent"
+
+
+def test_the_agent_is_told_not_to_estimate_what_a_calculator_computed() -> None:
+    """The clinician's requirement, verbatim: *nous voulons éviter que le modèle estime
+    lui-même un risque sans utiliser le calculateur validé.* A figure in the bundle is not
+    enough on its own -- a model handed a number and no instruction may still produce its
+    own, and nothing downstream could tell which it reported."""
+    import inspect
+
+    from rcpia.agents import bundle as bundle_module
+
+    source = inspect.getsource(bundle_module.build_bundle)
+    assert "n'estimez jamais vous-même une probabilité" in source
+    assert "une estimation de remplacement" in source, (
+        "a refusal must also be reported rather than replaced by an estimate"
+    )
+
+
+def test_a_nomogram_id_is_not_mistaken_for_an_invented_citation() -> None:
+    """`briganti_2012` reaching an agent's prose must not trip the citation checks: it is a
+    computation over this patient's ledger, not a corpus passage to quote."""
+    from rcpia.agents.schemas import citations_in_prose
+
+    assert citations_in_prose("Briganti 2012 (briganti_2012) : 15,0 %") == set()
+    assert citations_in_prose("mskcc_preoperative donne 2,8 %") == set()

@@ -30,6 +30,7 @@ from rcpia.agents.schemas import (
     ConflictingField,
     GuidelinePassage,
     LedgerField,
+    NomogramReading,
     OutputFormat,
     SourceSnippet,
     TaskBundle,
@@ -42,6 +43,7 @@ from rcpia.cases.ledger import AMBER, RED, LedgerEntry, LedgerReading
 from rcpia.core.models import CancerType, Case, CaseLedgerVersion, DocumentChunk
 from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.rerank import Reranker
+from rcpia.nomograms import evaluate_all
 
 MAX_SNIPPET_CHARACTERS = 4000
 
@@ -319,6 +321,33 @@ async def build_bundle(
         if entry.highlight == AMBER and len(entry.readings) > 1
     ]
 
+    # **Deterministic calculators, run over this patient's own ledger.**
+    #
+    # Handed to the agent so that it never has to estimate a risk the clinician asked us to
+    # compute -- and handed to it *with its refusals*, because "Briganti 2023 needs the mpMRI
+    # index-lesion diameter" is an instruction to a tumour board, while silence is not.
+    #
+    # The synthesis is excluded on purpose. It reconciles what the specialists said, and a
+    # figure appearing there for the first time would be a new clinical claim rather than a
+    # reconciliation of existing ones.
+    nomograms: list[NomogramReading] = []
+    if agent_role != SYNTHESIS_ROLE:
+        facts = {entry.key: entry.value for entry in entries if entry.value}
+        for result in evaluate_all(facts, cancer_type=str(case.cancer_type)):
+            nomograms.append(
+                NomogramReading(
+                    model_id=result.model_id,
+                    display_name=result.display_name,
+                    status=str(result.status),
+                    estimates=dict(result.estimates),
+                    missing_fields=list(result.missing_fields),
+                    reason_codes=[str(code) for code in result.reason_codes],
+                    inputs_used=dict(result.inputs_used),
+                    limitation=result.provenance.limitation if result.provenance else "",
+                    source_url=result.provenance.source_url if result.provenance else "",
+                )
+            )
+
     inputs = BundleInputs(
         case_id=str(case.id),
         agent_role=agent_role,
@@ -336,6 +365,7 @@ async def build_bundle(
         guideline_passages=passages,
         missing_fields=[entry.key for entry in entries if entry.highlight == RED],
         conflicting_fields=conflicts,
+        nomograms=nomograms,
         safety_constraints=list(SAFETY_CONSTRAINTS),
         # Populated only for the synthesis role; every first pass leaves this empty.
         agent_opinions=opinions,
@@ -347,6 +377,22 @@ async def build_bundle(
         *report.limitation_notes(),
         *evidence_notes,
     ]
+    if nomograms:
+        computed = [reading for reading in nomograms if reading.estimates]
+        if computed:
+            constraints.append(
+                "Des calculateurs validés ont été exécutés sur ce dossier et leurs résultats "
+                "figurent dans `nomograms`. Reprenez ces chiffres tels quels en nommant le "
+                "modèle et sa version ; n'estimez jamais vous-même une probabilité qu'un "
+                "calculateur a produite, et ne recalculez pas la sienne."
+            )
+        refused = [reading for reading in nomograms if not reading.estimates]
+        if refused:
+            constraints.append(
+                "Certains calculateurs n'ont pas pu conclure : `nomograms` indique lequel et "
+                "quelle donnée lui manque. Rapportez ce manque à la RCP plutôt que de fournir "
+                "une estimation de remplacement."
+            )
     if agent_role == SYNTHESIS_ROLE:
         constraints.append(
             "Vous recevez les avis déjà rendus par les spécialistes. Rapportez leurs "
