@@ -11,10 +11,9 @@
 //
 // Provisioning and deployment commands are in `infra/azure/README.md`.
 
-@description('Short name for this deployment. Becomes part of every resource name.')
-@minLength(3)
-@maxLength(12)
-param name string = 'rcpia'
+@description('Environment this deployment represents. Becomes part of every resource name, so a staging and a production deployment cannot collide.')
+@allowed(['prod', 'stg', 'dev'])
+param environmentName string = 'prod'
 
 @description('Azure region. PostgreSQL Flexible Server and Container Apps must both be available.')
 param location string = resourceGroup().location
@@ -61,13 +60,32 @@ param azureOpenAiEmbeddingDeployment string = 'text-embedding-3-large'
 @description('Specialist roles convened automatically after extraction.')
 param autoPanelRoles string = 'urology_oncology,medical_oncology,radiation_oncology'
 
-var suffix = uniqueString(resourceGroup().id)
-var registryName = toLower('${name}acr${suffix}')
-// Storage account names cap at 24 characters, and `name` may be twelve.
-var storageName = toLower(take('${name}st${suffix}', 24))
-var postgresName = toLower('${name}-pg-${suffix}')
+// **Naming follows the Azure Cloud Adoption Framework**, matching the resource group the
+// deployment targets: a type abbreviation, the workload, the environment, and -- where Azure
+// demands global uniqueness -- a short deterministic hash of the resource group.
+//
+//     rg-rcpia              resource group (created outside this template)
+//     log-rcpia-prod        Log Analytics workspace
+//     cae-rcpia-prod        Container Apps environment
+//     ca-rcpia-api-prod     container apps
+//     crrcpiaprod<hash>     container registry   (alphanumeric only)
+//     strcpiaprod<hash>     storage account      (alphanumeric, 24 characters)
+//     psql-rcpia-prod-<hash>  PostgreSQL flexible server
+//
+// The hash is derived from the resource group id, so it is stable across redeployments and
+// differs between environments. Six characters rather than thirteen: enough to make a global
+// name unique in practice, short enough that an operator can read the name aloud.
+var suffix = take(uniqueString(resourceGroup().id), 6)
+var workload = 'rcpia'
+var prefix = '${workload}-${environmentName}'
+
+var workspaceName = 'log-${prefix}'
+var environmentName_ = 'cae-${prefix}'
+var registryName = toLower('cr${workload}${environmentName}${suffix}')
+var storageName = toLower('st${workload}${environmentName}${suffix}')
+var postgresName = toLower('psql-${prefix}-${suffix}')
 var databaseName = 'rcpia'
-var blobContainerName = 'rcpia'
+var blobContainerName = 'dossiers'
 
 // ---------------------------------------------------------------------------------------
 // Observability. A Container Apps Environment requires a workspace; without one the only
@@ -75,7 +93,7 @@ var blobContainerName = 'rcpia'
 // ---------------------------------------------------------------------------------------
 
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
-  name: '${name}-logs'
+  name: workspaceName
   location: location
   properties: {
     sku: { name: 'PerGB2018' }
@@ -190,7 +208,7 @@ var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${stor
 // ---------------------------------------------------------------------------------------
 
 resource containerEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: '${name}-env'
+  name: environmentName_
   location: location
   properties: {
     appLogsConfiguration: {
@@ -247,7 +265,7 @@ var backendEnv = [
 // **Internal ingress.** No public hostname, no external traffic. The web app reaches it at
 // its environment-internal FQDN, and so does nothing else.
 resource api 'Microsoft.App/containerApps@2024-03-01' = {
-  name: '${name}-api'
+  name: 'ca-${prefix}-api'
   location: location
   properties: {
     managedEnvironmentId: containerEnv.id
@@ -265,7 +283,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'api'
-          image: '${registry.properties.loginServer}/rcpia-api:${imageTag}'
+          image: '${registry.properties.loginServer}/${workload}-api:${imageTag}'
           resources: { cpu: json('1.0'), memory: '2Gi' }
           env: backendEnv
           probes: [
@@ -289,7 +307,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
 // scaling on queue depth would need a KEDA PostgreSQL scaler, which is worth adding once the
 // cost of an idle replica is known.
 resource worker 'Microsoft.App/containerApps@2024-03-01' = {
-  name: '${name}-worker'
+  name: 'ca-${prefix}-worker'
   location: location
   properties: {
     managedEnvironmentId: containerEnv.id
@@ -301,7 +319,7 @@ resource worker 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'worker'
-          image: '${registry.properties.loginServer}/rcpia-worker:${imageTag}'
+          image: '${registry.properties.loginServer}/${workload}-worker:${imageTag}'
           // An agent run holds a Pi process, which needs room. Below this the runtime is
           // killed mid-answer and the job retries, which costs more than the memory.
           resources: { cpu: json('2.0'), memory: '4Gi' }
@@ -321,7 +339,7 @@ resource worker 'Microsoft.App/containerApps@2024-03-01' = {
 // and the `/api/*` rewrite in `next.config.mjs`; `NEXT_PUBLIC_API_BASE_URL` is `/api` so the
 // browser never leaves this origin.
 resource web 'Microsoft.App/containerApps@2024-03-01' = {
-  name: '${name}-web'
+  name: 'ca-${prefix}-web'
   location: location
   properties: {
     managedEnvironmentId: containerEnv.id
@@ -341,7 +359,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'web'
-          image: '${registry.properties.loginServer}/rcpia-web:${imageTag}'
+          image: '${registry.properties.loginServer}/${workload}-web:${imageTag}'
           resources: { cpu: json('0.5'), memory: '1Gi' }
           env: [
             { name: 'NODE_ENV', value: 'production' }
@@ -356,6 +374,16 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
 }
 
 output webUrl string = 'https://${web.properties.configuration.ingress.fqdn}'
+output resourceNames object = {
+  workspace: workspace.name
+  environment: containerEnv.name
+  registry: registry.name
+  storage: storage.name
+  postgres: postgres.name
+  api: api.name
+  worker: worker.name
+  web: web.name
+}
 output apiInternalFqdn string = api.properties.configuration.ingress.fqdn
 output registryLoginServer string = registry.properties.loginServer
 output postgresFqdn string = postgres.properties.fullyQualifiedDomainName

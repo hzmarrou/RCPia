@@ -2,6 +2,26 @@
 
 Provisions from nothing: registry, environment, database, storage and three container apps.
 
+## Names
+
+Azure Cloud Adoption Framework: a type abbreviation, the workload, the environment, and — for
+the three resources Azure requires to be globally unique — six characters of a hash derived
+from the resource group id, stable across redeployments.
+
+| resource | name |
+|---|---|
+| resource group | `rg-rcpia` |
+| Log Analytics | `log-rcpia-<env>` |
+| Container Apps environment | `cae-rcpia-<env>` |
+| container apps | `ca-rcpia-<env>-{web,api,worker}` |
+| container registry | `crrcpia<env><hash>` |
+| storage account | `strcpia<env><hash>` |
+| PostgreSQL | `psql-rcpia-<env>-<hash>` |
+| database / blob container | `rcpia` / `dossiers` |
+
+`environmentName` is `prod`, `stg` or `dev`, so a staging deployment cannot collide with
+production. The commands below use `stg`.
+
 ## The shape of it
 
 One public hostname. The **web** app is the only external ingress; the **API** is
@@ -9,13 +29,14 @@ internal-only and reached through a `/api/*` rewrite in `next.config.mjs`; the *
 no ingress at all and takes its work from the database.
 
 ```
-browser ──► rcpia-web (external)
+browser ──► ca-rcpia-<env>-web     (external ingress — the only public hostname)
               │  /api/*  rewritten server-side
               ▼
-            rcpia-api (internal ingress only)
+            ca-rcpia-<env>-api     (internal ingress, no public surface)
               ▲
               │
-            rcpia-worker (no ingress)  ──►  PostgreSQL + Blob Storage
+            ca-rcpia-<env>-worker  (no ingress)  ──►  psql-rcpia-<env>-<hash>
+                                                      strcpia<env><hash>
 ```
 
 That topology is a decision, not a convenience. `docs/decisions.md` records the alternative —
@@ -34,22 +55,25 @@ cookie that no cross-site rule ever touches. It also means the API has no public
 ## 1. Resource group
 
 ```bash
-az group create --name rcpia-rg --location westeurope
+az group create --name rg-rcpia --location francecentral
 ```
 
-Pick a region where both Container Apps and PostgreSQL Flexible Server exist, and where the
-patient data is allowed to sit. That second constraint is not an engineering one — dossiers
-are stored unmasked, which `docs/decisions.md` records as an accepted MVP position, and where
-they live is a governance decision.
+France Central is verified for both requirements: Container Apps is available there, and so is
+the `Standard_D2ds_v5` GeneralPurpose SKU the template asks for. Any other region needs both
+checked again before deploying.
+
+It also has to be a region the patient data is allowed to sit in. That constraint is not an
+engineering one — dossiers are stored unmasked, which `docs/decisions.md` records as an
+accepted MVP position, and where they live is a governance decision.
 
 ## 2. Provision
 
 ```bash
 az deployment group create \
-  --resource-group rcpia-rg \
+  --resource-group rg-rcpia \
   --template-file infra/azure/container-apps.bicep \
   --parameters \
-      name=rcpia \
+      environmentName=stg \
       postgresAdminPassword="$(openssl rand -base64 24)" \
       authSecret="$(openssl rand -base64 48)" \
       llamaparseApiKey="$LLAMAPARSE_API_KEY" \
@@ -66,7 +90,7 @@ That is expected; step 4 fixes it.
 Useful outputs:
 
 ```bash
-az deployment group show -g rcpia-rg -n container-apps \
+az deployment group show -g rg-rcpia -n container-apps \
   --query properties.outputs --output json
 ```
 
@@ -76,7 +100,7 @@ The template allow-lists the extension at server level. The extension itself sti
 created inside the database, and a migration cannot do it for itself:
 
 ```bash
-PGHOST=$(az deployment group show -g rcpia-rg -n container-apps \
+PGHOST=$(az deployment group show -g rg-rcpia -n container-apps \
   --query properties.outputs.postgresFqdn.value -o tsv)
 
 psql "host=$PGHOST user=rcpia dbname=rcpia sslmode=require" \
@@ -90,7 +114,7 @@ a container that will not start rather than as a database error anyone sees.
 ## 4. Build and push the images
 
 ```bash
-ACR=$(az deployment group show -g rcpia-rg -n container-apps \
+ACR=$(az deployment group show -g rg-rcpia -n container-apps \
   --query properties.outputs.registryLoginServer.value -o tsv)
 az acr login --name "${ACR%%.*}"
 
@@ -112,18 +136,18 @@ the agent runtime without anything saying so.
 ## 5. Run the migrations
 
 ```bash
-az containerapp exec -g rcpia-rg -n rcpia-api --command "alembic upgrade head"
+az containerapp exec -g rg-rcpia -n ca-rcpia-stg-api --command "alembic upgrade head"
 ```
 
 ## 6. Restart, and check
 
 ```bash
-for app in rcpia-api rcpia-worker rcpia-web; do
-  az containerapp revision restart -g rcpia-rg -n "$app" \
-    --revision "$(az containerapp revision list -g rcpia-rg -n "$app" --query '[0].name' -o tsv)"
+for app in ca-rcpia-stg-api ca-rcpia-stg-worker ca-rcpia-stg-web; do
+  az containerapp revision restart -g rg-rcpia -n "$app" \
+    --revision "$(az containerapp revision list -g rg-rcpia -n "$app" --query '[0].name' -o tsv)"
 done
 
-az containerapp exec -g rcpia-rg -n rcpia-worker \
+az containerapp exec -g rg-rcpia -n ca-rcpia-stg-worker \
   --command "python -m rcpia.ops.smoke --skip-api"
 ```
 
@@ -135,7 +159,7 @@ passages, extractions where the second pass never ran. A green container proves 
 Then open the web URL:
 
 ```bash
-az deployment group show -g rcpia-rg -n container-apps \
+az deployment group show -g rg-rcpia -n container-apps \
   --query properties.outputs.webUrl.value -o tsv
 ```
 
@@ -143,9 +167,9 @@ az deployment group show -g rcpia-rg -n container-apps \
 
 ```bash
 docker build ... && docker push ...          # as in step 4
-az containerapp update -g rcpia-rg -n rcpia-api    --image "$ACR/rcpia-api:$TAG"
-az containerapp update -g rcpia-rg -n rcpia-worker --image "$ACR/rcpia-worker:$TAG"
-az containerapp update -g rcpia-rg -n rcpia-web    --image "$ACR/rcpia-web:$TAG"
+az containerapp update -g rg-rcpia -n ca-rcpia-stg-api    --image "$ACR/rcpia-api:$TAG"
+az containerapp update -g rg-rcpia -n ca-rcpia-stg-worker --image "$ACR/rcpia-worker:$TAG"
+az containerapp update -g rg-rcpia -n ca-rcpia-stg-web    --image "$ACR/rcpia-web:$TAG"
 ```
 
 Use a real tag rather than `latest`. A pushed `latest` does not restart anything, which is how
@@ -160,9 +184,9 @@ throughput lever rather than a response to load. Three gave 2.32× the throughpu
 measured on a 15-dossier batch.
 
 ```bash
-az deployment group create -g rcpia-rg \
+az deployment group create -g rg-rcpia \
   --template-file infra/azure/container-apps.bicep \
-  --parameters name=rcpia workerReplicas=5 ...
+  --parameters environmentName=prod workerReplicas=5 ...
 ```
 
 Autoscaling on queue depth would need a KEDA PostgreSQL scaler. Worth adding once the cost of
