@@ -72,6 +72,19 @@ def test_a_missing_pdf_is_refused_by_name() -> None:
         page_texts(Path("no-such-file-anywhere.pdf"))
 
 
+def test_a_missing_pdf_is_refused_by_name_even_without_pdftotext(monkeypatch) -> None:
+    """The argument is wrong wherever this runs, so the error must not depend on the machine.
+
+    This failed on CI and passed locally for a whole branch: `pdftotext` is installed here and
+    absent on the runner, so the same call reported a missing file in one place and a missing
+    tool in the other. A developer reading the runner's output would go and install
+    poppler-utils to fix a typo in a path.
+    """
+    monkeypatch.setattr("rcpia.corpus.locate.shutil.which", lambda _: None)
+    with pytest.raises(LocateError, match="does not exist"):
+        page_texts(Path("no-such-file-anywhere.pdf"))
+
+
 REAL_PDF = Path(
     r"C:\Users\hzmarrou\OneDrive\python\learning\RCPia\data\ref-25\ESMO_Cancer_Cachexia_2021.pdf"
 )

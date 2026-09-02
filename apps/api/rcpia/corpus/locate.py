@@ -58,14 +58,19 @@ def page_texts(pdf: Path) -> list[str]:
     `pdftotext` separates pages with a form feed, so one call gives every page rather than one
     call per page.
     """
+    # The argument is checked before the environment, deliberately. A path that does not exist
+    # is wrong wherever the call runs, and reporting it as a missing tool sends the reader to
+    # install poppler-utils to fix a typo. It also made this function's error depend on the
+    # machine: with pdftotext present the caller was told the file was missing, and on a runner
+    # without it the same call blamed the tool.
+    if not pdf.exists():
+        raise LocateError(f"{pdf} does not exist")
     if shutil.which("pdftotext") is None:
         raise LocateError(
             "pdftotext is not on PATH, so page numbers cannot be recovered. Install poppler-utils "
             "or record the pages as unavailable — do not let every passage report an unknown page "
             "as though the document had no PDF."
         )
-    if not pdf.exists():
-        raise LocateError(f"{pdf} does not exist")
     try:
         result = subprocess.run(  # noqa: S603 - fixed binary, path argument only
             ["pdftotext", str(pdf), "-"],
