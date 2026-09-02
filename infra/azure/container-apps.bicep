@@ -115,8 +115,84 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = 
 }
 
 // ---------------------------------------------------------------------------------------
+// Network.
+//
+// **Storage in this tenant has no public endpoint, and cannot be given one.** The governance
+// policy that forbids shared-key access also sets `publicNetworkAccess: Disabled` on every
+// storage account and re-applies it: an update asking for `Enabled` returns `Disabled`, the
+// same way an update asking for `allowSharedKeyAccess: true` returns `false`. Measured, not
+// assumed -- a blob call from outside gets `AuthorizationFailure`, which is the network
+// refusal, and not `AuthorizationPermissionMismatch`, which is what a missing role looks like.
+//
+// The only route left to a blob is a private endpoint, and a private endpoint is reachable
+// only from inside a virtual network. So the environment is VNet-injected. This is not
+// hardening added for its own sake; without it the API cannot store a dossier at all.
+// ---------------------------------------------------------------------------------------
+
+// The identity the API and the worker both run as. Deliberately user-assigned rather than
+// system-assigned: it is a resource in its own right, so it survives the apps being deleted
+// and recreated, and its id is known before the deployment starts. Both properties matter --
+// see the role assignment near the end of this file for why.
+resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-${prefix}-apps'
+  location: location
+}
+
+resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+  name: 'vnet-${prefix}'
+  location: location
+  properties: {
+    addressSpace: { addressPrefixes: ['10.20.0.0/16'] }
+    subnets: [
+      {
+        // Container Apps infrastructure.
+        //
+        // The two environment kinds want **opposite** things from this one field, and the
+        // error messages name the kind rather than the requirement, which is easy to
+        // misread as a contradiction:
+        //
+        //   consumption-only (V1)  delegation forbidden  ManagedEnvironmentV1SubnetDelegationNotAllowed
+        //   workload profiles      delegation required   ManagedEnvironmentSubnetDelegationError
+        //
+        // `workloadProfiles` is declared on the environment below, so this is the second
+        // case and the delegation belongs here. /23 is comfortably above the /27 minimum.
+        name: 'snet-apps'
+        properties: {
+          addressPrefix: '10.20.0.0/23'
+          delegations: [
+            {
+              name: 'containerapps'
+              properties: { serviceName: 'Microsoft.App/environments' }
+            }
+          ]
+        }
+      }
+      {
+        // Private endpoints only. Network policies off, or the endpoint's own NIC is
+        // filtered by rules meant for ordinary workloads.
+        name: 'snet-pe'
+        properties: {
+          addressPrefix: '10.20.2.0/24'
+          privateEndpointNetworkPolicies: 'Disabled'
+        }
+      }
+    ]
+  }
+}
+
+resource appsSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
+  parent: vnet
+  name: 'snet-apps'
+}
+
+resource peSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
+  parent: vnet
+  name: 'snet-pe'
+}
+
+// ---------------------------------------------------------------------------------------
 // Storage. Dossiers and Pi session transcripts, both of which carry patient data: private
-// access only, TLS 1.2, no public blob listing.
+// access only, TLS 1.2, no public blob listing, and no public network endpoint.
 // ---------------------------------------------------------------------------------------
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
@@ -128,6 +204,9 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowBlobPublicAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
+    // Stated rather than inherited. The policy sets this regardless; writing it down keeps
+    // the template honest about the topology the rest of the file assumes.
+    publicNetworkAccess: 'Disabled'
   }
 }
 
@@ -141,6 +220,56 @@ resource blobContainer 'Microsoft.Storage/storageAccounts/blobServices/container
   name: blobContainerName
   properties: {
     publicAccess: 'None'
+  }
+}
+
+// The private endpoint, and the DNS that makes it findable. Without the zone the account's
+// public name resolves to a public address that refuses the connection; with it, the same
+// name resolves to 10.20.2.x from inside the VNet. The application therefore needs no
+// Azure-specific hostname -- `AZURE_STORAGE_ACCOUNT_URL` is the ordinary blob URL.
+
+resource blobPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: 'pe-${prefix}-blob'
+  location: location
+  properties: {
+    subnet: { id: peSubnet.id }
+    privateLinkServiceConnections: [
+      {
+        name: 'blob'
+        properties: {
+          privateLinkServiceId: storage.id
+          groupIds: ['blob']
+        }
+      }
+    ]
+  }
+}
+
+resource blobDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.blob.${environment().suffixes.storage}'
+  location: 'global'
+}
+
+resource blobDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: blobDnsZone
+  name: 'link-${prefix}'
+  location: 'global'
+  properties: {
+    virtualNetwork: { id: vnet.id }
+    registrationEnabled: false
+  }
+}
+
+resource blobDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: blobPrivateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'blob'
+        properties: { privateDnsZoneId: blobDnsZone.id }
+      }
+    ]
   }
 }
 
@@ -201,7 +330,14 @@ resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallR
 }
 
 var databaseUrl = 'postgresql+psycopg://${postgresAdminUser}:${postgresAdminPassword}@${postgres.properties.fullyQualifiedDomainName}:5432/${databaseName}?sslmode=require'
-var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${storage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+// **No account key.** A subscription policy can forbid shared-key access to storage, and
+// this one does: `allowSharedKeyAccess` came back `false` on a freshly created account and
+// setting it to `true` silently returned `false` again. A connection string then fails at the
+// first write with `KeyBasedAuthenticationNotPermitted`, after the case row already exists.
+//
+// The apps therefore reach storage as themselves, through a system-assigned identity holding
+// Storage Blob Data Contributor on this account and nothing else.
+var storageAccountUrl = storage.properties.primaryEndpoints.blob
 
 // ---------------------------------------------------------------------------------------
 // Container Apps
@@ -211,6 +347,24 @@ resource containerEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: environmentName_
   location: location
   properties: {
+    // `internal: false` keeps the web app's ingress public while the apps themselves sit in
+    // the VNet -- one public hostname, and a private path to storage. Note that this field
+    // is fixed when the environment is created: an existing environment cannot be moved
+    // into a VNet, it has to be replaced.
+    vnetConfiguration: {
+      infrastructureSubnetId: appsSubnet.id
+      internal: false
+    }
+    // Declared rather than left to the default. Omitting this field does not mean "no
+    // workload profiles"; the 2024-03-01 API picks the workload-profiles environment
+    // anyway, and the subnet delegation requirement then changes underneath the template.
+    // Saying it out loud keeps the environment kind and the subnet in agreement.
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+    ]
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
@@ -233,7 +387,6 @@ var sharedSecrets = [
   { name: 'registry-password', value: registry.listCredentials().passwords[0].value }
   { name: 'database-url', value: databaseUrl }
   { name: 'auth-secret', value: authSecret }
-  { name: 'storage-connection', value: storageConnectionString }
   { name: 'llamaparse-key', value: llamaparseApiKey }
   { name: 'openai-key', value: azureOpenAiApiKey }
   { name: 'rerank-key', value: empty(azureRerankApiKey) ? azureOpenAiApiKey : azureRerankApiKey }
@@ -246,7 +399,10 @@ var backendEnv = [
   { name: 'DATABASE_URL', secretRef: 'database-url' }
   { name: 'AUTH_SECRET', secretRef: 'auth-secret' }
   { name: 'BLOB_PROVIDER', value: 'azure' }
-  { name: 'AZURE_STORAGE_CONNECTION_STRING', secretRef: 'storage-connection' }
+  { name: 'AZURE_STORAGE_ACCOUNT_URL', value: storageAccountUrl }
+  // Names which attached identity to present. A user-assigned identity is not
+  // discoverable on its own -- DefaultAzureCredential needs to be told.
+  { name: 'AZURE_CLIENT_ID', value: appIdentity.properties.clientId }
   { name: 'AZURE_STORAGE_CONTAINER', value: blobContainerName }
   { name: 'PARSER_PROVIDER', value: 'llamaparse' }
   { name: 'LLAMAPARSE_API_KEY', secretRef: 'llamaparse-key' }
@@ -267,6 +423,11 @@ var backendEnv = [
 resource api 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'ca-${prefix}-api'
   location: location
+  // Reaches storage as itself. No key exists to leak, rotate, or be refused by policy.
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${appIdentity.id}': {} }
+  }
   properties: {
     managedEnvironmentId: containerEnv.id
     configuration: {
@@ -299,7 +460,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
       scale: { minReplicas: 1, maxReplicas: 3 }
     }
   }
-  dependsOn: [database, allowExtensions, blobContainer]
+  dependsOn: [database, allowExtensions, blobContainer, blobDnsGroup]
 }
 
 // **No ingress at all.** The worker takes jobs from the database; nothing calls it. Replicas
@@ -309,6 +470,11 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
 resource worker 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'ca-${prefix}-worker'
   location: location
+  // Reaches storage as itself. No key exists to leak, rotate, or be refused by policy.
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${appIdentity.id}': {} }
+  }
   properties: {
     managedEnvironmentId: containerEnv.id
     configuration: {
@@ -332,7 +498,7 @@ resource worker 'Microsoft.App/containerApps@2024-03-01' = {
       scale: { minReplicas: workerReplicas, maxReplicas: workerReplicas }
     }
   }
-  dependsOn: [database, allowExtensions, blobContainer]
+  dependsOn: [database, allowExtensions, blobContainer, blobDnsGroup]
 }
 
 // **The only public hostname.** `API_INTERNAL_BASE_URL` drives both the server-side fetches
@@ -370,6 +536,33 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
       ]
       scale: { minReplicas: 1, maxReplicas: 3 }
     }
+  }
+}
+
+// Storage Blob Data Contributor, and only on this storage account. Read, write and delete
+// blobs; nothing about the account itself, and nothing anywhere else in the subscription.
+var blobDataContributor = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+)
+
+// One assignment, for the shared identity declared above, and only on this storage account.
+//
+// A role assignment's name has to be computable before the deployment starts, so it cannot
+// be derived from a principal that does not exist yet -- which rules out naming it after a
+// system-assigned identity (Bicep BCP120). Naming it after the *app* instead is what broke:
+// the identity dies with the app, a rebuilt app gets a new principal, and Azure will not
+// swap the principal of an existing assignment (`RoleAssignmentUpdateNotPermitted`), so
+// every environment rebuild needed a manual cleanup of assignments that cannot be deleted
+// with the credentials to hand. The user-assigned identity resolves both: its resource id is
+// known up front, and its principal outlives any number of app rebuilds.
+resource appIdentityRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: storage
+  name: guid(storage.id, appIdentity.id, blobDataContributor)
+  properties: {
+    roleDefinitionId: blobDataContributor
+    principalId: appIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 

@@ -24,7 +24,7 @@ dependencies = [
 # install it, which is why the adapter imports the SDK lazily.
 # The [aio] extra pulls in aiohttp; without it the async client raises ImportError at
 # construction time, so the plain package is not enough for this adapter.
-azure = ["azure-storage-blob[aio]>=12.23"]
+azure = ["azure-storage-blob[aio]>=12.23", "azure-identity>=1.19"]
 
 [dependency-groups]
 dev = [

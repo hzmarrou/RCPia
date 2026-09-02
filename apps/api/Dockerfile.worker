@@ -59,13 +59,19 @@ ENV NODE_PATH=/app/node_modules
 
 # Python dependency layer: cached until pyproject.toml/uv.lock change.
 COPY apps/api/pyproject.toml apps/api/uv.lock ./
+# **`--extra azure` is not optional for a container image.** The extra exists so an
+# on-premises install can skip the SDK, and `rcpia.storage.azure_blob` imports it lazily
+# so that skipping works. An image, though, is built once and may run against either
+# provider: leaving it out produced a healthy API that accepted an upload and answered
+# 500 with `No module named 'azure'` from inside `put_bytes`, after the case row had
+# already been created. A few megabytes buys one image that runs in both places.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --extra azure
 
 COPY apps/api/README.md ./
 COPY apps/api/rcpia ./rcpia
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra azure
 
 # **The agent folders travel in the image.** Compose bind-mounts `../agents:/app/agents:ro`,
 # which made the image work locally while never being self-contained: the first Azure

@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     blob_provider: Literal["local", "azure"] = "local"
     local_blob_root: str = "/data/blobs"
     azure_storage_connection_string: str = ""
+    # Preferred over the connection string. A tenant policy can forbid shared-key
+    # access outright, in which case a key is not merely weaker but refused.
+    azure_storage_account_url: str = ""
     azure_storage_container: str = "rcpia"
 
     parser_provider: Literal["llamaparse", "liteparse"] = "llamaparse"

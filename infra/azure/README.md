@@ -44,6 +44,34 @@ That topology is a decision, not a convenience. `docs/decisions.md` records the 
 `SameSite=None; Secure` on the session cookie, which is a weaker position than a host-only
 cookie that no cross-site rule ever touches. It also means the API has no public surface.
 
+## Why there is a virtual network
+
+Not hardening. Without it the API cannot store a dossier at all.
+
+The subscription sits under a governance policy (`MCAPSGov Deploy and Modify Policies`,
+assigned at management-group scope) that sets two properties on every storage account and
+re-applies them if you change them:
+
+- `allowSharedKeyAccess: false` -- a connection string fails at the first write with
+  `KeyBasedAuthenticationNotPermitted`, *after* the case row already exists
+- `publicNetworkAccess: Disabled` -- an update asking for `Enabled` returns `Disabled`
+
+The second one is easy to misdiagnose. A blob call from outside the VNet returns
+
+    AuthorizationFailure: This request is not authorized to perform this operation.
+
+which looks like a missing role assignment. It is not: a missing role gives
+`AuthorizationPermissionMismatch`. `AuthorizationFailure` is the network refusing the request
+before identity is considered. Verify by checking `publicNetworkAccess` before touching RBAC.
+
+With no public endpoint and no shared key, the only route to a blob is a private endpoint,
+and a private endpoint is reachable only from inside a VNet. Hence the VNet, the private
+endpoint, the private DNS zone, and the user-assigned identity that holds Storage Blob Data
+Contributor on that one account.
+
+If your tenant has no such policy, none of this is needed: give the storage account a public
+endpoint and the template's earlier connection-string form would have worked.
+
 ## Before you start
 
 - **Azure CLI** with the Container Apps extension: `az extension add --name containerapp`
@@ -51,6 +79,19 @@ cookie that no cross-site rule ever touches. It also means the API has no public
 - **Azure AI Foundry** already provisioned, with a chat deployment and an embedding
   deployment. This template does not create it: the endpoint and key are inputs
 - **A LlamaParse API key**
+- **Three resource providers registered.** A VNet-injected environment needs more than a
+  plain one, and the failures name the provider rather than the cause:
+
+  ```bash
+  for p in Microsoft.App Microsoft.ContainerService Microsoft.Authorization; do
+    az provider register -n $p
+  done
+  ```
+
+  Without `Microsoft.ContainerService` the deployment fails with `SubscriptionIsNotRegistered`
+  even though no AKS cluster is involved. Without `Microsoft.Authorization` the role
+  assignment fails, and `az role assignment list` reports `MissingSubscription`, which reads
+  like a credential problem and is not one.
 
 ## 1. Resource group
 
@@ -170,9 +211,51 @@ images and the revisions provision.
 
 ## 6. Run the migrations
 
+**Not from inside the container.** The API image contains `rcpia/` but neither `alembic/` nor
+`alembic.ini`, so `alembic upgrade head` in the container fails with
+
+    FAILED: No 'script_location' key found in configuration.
+
+Run them from a machine that can reach the database, against the server's public endpoint:
+
 ```bash
-az containerapp exec -g rg-rcpia -n ca-rcpia-stg-api --command "alembic upgrade head"
+az postgres flexible-server firewall-rule create -g rg-rcpia \
+  --name psql-rcpia-stg-<hash> --rule-name TempAdminDeploy \
+  --start-ip-address "$(curl -s ifconfig.me)" --end-ip-address "$(curl -s ifconfig.me)"
+
+DATABASE_URL=... uv run --project apps/api alembic upgrade head
 ```
+
+Delete the rule afterwards. Copying the migrations into the image would let the container do
+this itself and is worth doing; until then this step needs a human with network access.
+
+## 6b. Load the guideline corpus
+
+**The database is empty of guidelines until you do this, and nothing warns you.** The agents
+start, retrieve nothing, and produce recommendations with no passages behind them -- output
+that looks complete and is not usable. Check before trusting any clinical result:
+
+```sql
+select (select count(*) from evidence_documents), (select count(*) from evidence_chunks);
+```
+
+Zero means the corpus is missing. Either load a prepared release:
+
+```bash
+uv run --project apps/api python -m rcpia.evidence.load <release directory>
+```
+
+or copy an already-embedded corpus from another environment, which avoids paying to
+recompute every vector:
+
+```bash
+docker compose -f infra/docker-compose.yml exec -T postgres \
+  pg_dump -U rcpia -d rcpia --data-only -t evidence_documents -t evidence_chunks > corpus.sql
+PGPASSWORD=... psql -h <server>.postgres.database.azure.com -U rcpia -d rcpia \
+  -v ON_ERROR_STOP=1 -f corpus.sql
+```
+
+Both sides must be at the same migration; compare `alembic_version` first.
 
 ## 7. Restart, and check
 
@@ -231,9 +314,13 @@ an idle replica is known; scaling a worker on HTTP traffic it never receives wou
 
 - **Custom domain and certificate.** Container Apps gives an `azurecontainerapps.io`
   hostname. A CHU domain needs a managed certificate and a DNS record.
-- **Private networking.** PostgreSQL is reached over its public endpoint with TLS, opened to
-  Azure services. Restricting it to the environment's outbound addresses, or moving to a
-  VNet-integrated environment with a private endpoint, is the next hardening step.
-- **Managed identity for storage and the registry.** Both use keys today.
+- **Private networking for PostgreSQL.** The database is still reached over its public
+  endpoint with TLS, opened to Azure services. The VNet now exists, so a private endpoint for
+  it is a small change -- deliberately not made while clinicians are testing, because
+  anything that adds friction to feedback comes later.
+- **Managed identity for the registry.** The registry still uses admin credentials. Storage
+  no longer does; see below.
+- **Migrations and corpus loading from inside the deployment.** Both need a human with
+  network access today (steps 6 and 6b).
 - **Backups beyond the database.** PostgreSQL keeps 14 days. Blob storage has no lifecycle or
   retention policy, and it holds dossiers and agent transcripts.
