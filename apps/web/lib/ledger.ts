@@ -112,3 +112,35 @@ export const CATEGORY_LABELS: Record<string, string> = {
   pathology: "Anatomopathologie",
   decision: "Décisions",
 };
+
+/** The three specialities a tumour board convenes for a urological case. */
+export const PANEL_ROLES = [
+  "urology_oncology",
+  "medical_oncology",
+  "radiation_oncology",
+] as const;
+
+/**
+ * Convene the panel on the ledger as it now stands.
+ *
+ * **Called by a person, deliberately.** The ledger page tells the clinician to check and
+ * correct the extraction before any analysis, and promises the agents will only see that
+ * version. Convening automatically the moment extraction finished broke that promise: the
+ * agents read the machine's first draft, and the review the page asked for happened after
+ * the opinions already existed. The deployment therefore leaves `AUTO_PANEL_ROLES` empty
+ * and this call is what starts the specialists.
+ */
+export async function convenePanel(caseId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/cases/${caseId}/analysis/panel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ roles: PANEL_ROLES }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(
+      detail.slice(0, 200) || `L'analyse n'a pas pu être lancée (${response.status})`,
+    );
+  }
+}

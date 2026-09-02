@@ -57,8 +57,14 @@ param azureOpenAiDeployment string = 'gpt-5.6-sol'
 @description('Embedding deployment name.')
 param azureOpenAiEmbeddingDeployment string = 'text-embedding-3-large'
 
-@description('Specialist roles convened automatically after extraction.')
-param autoPanelRoles string = 'urology_oncology,medical_oncology,radiation_oncology'
+@description('Specialist roles convened automatically after extraction. Empty means the clinician starts the analysis.')
+// **Empty by default, deliberately.** The ledger page tells the clinician to check and
+// correct the extraction before any analysis, and promises the specialists will only see
+// that version. Convening automatically the moment extraction finished broke that promise:
+// the agents read the machine's first draft and the review happened afterwards. Set this
+// only for an unattended environment -- a batch evaluation, say -- where no one is going to
+// press the button.
+param autoPanelRoles string = ''
 
 // **Naming follows the Azure Cloud Adoption Framework**, matching the resource group the
 // deployment targets: a type abbreviation, the workload, the environment, and -- where Azure
