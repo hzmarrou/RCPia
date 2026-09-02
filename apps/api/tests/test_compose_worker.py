@@ -16,6 +16,7 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 COMPOSE = Path(__file__).resolve().parents[3] / "infra" / "docker-compose.yml"
+NPM_LOCK = COMPOSE.resolve().parents[1] / "package-lock.json"
 WORKER = "rcpia-worker"
 
 
@@ -44,6 +45,7 @@ def test_the_worker_is_built_from_the_pi_capable_image(compose: dict) -> None:
     body = dockerfile.read_text(encoding="utf-8")
     assert "nodejs" in body, "the agent runtime is a Node program"
     assert "npm ci" in body, "the runtime must install from the lockfile, not float"
+    assert "|| npm install" not in body, "a failed lockfile install must fail the image build"
     assert "rcpia.worker" in body
 
     # Both halves of the harness are pinned, not just the Pi packages. A major-version-only
@@ -56,6 +58,13 @@ def test_the_worker_is_built_from_the_pi_capable_image(compose: dict) -> None:
     # adapter resolves the package directly, but PATH not carrying the shim was half of the
     # defect that left the deployed worker unable to launch Pi at all.
     assert "/app/node_modules/.bin" in body, "the npm bin directory must be reachable"
+
+
+def test_the_pi_lockfile_does_not_pin_environment_specific_feed_shards() -> None:
+    """A lock generated behind the corporate proxy must still build on another network."""
+    body = NPM_LOCK.read_text(encoding="utf-8")
+    assert "ms-feed-" not in body
+    assert "packagefeedproxy.microsoft.io" not in body
 
 
 def test_the_worker_runs_the_job_loop_and_reaches_the_database(compose: dict) -> None:

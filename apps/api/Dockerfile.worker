@@ -54,7 +54,7 @@ RUN apt-get update \
 # package, because the four Pi packages are released together and mixing them breaks the same
 # way.
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev || npm install --omit=dev --no-audit --no-fund
+RUN npm ci --omit=dev
 ENV NODE_PATH=/app/node_modules
 
 # Python dependency layer: cached until pyproject.toml/uv.lock change.

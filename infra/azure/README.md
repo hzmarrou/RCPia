@@ -22,15 +22,26 @@ from the resource group id, stable across redeployments.
 `environmentName` is `prod`, `stg` or `dev`, so a staging deployment cannot collide with
 production. The commands below use `stg`.
 
+Use one deployment name throughout the procedure. Output lookups are tied to the deployment
+record, not merely to the resources it created:
+
+```bash
+DEPLOYMENT_NAME=rcpia-stg
+```
+
+If a recovery deployment uses another name, change this variable once rather than editing
+individual commands. The first staging rollout finished under `rcpia-stg-uami`; querying the
+earlier failed `rcpia-stg` record returned no outputs even though the resources were healthy.
+
 ## The shape of it
 
 One public hostname. The **web** app is the only external ingress; the **API** is
-internal-only and reached through a `/api/*` rewrite in `next.config.mjs`; the **worker** has
-no ingress at all and takes its work from the database.
+internal-only and reached through the web app's runtime `/api/*` route handler; the **worker**
+has no ingress at all and takes its work from the database.
 
 ```
 browser ──► ca-rcpia-<env>-web     (external ingress — the only public hostname)
-              │  /api/*  rewritten server-side
+              │  /api/*  proxied server-side
               ▼
             ca-rcpia-<env>-api     (internal ingress, no public surface)
               ▲
@@ -79,19 +90,30 @@ endpoint and the template's earlier connection-string form would have worked.
 - **Azure AI Foundry** already provisioned, with a chat deployment and an embedding
   deployment. This template does not create it: the endpoint and key are inputs
 - **A LlamaParse API key**
-- **Three resource providers registered.** A VNet-injected environment needs more than a
-  plain one, and the failures name the provider rather than the cause:
+- **Resource providers registered.** This template provisions Container Apps, ACR,
+  PostgreSQL, networking, storage, managed identity, Log Analytics and role assignments.
+  Register every namespace it uses and wait for registration to finish:
 
   ```bash
-  for p in Microsoft.App Microsoft.ContainerService Microsoft.Authorization; do
-    az provider register -n $p
+  for p in \
+    Microsoft.App \
+    Microsoft.Authorization \
+    Microsoft.ContainerRegistry \
+    Microsoft.ContainerService \
+    Microsoft.DBforPostgreSQL \
+    Microsoft.ManagedIdentity \
+    Microsoft.Network \
+    Microsoft.OperationalInsights \
+    Microsoft.Storage; do
+    az provider register --namespace "$p" --wait
   done
   ```
 
-  Without `Microsoft.ContainerService` the deployment fails with `SubscriptionIsNotRegistered`
-  even though no AKS cluster is involved. Without `Microsoft.Authorization` the role
-  assignment fails, and `az role assignment list` reports `MissingSubscription`, which reads
-  like a credential problem and is not one.
+  `Microsoft.App`, `Microsoft.DBforPostgreSQL` and `Microsoft.ContainerRegistry` were
+  unregistered on the first deployment. A VNet-injected Container Apps environment also
+  requires `Microsoft.ContainerService`, even though no AKS cluster is created. Without
+  `Microsoft.Authorization`, the role assignment fails and `az role assignment list` can
+  report `MissingSubscription`, which reads like a credential problem and is not one.
 
 ## 1. Resource group
 
@@ -112,6 +134,7 @@ accepted MVP position, and where they live is a governance decision.
 ```bash
 az deployment group create \
   --resource-group rg-rcpia \
+  --name "$DEPLOYMENT_NAME" \
   --template-file infra/azure/container-apps.bicep \
   --parameters \
       environmentName=stg \
@@ -119,7 +142,7 @@ az deployment group create \
       authSecret="$(openssl rand -base64 48)" \
       llamaparseApiKey="$LLAMAPARSE_API_KEY" \
       azureOpenAiApiKey="$AZURE_OPENAI_API_KEY" \
-      azureOpenAiBaseUrl="https://rcpia.services.ai.azure.com"
+      azureOpenAiBaseUrl="https://rcpia.services.ai.azure.com/openai/v1"
 ```
 
 Keep the two generated secrets. `authSecret` signs session cookies — rotating it logs
@@ -139,7 +162,7 @@ only the three container apps failed, and only for this reason.
 Useful outputs:
 
 ```bash
-az deployment group show -g rg-rcpia -n rcpia-stg \
+az deployment group show -g rg-rcpia -n "$DEPLOYMENT_NAME" \
   --query properties.outputs --output json
 ```
 
@@ -149,8 +172,15 @@ The template allow-lists the extension at server level. The extension itself sti
 created inside the database, and a migration cannot do it for itself:
 
 ```bash
-PGHOST=$(az deployment group show -g rg-rcpia -n rcpia-stg \
+PGHOST=$(az deployment group show -g rg-rcpia -n "$DEPLOYMENT_NAME" \
   --query properties.outputs.postgresFqdn.value -o tsv)
+PGNAME=$(az deployment group show -g rg-rcpia -n "$DEPLOYMENT_NAME" \
+  --query properties.outputs.resourceNames.value.postgres -o tsv)
+CLIENT_IP=$(curl -s ifconfig.me)
+
+az postgres flexible-server firewall-rule create -g rg-rcpia \
+  --name "$PGNAME" --rule-name TempAdminDeploy \
+  --start-ip-address "$CLIENT_IP" --end-ip-address "$CLIENT_IP"
 
 psql "host=$PGHOST user=rcpia dbname=rcpia sslmode=require" \
   -c 'CREATE EXTENSION IF NOT EXISTS vector;'
@@ -164,7 +194,7 @@ a container that will not start rather than as a database error anyone sees.
 
 ```bash
 set -a; . ./.env; set +a          # UV_DEFAULT_INDEX and NPM_CONFIG_REGISTRY
-ACR=$(az deployment group show -g rg-rcpia -n rcpia-stg \
+ACR=$(az deployment group show -g rg-rcpia -n "$DEPLOYMENT_NAME" \
   --query properties.outputs.registryLoginServer.value -o tsv)
 az acr login --name "${ACR%%.*}"
 
@@ -201,7 +231,7 @@ the agent runtime without anything saying so.
 ## 5. Deploy again, now that the images exist
 
 ```bash
-az deployment group create --resource-group rg-rcpia --name rcpia-stg \
+az deployment group create --resource-group rg-rcpia --name "$DEPLOYMENT_NAME" \
   --template-file infra/azure/container-apps.bicep \
   --parameters environmentName=stg location=francecentral imageTag=stg ...
 ```
@@ -216,17 +246,20 @@ images and the revisions provision.
 
     FAILED: No 'script_location' key found in configuration.
 
-Run them from a machine that can reach the database, against the server's public endpoint:
+Run them from the same machine while the temporary firewall rule from step 3 is still open:
 
 ```bash
-az postgres flexible-server firewall-rule create -g rg-rcpia \
-  --name psql-rcpia-stg-<hash> --rule-name TempAdminDeploy \
-  --start-ip-address "$(curl -s ifconfig.me)" --end-ip-address "$(curl -s ifconfig.me)"
+PGNAME=$(az deployment group show -g rg-rcpia -n "$DEPLOYMENT_NAME" \
+  --query properties.outputs.resourceNames.value.postgres -o tsv)
 
 DATABASE_URL=... uv run --project apps/api alembic upgrade head
+
+az postgres flexible-server firewall-rule delete -g rg-rcpia \
+  --name "$PGNAME" --rule-name TempAdminDeploy --yes
 ```
 
-Delete the rule afterwards. Copying the migrations into the image would let the container do
+The delete is part of the procedure, not optional cleanup: the rule exists only for extension
+creation and migrations. Copying the migrations into the image would let the deployment do
 this itself and is worth doing; until then this step needs a human with network access.
 
 ## 6b. Load the guideline corpus
@@ -277,7 +310,7 @@ passages, extractions where the second pass never ran. A green container proves 
 Then open the web URL:
 
 ```bash
-az deployment group show -g rg-rcpia -n rcpia-stg \
+az deployment group show -g rg-rcpia -n "$DEPLOYMENT_NAME" \
   --query properties.outputs.webUrl.value -o tsv
 ```
 

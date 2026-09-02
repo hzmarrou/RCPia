@@ -1,7 +1,7 @@
 // RCPia on Azure Container Apps.
 //
 // **One public hostname.** The web app is the only external ingress; the API is internal-only
-// and reached through a `/api/*` rewrite in the web app, and the worker has no ingress at all.
+// and reached through the web app's `/api/*` route handler, and the worker has no ingress at all.
 // That is the same-origin topology `docs/decisions.md` requires: the session cookie stays
 // host-only, `SameSite=Lax` suffices, and the API is not reachable from the internet.
 //
@@ -43,7 +43,7 @@ param llamaparseApiKey string
 @secure()
 param azureOpenAiApiKey string
 
-@description('Azure AI Foundry endpoint, for example https://rcpia.services.ai.azure.com')
+@description('Azure OpenAI-compatible base URL, including /openai/v1, for example https://rcpia.services.ai.azure.com/openai/v1')
 param azureOpenAiBaseUrl string
 
 @secure()
@@ -502,8 +502,8 @@ resource worker 'Microsoft.App/containerApps@2024-03-01' = {
 }
 
 // **The only public hostname.** `API_INTERNAL_BASE_URL` drives both the server-side fetches
-// and the `/api/*` rewrite in `next.config.mjs`; `NEXT_PUBLIC_API_BASE_URL` is `/api` so the
-// browser never leaves this origin.
+// and the runtime `/api/*` route handler; `NEXT_PUBLIC_API_BASE_URL` is `/api` so the browser
+// never leaves this origin.
 resource web 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'ca-${prefix}-web'
   location: location
