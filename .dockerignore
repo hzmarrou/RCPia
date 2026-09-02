@@ -1,0 +1,51 @@
+# The worker image builds from the repository root, because it needs `agents/` alongside the
+# API package. Without this file that context is the whole working tree — dependency trees,
+# build output, the local virtualenv and the git history — which is slow to send to a local
+# daemon and slower still to upload to a remote builder.
+#
+# Everything here is either reinstalled inside the image, irrelevant to it, or must not be in
+# it at all.
+
+# Dependency trees: reinstalled from the lockfiles during the build.
+node_modules/
+**/node_modules/
+.pnpm-store/
+.venv/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Build output, rebuilt inside the image.
+apps/web/.next/
+apps/web/out/
+dist/
+build/
+
+# History and tooling the image has no use for.
+.git/
+.github/
+.vscode/
+.idea/
+
+# **Never in an image.** `.env` carries the LlamaParse and Azure keys; secrets belong in
+# Container Apps secrets, injected at runtime, and an image is copied and cached in a registry.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# **Patient data.** Dossiers live outside the repository by policy, but a stray copy or a
+# rendering check must never be baked into an image that is pushed to a registry.
+docs/dossiers/
+docs/reference/
+**/*.docx
+**/~$*
+
+# Local scratch and measurement output.
+data/
+blobs/
+*.log

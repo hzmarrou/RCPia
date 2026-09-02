@@ -67,6 +67,16 @@ COPY apps/api/rcpia ./rcpia
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
+# **The agent folders travel in the image.** Compose bind-mounts `../agents:/app/agents:ro`,
+# which made the image work locally while never being self-contained: the first Azure
+# deployment started three replicas that each died with
+# `worker cannot start: AGENTS_ROOT does not exist: /app/agents`.
+#
+# A brain is part of what the worker *is*, not configuration handed to it -- an image whose
+# agents come from outside cannot be run anywhere the mount is absent, and cannot be pinned to
+# a version either, since the folder could change under a running container.
+COPY agents ./agents
+
 # One job at a time, by design. Concurrency comes from running several of these containers and
 # letting the queue's `FOR UPDATE SKIP LOCKED` hand each a different job -- never from running
 # several agents inside one worker, which would share a lease and a heartbeat between runs that

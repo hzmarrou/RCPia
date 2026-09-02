@@ -1,33 +1,18 @@
 /** @type {import('next').NextConfig} */
 
-// **Same-origin reverse proxy.** The browser talks only to the web app's own hostname, and
-// `/api/*` is rewritten to the API container. That keeps the session cookie host-only, so no
-// cross-site rules apply and `SameSite=Lax` is enough — the alternative, a shared parent
-// domain with `SameSite=None; Secure`, was rejected in `docs/decisions.md` as the weaker
-// position.
+// **The `/api/*` proxy is a route handler, not a rewrite.** Next evaluates `rewrites()` during
+// `next build` and freezes the result into `routes-manifest.json`, so a destination read from
+// the environment at runtime is simply absent — measured on the first Azure deployment, where
+// the manifest shipped as `"rewrites":[]` and every `/api/*` call returned a Next 404.
 //
-// It also means the API needs no public ingress at all: in Azure Container Apps it is
-// internal-only, reachable from the web app and the worker and from nowhere else.
-//
-// Unset locally, where both answer on `localhost` and the rewrite is unnecessary.
-const apiOrigin = process.env.API_INTERNAL_BASE_URL;
-
+// Building the destination in would work and would tie each image to one environment. The
+// handler in `app/api/[...path]/route.ts` reads `API_INTERNAL_BASE_URL` per request instead,
+// so one image runs in staging and production alike.
 const nextConfig = {
   reactStrictMode: true,
-  // Standalone output is only used for the container image. On Windows it needs
-  // symlink privileges (Developer Mode), so it stays opt-in via NEXT_OUTPUT.
+  // Standalone output is only used for the container image. On Windows it needs symlink
+  // privileges (Developer Mode), so it stays opt-in via NEXT_OUTPUT.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
-  async rewrites() {
-    if (!apiOrigin) {
-      return [];
-    }
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${apiOrigin.replace(/\/$/, "")}/:path*`,
-      },
-    ];
-  },
 };
 
 export default nextConfig;

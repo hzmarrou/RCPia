@@ -84,13 +84,21 @@ az deployment group create \
 Keep the two generated secrets. `authSecret` signs session cookies — rotating it logs
 everyone out — and the database password is not recoverable from the template.
 
-The first run creates the apps with images that do not exist yet, so they will fail to start.
-That is expected; step 4 fixes it.
+**The first run of this deployment will fail, and that is the order being wrong rather than
+anything being broken.** Container Apps validates the image reference when it creates a
+revision, so an app pointing at a tag that does not exist yet is rejected outright:
+
+    MANIFEST_UNKNOWN: manifest tagged by "stg" is not found
+
+Everything else provisions — registry, database, storage, environment. Build and push the
+images (step 4), then run this same command again and the container apps come up. Measured on
+the first real deployment: the registry, PostgreSQL, storage and the environment all succeeded;
+only the three container apps failed, and only for this reason.
 
 Useful outputs:
 
 ```bash
-az deployment group show -g rg-rcpia -n container-apps \
+az deployment group show -g rg-rcpia -n rcpia-stg \
   --query properties.outputs --output json
 ```
 
@@ -100,7 +108,7 @@ The template allow-lists the extension at server level. The extension itself sti
 created inside the database, and a migration cannot do it for itself:
 
 ```bash
-PGHOST=$(az deployment group show -g rg-rcpia -n container-apps \
+PGHOST=$(az deployment group show -g rg-rcpia -n rcpia-stg \
   --query properties.outputs.postgresFqdn.value -o tsv)
 
 psql "host=$PGHOST user=rcpia dbname=rcpia sslmode=require" \
@@ -114,32 +122,59 @@ a container that will not start rather than as a database error anyone sees.
 ## 4. Build and push the images
 
 ```bash
-ACR=$(az deployment group show -g rg-rcpia -n container-apps \
+set -a; . ./.env; set +a          # UV_DEFAULT_INDEX and NPM_CONFIG_REGISTRY
+ACR=$(az deployment group show -g rg-rcpia -n rcpia-stg \
   --query properties.outputs.registryLoginServer.value -o tsv)
 az acr login --name "${ACR%%.*}"
 
-docker build -t "$ACR/rcpia-api:latest"    -f apps/api/Dockerfile        apps/api
-docker build -t "$ACR/rcpia-worker:latest" -f apps/api/Dockerfile.worker .
-docker build -t "$ACR/rcpia-web:latest"    -f apps/web/Dockerfile        apps/web \
+export DOCKER_BUILDKIT=1
+docker build -t "$ACR/rcpia-api:stg"    -f apps/api/Dockerfile apps/api \
+  --build-arg UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX"
+docker build -t "$ACR/rcpia-worker:stg" -f apps/api/Dockerfile.worker . \
+  --build-arg UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX" \
+  --build-arg NPM_CONFIG_REGISTRY="$NPM_CONFIG_REGISTRY"
+docker build -t "$ACR/rcpia-web:stg"    -f apps/web/Dockerfile apps/web \
+  --build-arg NPM_CONFIG_REGISTRY="$NPM_CONFIG_REGISTRY" \
   --build-arg NEXT_OUTPUT=standalone
 
-docker push "$ACR/rcpia-api:latest"
-docker push "$ACR/rcpia-worker:latest"
-docker push "$ACR/rcpia-web:latest"
+docker push "$ACR/rcpia-api:stg"
+docker push "$ACR/rcpia-worker:stg"
+docker push "$ACR/rcpia-web:stg"
 ```
+
+**Pass the index arguments.** This network blocks `files.pythonhosted.org` and the npm registry
+by policy, so a build without `UV_DEFAULT_INDEX` fails at `uv sync` with a TLS
+`HandshakeFailure` that reads like a broken image and is a firewall. The Dockerfiles already
+declare the argument; `.env` already holds the proxy.
+
+**`az acr build` does not work for these images.** ACR Tasks uses the classic builder, which
+rejects the `--mount=type=cache` lines: *"the --mount option requires BuildKit"*. Building
+locally and pushing is the supported path, at the cost of sending roughly 1.25 GB.
+
 
 **The worker image is built from the repository root**, not from `apps/api`: it needs the
 `agents/` folder and the pinned Node runtime. It holds `nodejs=22.23.2-1nodesource1` with
 `apt-mark hold`, because the Pi runtime is pinned and an unpinned Node upgrade would change
 the agent runtime without anything saying so.
 
-## 5. Run the migrations
+## 5. Deploy again, now that the images exist
+
+```bash
+az deployment group create --resource-group rg-rcpia --name rcpia-stg \
+  --template-file infra/azure/container-apps.bicep \
+  --parameters environmentName=stg location=francecentral imageTag=stg ...
+```
+
+The same command as step 2, with the same parameters. This time the container apps find their
+images and the revisions provision.
+
+## 6. Run the migrations
 
 ```bash
 az containerapp exec -g rg-rcpia -n ca-rcpia-stg-api --command "alembic upgrade head"
 ```
 
-## 6. Restart, and check
+## 7. Restart, and check
 
 ```bash
 for app in ca-rcpia-stg-api ca-rcpia-stg-worker ca-rcpia-stg-web; do
@@ -159,7 +194,7 @@ passages, extractions where the second pass never ran. A green container proves 
 Then open the web URL:
 
 ```bash
-az deployment group show -g rg-rcpia -n container-apps \
+az deployment group show -g rg-rcpia -n rcpia-stg \
   --query properties.outputs.webUrl.value -o tsv
 ```
 
