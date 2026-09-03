@@ -192,13 +192,61 @@ _WORDS = re.compile(r"[^\W\d_]+", re.UNICODE)
 # has no recognised meaning here, and an unrecognised one is refused for the same reason an
 # unrecognised word is. The keyword form declines to match a number that opens a Gleason pair,
 # so "Gleason 3+4" is read as the pair it is rather than leaving a stray "+4" behind.
+# **Recognising the shape of a grade is not the same as it being a grade.** Consuming any
+# digits that looked like grading meant "ISUP 0", "Gleason 0", "Gleason 99", "0+0" and
+# "Gleason 8 (3+4)" -- a sum that contradicts its own pair -- were all read as ordinary
+# grading and vanished, leaving a field that looked like a plain diagnosis. None of them is a
+# grade a pathologist can write. A number outside its scale is either a different measurement
+# or an error, and neither should quietly establish that a patient is eligible for a model.
+#
+# Invalid grading is left in the text rather than consumed, so the token check that follows
+# refuses it exactly as it refuses any other stray numeral.
 _GRADING_FORMS = re.compile(
-    r"\b\d{1,2}\s*\(\s*\d\s*\+\s*\d\s*\)"
-    r"|\(\s*\d\s*\+\s*\d\s*\)"
-    r"|\b\d\s*\+\s*\d\b"
-    r"|\b(?:gleason|isup|score|grade|groupe)\b\s*:?\s*\d{1,2}(?!\s*\+)",
+    r"\b(?P<sum>\d{1,2})\s*\(\s*(?P<sa>\d)\s*\+\s*(?P<sb>\d)\s*\)"
+    r"|\(\s*(?P<pa>\d)\s*\+\s*(?P<pb>\d)\s*\)"
+    r"|\b(?P<ba>\d)\s*\+\s*(?P<bb>\d)\b"
+    # Declines a number that opens a pair ("Gleason 3+4") or is followed by one
+    # ("Gleason 8 (3+4)"), so the fuller form matches instead and its sum is checked against
+    # its own pair. Matching "gleason 8" here first would consume the sum and the pair as two
+    # separately valid grades and never notice they contradict each other.
+    r"|\b(?P<keyword>gleason|isup|score|grade|groupe)\b\s*:?\s*(?P<value>\d{1,2})(?!\s*[+(])",
     re.IGNORECASE,
 )
+
+# Gleason grades each pattern 1 to 5 and sums them, so a score runs 2 to 10. ISUP and the
+# grade group it names run 1 to 5.
+_PATTERN_SCALE = range(1, 6)
+_SCORE_SCALE = range(2, 11)
+_GROUP_SCALE = range(1, 6)
+_KEYWORD_SCALE = {
+    "gleason": _SCORE_SCALE,
+    "score": _SCORE_SCALE,
+    "isup": _GROUP_SCALE,
+    "grade": _GROUP_SCALE,
+    "groupe": _GROUP_SCALE,
+}
+
+
+def _consume_valid_grading(match: "re.Match[str]") -> str:
+    """Erase a grade that a pathologist could have written; leave anything else in place."""
+    parts = match.groupdict()
+    if parts["sum"] is not None:
+        first, second = int(parts["sa"]), int(parts["sb"])
+        total = int(parts["sum"])
+        # The sum has to be the sum. "Gleason 8 (3+4)" contradicts itself, and a field that
+        # disagrees with itself about the grade is not a plain statement of anything.
+        valid = (
+            first in _PATTERN_SCALE
+            and second in _PATTERN_SCALE
+            and total == first + second
+        )
+    elif parts["pa"] is not None:
+        valid = int(parts["pa"]) in _PATTERN_SCALE and int(parts["pb"]) in _PATTERN_SCALE
+    elif parts["ba"] is not None:
+        valid = int(parts["ba"]) in _PATTERN_SCALE and int(parts["bb"]) in _PATTERN_SCALE
+    else:
+        valid = int(parts["value"]) in _KEYWORD_SCALE[parts["keyword"].lower()]
+    return " " if valid else match.group(0)
 
 # Punctuation that may sit against a word without changing what it says. A token made only of
 # these is refused rather than skipped: ":" and "-" standing alone are how a form records that
@@ -217,7 +265,7 @@ def _states_plainly(text: str, terms: tuple[str, ...]) -> bool:
     if not any(term in text for term in terms):
         return False
     named = {word for term in terms for word in _WORDS.findall(term)}
-    for token in _GRADING_FORMS.sub(" ", text).split():
+    for token in _GRADING_FORMS.sub(_consume_valid_grading, text).split():
         word = token.strip(_STRIPPABLE)
         # Punctuation alone, or a token carrying a digit or symbol that grading did not claim.
         if not word or not word.isalpha():

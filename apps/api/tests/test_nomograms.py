@@ -425,8 +425,40 @@ def test_the_grading_a_diagnosis_legitimately_carries_still_confirms_it() -> Non
         "Adénocarcinome acinaire, Gleason 3+4",
         "Adénocarcinome acinaire, Gleason 7 (3+4)",
         "Adénocarcinome, ISUP 2",
+        "Adénocarcinome, ISUP 5",
+        "Adénocarcinome Gleason 10",
+        "Adénocarcinome 5+5",
+        "Adénocarcinome Gleason 9 (4+5)",
     ):
         assert classify_prostate_histology(graded) is Tristate.yes, graded
+
+
+def test_a_grade_no_pathologist_could_write_does_not_establish_eligibility() -> None:
+    """**Recognising the shape of a grade is not the same as it being a grade.**
+
+    Any digits shaped like grading were consumed and disappeared, so a field could carry a
+    number outside every published scale -- or one that contradicts itself -- and still read
+    as a plain statement of the diagnosis. Gleason grades each pattern 1 to 5 and sums them,
+    so a score runs 2 to 10; ISUP and the grade group it names run 1 to 5. A number outside
+    its scale is a different measurement or an error, and neither establishes that a patient
+    belongs to a model's population.
+    """
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    for invalid in (
+        "Adénocarcinome, ISUP 0",
+        "Adénocarcinome, ISUP 6",
+        "Adénocarcinome Gleason 0",
+        "Adénocarcinome Gleason 11",
+        "Adénocarcinome Gleason 99",
+        "Adénocarcinome 0+0",
+        "Adénocarcinome 6+7",
+        "Adénocarcinome (0+0)",
+        # The sum has to be the sum: a field disagreeing with itself states nothing plainly.
+        "Adénocarcinome Gleason 8 (3+4)",
+        "Adénocarcinome Gleason 5 (3+4)",
+    ):
+        assert classify_prostate_histology(invalid) is Tristate.unknown, invalid
 
 
 @pytest.mark.parametrize(
@@ -440,6 +472,10 @@ def test_the_grading_a_diagnosis_legitimately_carries_still_confirms_it() -> Non
         "Adénocarcinome : 0 %",
         "Adénocarcinome 0/10",
         "Adénocarcinome ?",
+        # A grade outside every published scale, and one contradicting its own pair.
+        "Adénocarcinome, ISUP 0",
+        "Adénocarcinome Gleason 99",
+        "Adénocarcinome Gleason 8 (3+4)",
     ],
 )
 def test_no_denial_reaches_a_calculated_score(histology: str) -> None:
