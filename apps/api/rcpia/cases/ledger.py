@@ -340,7 +340,13 @@ def adenocarcinoma_confirmation(entries: list[LedgerEntry]) -> str:
             continue
         if entry.origin != str(FactOrigin.human):
             return "unknown"
-        answer = (entry.value or "").strip().lower().strip(".!? ")
+        # Case and surrounding whitespace only. **Nothing is stripped from the answer
+        # itself.** An earlier version also stripped `.!?`, which turned "Oui ?" -- a
+        # clinician recording that they are not sure -- into an unqualified yes, and both
+        # calculators duly computed. A punctuation mark a person took the trouble to type is
+        # part of what they said, and the only safe reading of an answer this code does not
+        # recognise is that the question is still open.
+        answer = (entry.value or "").strip().lower()
         if answer in _CONFIRMED:
             return "yes"
         if answer in _DENIED:

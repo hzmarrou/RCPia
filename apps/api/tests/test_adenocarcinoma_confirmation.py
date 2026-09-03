@@ -117,6 +117,17 @@ def test_an_unambiguous_pathology_report_authorises_nothing_by_itself() -> None:
     assert mskcc.evaluate(record).status is Status.not_possible
 
 
+def test_uncertain_punctuation_does_not_reach_a_calculated_score() -> None:
+    """The end-to-end reproduction: "Oui ?" with otherwise complete inputs produced
+    `CALCULATED` from both calculators before this fix."""
+    answer = adenocarcinoma_confirmation([_entry("Oui ?", FactOrigin.human)])
+    record = record_from_facts(COMPLETE, adenocarcinoma_confirmed=Tristate(answer))
+
+    assert record.is_prostate_adenocarcinoma is Tristate.unknown
+    assert briganti.evaluate(record).status is not Status.calculated
+    assert mskcc.evaluate(record).status is not Status.calculated
+
+
 def test_a_caller_that_forgets_to_ask_gets_a_refusal_not_a_calculation() -> None:
     """The default is the safe answer, so a new call site is wrong in the harmless direction."""
     results = evaluate_all(COMPLETE, cancer_type="prostate")
@@ -159,6 +170,27 @@ def test_an_answer_that_is_not_an_answer_is_unknown() -> None:
     yes or no leaves the question open."""
     for unclear in (None, "", "à confirmer", "en attente du compte-rendu", "?"):
         assert adenocarcinoma_confirmation([_entry(unclear, FactOrigin.human)]) == "unknown"
+
+
+def test_a_question_mark_is_uncertainty_not_confirmation() -> None:
+    """**Re-review finding.** A first version of this normalised the answer by also
+    stripping `.!?`, on the assumption that they were incidental punctuation. They are not:
+    "Oui ?" is how a clinician records that they typed an answer and are not sure of it, and
+    stripping the mark before comparing it read that hesitation as an unqualified yes. Both
+    calculators computed on it. Only case and surrounding whitespace are normalised now; a
+    punctuation mark a person took the trouble to type is part of what they said.
+    """
+    for uncertain in ("Oui ?", "Oui?", "Oui !", "Non ?", "Non!", "Oui.", "Non."):
+        assert (
+            adenocarcinoma_confirmation([_entry(uncertain, FactOrigin.human)]) == "unknown"
+        ), uncertain
+
+
+def test_case_and_surrounding_whitespace_are_the_only_things_normalised() -> None:
+    for confirmed in ("Oui", "oui", "OUI", "  Oui  ", "yes", "YES", "o", "O"):
+        assert adenocarcinoma_confirmation([_entry(confirmed, FactOrigin.human)]) == "yes"
+    for denied in ("Non", "non", "NON", "  Non  ", "no", "NO", "n", "N"):
+        assert adenocarcinoma_confirmation([_entry(denied, FactOrigin.human)]) == "no"
 
 
 def test_a_case_nobody_has_answered_is_unknown() -> None:
