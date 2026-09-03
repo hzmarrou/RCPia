@@ -1108,6 +1108,64 @@ async def test_the_pps_is_readable_as_json_and_downloadable_as_markdown(
     assert "# FICHE RCP" in download.text
 
 
+async def test_the_fiche_and_the_probatoire_are_both_downloadable_as_word_files(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two Word files a clinician actually takes into an RCP, over the HTTP path a
+    browser uses -- not just the renderer called directly."""
+    import io
+
+    from docx import Document as WordDocument
+
+    user, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+    await sign_in(client, user)
+
+    reference = (await client.get(f"/cases/{case.id}/pps")).json()
+    fiche = await client.get(f"/cases/{case.id}/pps/docx")
+    probatoire = await client.get(f"/cases/{case.id}/pps/docx/probatoire")
+
+    word_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert fiche.status_code == 200
+    assert fiche.headers["content-type"] == word_type
+    assert "Fiche-RCP" in fiche.headers["content-disposition"]
+    assert probatoire.status_code == 200
+    assert probatoire.headers["content-type"] == word_type
+    assert "Dossier-probatoire" in probatoire.headers["content-disposition"]
+
+    def _full_text(word_document) -> str:
+        # The header, and the case reference inside it, live in a table -- paragraphs
+        # alone would silently miss most of what a reader actually sees.
+        paragraphs = "\n".join(p.text for p in word_document.paragraphs)
+        cells = "\n".join(
+            cell.text
+            for table in word_document.tables
+            for row in table.rows
+            for cell in row.cells
+        )
+        return paragraphs + "\n" + cells
+
+    # Bytes a real Word installation can open, not merely bytes with the right header.
+    fiche_doc = WordDocument(io.BytesIO(fiche.content))
+    probatoire_doc = WordDocument(io.BytesIO(probatoire.content))
+    fiche_text = _full_text(fiche_doc)
+    probatoire_text = _full_text(probatoire_doc)
+
+    assert "FICHE RCP" in fiche_text
+    assert "DOSSIER PROBATOIRE" in probatoire_text
+    # Both name the same case and the same version of the data: this is what lets the two
+    # files be matched to each other after the fact.
+    assert case.reference in fiche_text
+    assert case.reference in probatoire_text
+    version = str(reference["ledger_version"])
+    assert version in fiche_text
+    assert version in probatoire_text
+
+
 async def test_a_case_with_no_analysis_says_so_rather_than_returning_an_empty_form(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:

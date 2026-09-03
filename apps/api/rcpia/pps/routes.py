@@ -1,8 +1,10 @@
 """PPS endpoints.
 
-Two shapes of the same document: JSON for the web app to lay out, and Markdown for
-download. Both are assembled on request from the stored ledger version and the stored
-agent runs, so neither can drift from what the database holds.
+Four shapes of the same document: JSON for the web app to lay out, Markdown for a plain-text
+download, and two Word files -- the fiche a board reads, and the probatoire it consults only
+when a claim is challenged. All four are assembled on request from the stored ledger version
+and the stored agent runs, so none of them can drift from what the database holds, or from
+one another.
 
 Nothing is persisted. A PPS is a pure function of its inputs, and the run ids and ledger
 version it was built from are printed in the document itself, so storing a copy would add
@@ -19,6 +21,7 @@ from rcpia.auth.dependencies import CurrentUser, SessionDep, protected_router
 from rcpia.cases import service as case_service
 from rcpia.core.models import UserRole
 from rcpia.pps import generator
+from rcpia.pps.docx import render_fiche_docx, render_probatoire_docx, to_bytes
 from rcpia.pps.render import render_markdown
 from rcpia.pps.schemas import DocumentAssertsADecision, PpsDocument
 
@@ -27,6 +30,7 @@ router = protected_router(
 )
 
 MARKDOWN = "text/markdown; charset=utf-8"
+WORD = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 @router.get("", response_model=PpsDocument)
@@ -51,6 +55,54 @@ async def download_pps(
         headers={
             "Content-Disposition": (
                 f'attachment; filename="PPS-provisoire-{document.case_reference}.md"'
+            )
+        },
+    )
+
+
+@router.get("/docx")
+async def download_pps_docx(
+    case_id: uuid.UUID, session: SessionDep, user: CurrentUser
+) -> Response:
+    """The fiche as a Word document: sections 1 to 6, and what is missing.
+
+    Not the sources register or the reasoning annexes -- those routinely make up half or
+    more of the rendered content, and a board reading this in the minutes it has per
+    patient should not scroll past them to reach the six sections it discusses. They are
+    at `/pps/docx/probatoire`, identified by the same case reference and ledger version.
+    """
+    document = await _build(session, user, case_id)
+    body = to_bytes(render_fiche_docx(document))
+
+    return Response(
+        content=body,
+        media_type=WORD,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="Fiche-RCP-{document.case_reference}.docx"'
+            )
+        },
+    )
+
+
+@router.get("/docx/probatoire")
+async def download_pps_probatoire_docx(
+    case_id: uuid.UUID, session: SessionDep, user: CurrentUser
+) -> Response:
+    """The sources register and every specialist's full reasoning, as a Word document.
+
+    Opened only when a claim in the fiche is challenged: the same case reference and
+    ledger version identify it as the fiche's companion.
+    """
+    document = await _build(session, user, case_id)
+    body = to_bytes(render_probatoire_docx(document))
+
+    return Response(
+        content=body,
+        media_type=WORD,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="Dossier-probatoire-{document.case_reference}.docx"'
             )
         },
     )

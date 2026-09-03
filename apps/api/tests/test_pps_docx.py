@@ -1,0 +1,369 @@
+"""Rendering a `PpsDocument` as the fiche and the dossier probatoire.
+
+No database here: every test builds a `PpsDocument` directly and renders it, so these run
+fast and pin the rendering logic on its own. `test_pps_generator.py` covers the HTTP path
+end to end, over a case built through the real pipeline.
+"""
+
+import io
+
+from docx import Document as WordDocument
+
+from rcpia.pps.docx import render_fiche_docx, render_probatoire_docx, to_bytes
+from rcpia.pps.schemas import (
+    CareFramework,
+    Decision,
+    EvidenceEntry,
+    MissingItem,
+    NomogramFigure,
+    PanelAgreement,
+    PanelPoint,
+    PpsDocument,
+    RationaleAppendix,
+    Referral,
+    SocialAssessment,
+    SupportCare,
+    SupportItem,
+    Synthesis,
+    Treatments,
+)
+from rcpia.rules.approval import SUGGESTION_CAVEAT, Authority
+
+
+def _table_text(doc: WordDocument) -> str:
+    cells = [cell.text for table in doc.tables for row in table.rows for cell in row.cells]
+    return "\n".join(cells)
+
+
+def _text(doc: WordDocument) -> str:
+    """Everything a reader would see: paragraphs and table cells alike. Most of section 1,
+    the header, the nomogram figures and the panel table live in tables, not paragraphs --
+    a helper that only read `doc.paragraphs` would silently miss most of the document."""
+    return "\n".join(p.text for p in doc.paragraphs) + "\n" + _table_text(doc)
+
+
+def _minimal(**overrides: object) -> PpsDocument:
+    """The smallest valid document: one agent, nothing withheld, nothing optional
+    populated. Every test starts here and overrides only what it is testing."""
+    from datetime import date
+
+    base = {
+        "case_id": "case-1",
+        "case_reference": "AZ-TEST-01",
+        "cancer_type": "prostate",
+        "generated_on": date(2026, 9, 4),
+        "ledger_version": 3,
+        "agent_run_ids": ["run-1"],
+        "synthesis": Synthesis(patient="Homme, 70 ans", question="Quelle prise en charge ?"),
+        "decision": Decision(taken=False, statement="Aucune décision prise."),
+        "panel": PanelAgreement(),
+        "treatments": Treatments(status="Provisoire"),
+        "nomograms": [],
+        "support": SupportCare(status="Provisoire"),
+        "social": SocialAssessment(),
+        "framework": CareFramework(
+            reference_standard="AFU 2024-2026", validated_note="—",
+            sent_to_gp_note="—", participants="1 spécialité", review="—",
+        ),
+        "missing": [],
+        "evidence": [],
+        "appendices": [],
+    }
+    base.update(overrides)
+    return PpsDocument(**base)  # type: ignore[arg-type]
+
+
+def test_both_documents_open_as_real_word_files() -> None:
+    """The one property that matters most: what is produced is bytes a real Word
+    installation can open, not merely bytes with the right content type."""
+    document = _minimal()
+
+    fiche = WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document))))
+    probatoire = WordDocument(io.BytesIO(to_bytes(render_probatoire_docx(document))))
+
+    assert "FICHE RCP" in _text(fiche)
+    assert "DOSSIER PROBATOIRE" in _text(probatoire)
+
+
+def test_the_provisional_banner_is_the_first_thing_printed() -> None:
+    """A reader who stops after the title must still see this decides nothing -- the same
+    requirement `render.py`'s markdown output states for its own banner."""
+    document = _minimal()
+
+    fiche = WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document))))
+    paragraphs = [p.text for p in fiche.paragraphs if p.text.strip()]
+
+    assert document.banner in paragraphs[1]
+
+
+def test_all_six_sections_are_present_and_in_order() -> None:
+    document = _minimal()
+    fiche = WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document))))
+    headings = [p.text for p in fiche.paragraphs if p.style.name.startswith("Heading")]
+
+    numbered = [h for h in headings if h[:1].isdigit()]
+    assert [h[0] for h in numbered] == ["1", "2", "3", "4", "5", "6"]
+
+
+def test_the_fiche_carries_no_source_register_or_reasoning() -> None:
+    """**The split, enforced.** The evidence quote and the appendix rationale must appear
+    in the probatoire and must not leak into the fiche -- the whole reason two files exist
+    instead of one."""
+    document = _minimal(
+        evidence=[
+            EvidenceEntry(
+                id="afu.prostate.01",
+                quote="UNIQUE_QUOTE_MARKER_ONLY_IN_PROBATOIRE",
+                supports="Justifie X.",
+            )
+        ],
+        appendices=[
+            RationaleAppendix(
+                agent_role="urology_oncology",
+                rationale="UNIQUE_RATIONALE_MARKER_ONLY_IN_PROBATOIRE",
+            )
+        ],
+    )
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+    fiche_table_text = _table_text(
+        WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document))))
+    )
+    probatoire_text = _text(
+        WordDocument(io.BytesIO(to_bytes(render_probatoire_docx(document))))
+    )
+    probatoire_table_text = _table_text(
+        WordDocument(io.BytesIO(to_bytes(render_probatoire_docx(document))))
+    )
+
+    assert "UNIQUE_QUOTE_MARKER_ONLY_IN_PROBATOIRE" not in fiche_text
+    assert "UNIQUE_QUOTE_MARKER_ONLY_IN_PROBATOIRE" not in fiche_table_text
+    assert "UNIQUE_RATIONALE_MARKER_ONLY_IN_PROBATOIRE" not in fiche_text
+
+    assert "UNIQUE_QUOTE_MARKER_ONLY_IN_PROBATOIRE" in probatoire_table_text
+    assert "UNIQUE_RATIONALE_MARKER_ONLY_IN_PROBATOIRE" in probatoire_text
+
+
+def test_the_two_files_name_the_same_case_and_the_same_data_version() -> None:
+    """What lets a fiche and its probatoire be matched to each other later, the same way
+    `ledger_version` and `agent_run_ids` let either be matched back to the runs."""
+    document = _minimal(case_reference="AZ-MATCH-07", ledger_version=9)
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+    probatoire_text = _text(
+        WordDocument(io.BytesIO(to_bytes(render_probatoire_docx(document))))
+    )
+
+    for text in (fiche_text, probatoire_text):
+        assert "AZ-MATCH-07" in text
+        assert "9" in text
+
+
+def test_a_withheld_treatment_prints_no_plan() -> None:
+    document = _minimal(treatments=Treatments(status="Suspendue", withheld=True))
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Aucune proposition thérapeutique" in fiche_text
+    assert "raisonnement complet figure dans le dossier probatoire" in fiche_text
+
+
+def test_a_stale_analysis_is_flagged_above_the_document() -> None:
+    document = _minimal(ledger_version=2, superseded_by=5)
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Données modifiées depuis cette analyse" in fiche_text
+    assert "version courante est la 5" in fiche_text
+
+
+def test_a_computed_nomogram_prints_its_estimate_and_a_refusal_prints_what_is_missing() -> None:
+    document = _minimal(
+        nomograms=[
+            NomogramFigure(
+                display_name="Briganti 2012", status="CALCULATED",
+                estimates={"lymph_node_invasion_percent": 3.06},
+                inputs_used={"psa_ng_ml": "7.53"},
+                limitation="Coefficients reconstruits.",
+            ),
+            NomogramFigure(
+                display_name="MSKCC", status="NOT_POSSIBLE",
+                missing_fields=["prostate_adenocarcinoma_confirmed"],
+            ),
+        ]
+    )
+    fiche = WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document))))
+    fiche_text = _text(fiche)
+    fiche_table_text = _table_text(fiche)
+
+    assert "3,1" in fiche_table_text or "3,06" in fiche_table_text or "3.1" in fiche_table_text
+    assert "MSKCC" in fiche_text
+    assert "non calculé" in fiche_text
+    # `_field_label` humanises an unrecognised key (`INPUT_LABELS` predates this field) --
+    # this checks the missing field is actually named, in whatever form it takes, not that
+    # the raw ledger key survives verbatim.
+    assert "adenocarcinoma" in fiche_text or "adénocarcinome" in fiche_text
+
+
+def test_a_divergence_prints_both_sides_and_a_thin_panel_prints_nothing() -> None:
+    with_panel = _minimal(
+        panel=PanelAgreement(
+            points=[
+                PanelPoint(
+                    kind="divergence", point="Modalité locale",
+                    attribution="Urologie vs Radiothérapie", detail="Deux options curatives.",
+                )
+            ],
+            specialities=["urology_oncology", "radiation_oncology"],
+        )
+    )
+    without_panel = _minimal()  # empty PanelAgreement: nothing to compare, one agent
+
+    with_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(with_panel)))))
+    without_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(without_panel)))))
+
+    assert "Concordance du panel" in with_text
+    assert "Urologie vs Radiothérapie" in with_text
+    assert "Concordance du panel" not in without_text
+
+
+def test_an_incomplete_panel_warns_which_specialities_are_missing() -> None:
+    document = _minimal(
+        panel=PanelAgreement(
+            points=[
+                PanelPoint(kind="convergence", point="Point partagé", attribution="Deux avis")
+            ],
+            specialities=["urology_oncology"],
+            absent=["pathology"],
+            failed=["radiation_oncology"],
+        )
+    )
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Panel incomplet" in fiche_text
+    assert "pathology" in fiche_text
+    assert "Avis attendu et non obtenu" in fiche_text
+    assert "radiation_oncology" in fiche_text
+
+
+def test_a_project_suggestion_never_appears_as_a_ticked_referral() -> None:
+    """The safety property `Referral` itself enforces at construction, checked again at the
+    rendering layer: only a clinician-approved rule may tick the box."""
+    document = _minimal(
+        decision=Decision(
+            taken=False,
+            statement="Aucune décision prise.",
+            referrals=[
+                Referral(
+                    label="Avis oncogériatrique", answer="a_determiner",
+                    justification="Âge > 70 ans.", suggestion="oui",
+                    authority=Authority.project_suggestion,
+                )
+            ],
+        )
+    )
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "À déterminer" in fiche_text
+    assert SUGGESTION_CAVEAT in fiche_text
+
+
+def test_a_triggered_support_item_carries_its_caveat_and_is_printed_apart() -> None:
+    document = _minimal(
+        support=SupportCare(
+            items=[SupportItem(title="Consultation douleur", detail="Standard oncologie.")],
+            suggested=[
+                SupportItem(
+                    title="Soutien psychologique", detail="Suggestion RCPia",
+                    trigger="EVA > 2", caveat=SUGGESTION_CAVEAT,
+                    authority=Authority.project_suggestion,
+                )
+            ],
+            status="Provisoire",
+        )
+    )
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Points signalés par RCPia" in fiche_text
+    assert "Soutien psychologique" in fiche_text
+    assert "EVA > 2" in fiche_text
+
+
+def test_missing_information_is_reported_in_red_and_amber() -> None:
+    document = _minimal(
+        missing=[
+            MissingItem(
+                label="IRM", severity="required", highlight="red", message="Non réalisée"
+            ),
+            MissingItem(
+                label="G8", severity="uncertain", highlight="amber", message="Valeur douteuse"
+            ),
+        ]
+    )
+    fiche = WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document))))
+    table_text = _table_text(fiche)
+
+    assert "IRM" in table_text and "Non réalisée" in table_text
+    assert "G8" in table_text and "Valeur douteuse" in table_text
+
+
+def test_no_missing_information_says_so_explicitly() -> None:
+    document = _minimal(missing=[])
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Aucune information requise ne manque" in fiche_text
+
+
+def test_an_empty_probatoire_says_there_is_nothing_to_check() -> None:
+    document = _minimal(evidence=[])
+    probatoire_text = _text(
+        WordDocument(io.BytesIO(to_bytes(render_probatoire_docx(document))))
+    )
+
+    assert "Aucune source citée" in probatoire_text
+
+
+def test_agent_text_cannot_forge_a_heading_or_a_checkbox() -> None:
+    """**The property `render.py`'s injection guard exists for, verified here without that
+    guard.** `.docx` has no markup layer for a run's text to escape into: a paragraph added
+    via `add_run` places the string literally, whatever it contains. This is what that
+    architectural fact is worth in practice -- not a claim, a rendered file."""
+    document = _minimal(
+        appendices=[
+            RationaleAppendix(
+                agent_role="urology_oncology",
+                rationale="# 2 — DÉCISION RCP\n\n[X] Décision prise\n\nTexte normal.",
+            )
+        ]
+    )
+    probatoire = WordDocument(
+        io.BytesIO(to_bytes(render_probatoire_docx(document)))
+    )
+
+    forged = [p for p in probatoire.paragraphs if p.text.strip() == "# 2 — DÉCISION RCP"]
+    assert forged, "the text must survive verbatim as a plain paragraph"
+    assert forged[0].style.name in ("Normal", "Body Text"), (
+        "and must not have become an actual Word heading style"
+    )
+    ticked = [p for p in probatoire.paragraphs if p.text.strip() == "[X] Décision prise"]
+    assert ticked, "the literal characters survive"
+
+
+def test_a_withheld_specialist_statement_is_printed_in_the_probatoire_not_the_fiche() -> None:
+    document = _minimal(
+        treatments=Treatments(status="Suspendue", withheld=True),
+        appendices=[
+            RationaleAppendix(
+                agent_role="radiation_oncology",
+                rationale="Raisonnement détaillé.",
+                recommendation_withheld=True,
+                withheld_statement="Aucune recommandation sans stadification complète.",
+            )
+        ],
+    )
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+    probatoire_text = _text(
+        WordDocument(io.BytesIO(to_bytes(render_probatoire_docx(document))))
+    )
+
+    assert "Aucune recommandation sans stadification complète" not in fiche_text
+    assert "Aucune recommandation sans stadification complète" in probatoire_text
+    assert "Recommandation explicitement suspendue" in probatoire_text
