@@ -347,13 +347,17 @@ def test_agent_text_cannot_forge_a_heading_or_a_checkbox() -> None:
     assert ticked, "the literal characters survive"
 
 
-def test_a_withheld_specialist_statement_is_printed_in_the_probatoire_not_the_fiche() -> None:
+def test_a_withheld_statement_reaches_both_files_and_its_reasoning_only_the_probatoire() -> None:
+    """This test previously asserted the refusal stayed out of the fiche, which is the
+    defect review found: it encoded the split as *appendix content never reaches the fiche*
+    when the rule is narrower -- reasoning stays in the probatoire, but the status of an
+    opinion belongs where the board reads it."""
     document = _minimal(
         treatments=Treatments(status="Suspendue", withheld=True),
         appendices=[
             RationaleAppendix(
                 agent_role="radiation_oncology",
-                rationale="Raisonnement détaillé.",
+                rationale="RAISONNEMENT_DETAILLE_PROBATOIRE_SEULEMENT",
                 recommendation_withheld=True,
                 withheld_statement="Aucune recommandation sans stadification complète.",
             )
@@ -364,6 +368,70 @@ def test_a_withheld_specialist_statement_is_printed_in_the_probatoire_not_the_fi
         WordDocument(io.BytesIO(to_bytes(render_probatoire_docx(document))))
     )
 
-    assert "Aucune recommandation sans stadification complète" not in fiche_text
+    assert "Aucune recommandation sans stadification complète" in fiche_text
+    assert "RAISONNEMENT_DETAILLE_PROBATOIRE_SEULEMENT" not in fiche_text
+
     assert "Aucune recommandation sans stadification complète" in probatoire_text
+    assert "RAISONNEMENT_DETAILLE_PROBATOIRE_SEULEMENT" in probatoire_text
     assert "Recommandation explicitement suspendue" in probatoire_text
+
+
+def test_a_specialist_who_withheld_is_named_in_the_fiche_not_only_the_probatoire() -> None:
+    """**The blocker this closes.** The lead synthesises a plan; one specialist explicitly
+    refused to recommend. In the markdown output both live in one file and a reader reaches
+    the refusal by scrolling. Splitting the files removed that path: a board reading only the
+    fiche would see the speciality listed under *Avis comparés*, beside a plan, and never
+    learn it declined to contribute to it."""
+    document = _minimal(
+        panel=PanelAgreement(specialities=["Urologie-oncologie", "Radiothérapie"]),
+        treatments=Treatments(status="Provisoire"),
+        appendices=[
+            RationaleAppendix(
+                agent_role="radiation_oncology",
+                rationale="RAISONNEMENT_RESERVE_AU_PROBATOIRE",
+                recommendation_withheld=True,
+                withheld_statement="Je suspends tout avis jusqu'au cTNM.",
+            )
+        ],
+    )
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Avis suspendus" in fiche_text
+    assert "Je suspends tout avis jusqu'au cTNM." in fiche_text
+    # The status reaches the fiche; the reasoning behind it still does not.
+    assert "RAISONNEMENT_RESERVE_AU_PROBATOIRE" not in fiche_text
+
+
+def test_a_withheld_advice_is_reported_even_when_there_is_no_panel() -> None:
+    """A single agent can withhold too, and `_panel` renders nothing for one speciality --
+    so a report that lived inside the panel block would vanish in exactly the case where
+    there is no second opinion to compensate for the missing one."""
+    document = _minimal(
+        appendices=[
+            RationaleAppendix(
+                agent_role="urology_oncology",
+                rationale="Raisonnement.",
+                recommendation_withheld=True,
+                withheld_statement="Avis suspendu dans l'attente de l'IRM.",
+            )
+        ],
+    )
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Avis suspendus" in fiche_text
+    assert "Avis suspendu dans l'attente de l'IRM." in fiche_text
+
+
+def test_no_withholding_notice_appears_when_every_specialist_recommended() -> None:
+    """The notice is a warning; printing it on every document would train readers past it."""
+    document = _minimal(
+        appendices=[
+            RationaleAppendix(agent_role="urology_oncology", rationale="Raisonnement.")
+        ],
+    )
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Avis suspendus" not in fiche_text

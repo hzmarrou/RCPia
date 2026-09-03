@@ -254,6 +254,59 @@ def _panel(doc: Document, document: PpsDocument) -> None:
     doc.add_paragraph()
 
 
+def _withheld_specialists(doc: Document, document: PpsDocument) -> None:
+    """Which specialists refused to recommend, named in the fiche rather than only in the
+    annexes.
+
+    The appendices are a probatoire concern and the fiche omits them -- but *that a
+    specialist withheld* is not reasoning, it is the status of the advice the board is
+    being handed, and it belongs where the board reads. In the markdown output the two
+    live in one file, so a reader scrolling reaches the refusal on their own; splitting
+    the files removed that path, and this restores it.
+
+    The failure this closes: the lead agent synthesises a plan, one specialist has
+    `recommendation_withheld` with "Je suspends tout avis jusqu'au cTNM", and the fiche
+    shows the speciality under *Avis comparés* beside a plan -- reading as a panel that
+    contributed, when it explicitly declined to.
+
+    The agent's substitute statement is printed in full, not trimmed to a preview: it is
+    the agent's own short text written in place of a recommendation, and a refusal cut
+    mid-sentence is exactly the kind of text a truncation can invert. The *reasoning*
+    behind it stays in the probatoire.
+    """
+    withheld = [
+        appendix
+        for appendix in document.appendices
+        if appendix.recommendation_withheld or appendix.withheld_statement
+    ]
+    if not withheld:
+        return
+
+    from rcpia.pps.generator import agent_label
+
+    heading = doc.add_paragraph()
+    run = heading.add_run("Avis suspendus — un spécialiste a refusé de se prononcer")
+    run.bold = True
+    run.font.color.rgb = WARNING_COLOR
+
+    for appendix in withheld:
+        line = doc.add_paragraph()
+        name = line.add_run(agent_label(appendix.agent_role) + " — ")
+        name.bold = True
+        line.add_run("recommandation explicitement suspendue.")
+        if appendix.withheld_statement:
+            doc.add_paragraph().add_run(
+                "Ce que ce spécialiste a indiqué en lieu de recommandation"
+            ).italic = True
+            _paragraphs(doc, appendix.withheld_statement)
+
+    _muted(
+        doc,
+        "Le raisonnement complet de ces spécialistes figure dans le dossier probatoire.",
+    )
+    doc.add_paragraph()
+
+
 def _field_label(key: str) -> str:
     return INPUT_LABELS.get(key, key.replace("_", " "))
 
@@ -377,6 +430,7 @@ def render_fiche_docx(document: PpsDocument) -> Document:
     for referral in document.decision.referrals:
         _referral(doc, referral)
     _panel(doc, document)
+    _withheld_specialists(doc, document)
 
     # ------------------------------------------------------------------ 3
     _heading(doc, f"3 — {SECTION_TITLES[2]}")
