@@ -1,0 +1,98 @@
+{
+  "document_id": "eau-esmo.bladder-advanced-variant.2020",
+  "note": "EAU-ESMO consensus statements on advanced and variant bladder cancer: a Delphi study, not a guideline. What it carries that no guideline in the corpus does is an explicit position on **variant histology** -- micropapillary, plasmacytoid, squamous and glandular differentiation -- which the EAU and AUA bladder guidelines largely leave to the pathologist.\n\nIts Delphi result tables are content rather than furniture: the agreed statement and the level of agreement are the finding, and a passage that reports 'consensus not reached' is as useful to a tumour board as one that reports agreement. They are kept.\n\nRouting is deliberately conservative. The paper is organised by question rather than by disease setting, and most of its questions cross settings, so the default spans them and only the sections whose own title names a setting are routed.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "spans_settings",
+    "note": "A consensus paper organised by question. Its sections on molecular markers, bladder preservation and immune checkpoint inhibitors each range across muscle-invasive and metastatic disease."
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry"
+    },
+    {
+      "match_section": "Disclosure",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "Funding",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "Acknowledgements",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "Author Contributions",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "Delphi survey participants",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "note": "Who sat on the panel, by speciality. Method, not finding."
+    },
+    {
+      "match_section": "Consensus levels applied",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "note": "The thresholds the Delphi process used to declare consensus. Method, not finding -- unlike the result tables, which are kept."
+    },
+    {
+      "match_section": "Treatment of MIBC with micropapillary",
+      "setting": "bladder_mibc_non_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "The variant-histology statement this paper exists for. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
+    },
+    {
+      "match_section": "adjuvant radiotherapy for the treatment of MIBC",
+      "setting": "bladder_mibc_non_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "prognostic molecular markers in MIBC",
+      "setting": "bladder_mibc_non_metastatic",
+      "match_leaf": true,
+      "every_occurrence": true
+    }
+  ]
+}

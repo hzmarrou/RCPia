@@ -17,7 +17,9 @@ def build_blob_store(settings: Settings) -> BlobStore:
         return LocalBlobStore(settings.local_blob_root, signing_secret=settings.auth_secret)
     if settings.blob_provider == "azure":
         return AzureBlobStore(
-            settings.azure_storage_connection_string, settings.azure_storage_container
+            settings.azure_storage_connection_string,
+            settings.azure_storage_container,
+            account_url=settings.azure_storage_account_url,
         )
     raise StorageError(f"Unknown BLOB_PROVIDER: {settings.blob_provider!r}")
 

@@ -5,6 +5,7 @@ process is invoked, how the JSONL session is read, and what happens when a run f
 """
 
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -110,7 +111,114 @@ def test_the_command_states_provider_model_tools_and_skills(adapter: PiAdapter) 
     assert "--verbose" in command
     # The bundle is attached as a file, never inlined as an argument.
     assert command[command.index("-p") + 1] == f"@{task_path}"
-    assert "--api-key" in command
+
+
+def test_the_command_approves_the_project_so_the_brain_is_read(adapter: PiAdapter) -> None:
+    """Without this flag the agent runs with no clinical brain at all.
+
+    Pi's own documentation is explicit: non-interactive modes (`-p`, `--mode json`,
+    `--mode rpc`) show no trust prompt, and with no saved decision `defaultProjectTrust`
+    defaults to `ask`, which **ignores** project-local `.pi/` resources. Our
+    `.pi/APPEND_SYSTEM.md` exists only to say *"read brain.md"*, so ignoring it silently
+    downgrades a clinical specialist to a general-purpose agent holding the case bundle.
+
+    Measured against the pinned runtime before this flag was added, the same agent folder
+    answered *"aucune spécialité médicale ne m'a été assignée … aucun fichier"* without it and
+    named `brain.md` and its speciality with it. The bundle alone is enough to make the output
+    *look* specialist, which is why nothing downstream caught this.
+    """
+    command = adapter.build_command(
+        settings=AgentSettings(provider="azure-openai-responses", model="gpt-5.6-sol"),
+        session_path=Path("/work/sessions/s.jsonl"),
+        task_path=Path("/work/tasks/t.json"),
+    )
+    assert "--approve" in command
+
+
+def test_the_api_key_is_never_a_command_line_argument(adapter: PiAdapter) -> None:
+    """Argv is readable by any process on the host and lands in crash dumps and diagnostics.
+
+    The key belongs in the child environment, which is not world-readable in the same way.
+    """
+    command = adapter.build_command(
+        settings=AgentSettings(provider="azure-openai-responses", model="gpt-5.6-sol"),
+        session_path=Path("/work/sessions/s.jsonl"),
+        task_path=Path("/work/tasks/t.json"),
+    )
+    assert "--api-key" not in command
+    assert not any(adapter.api_key and adapter.api_key in part for part in command)
+
+
+def test_the_key_reaches_the_runtime_through_the_environment(adapter: PiAdapter) -> None:
+    """Removing it from argv is only correct if it still arrives."""
+    env = adapter._environment()
+    assert env.get("AZURE_OPENAI_API_KEY") == adapter.api_key
+
+
+def test_a_clinical_run_reads_its_own_config_directory_not_the_hosts(
+    adapter: PiAdapter,
+) -> None:
+    """Otherwise the host decides what the agent is.
+
+    Pi's default config directory holds stored credentials, global settings including
+    `defaultProjectTrust`, saved trust decisions and globally installed skills. Reading the
+    developer's copy made the same command behave differently on a laptop and in a container --
+    and, measured, made an older key in `auth.json` win over the configured one, answering
+    `401` while `AZURE_OPENAI_API_KEY` sat unused.
+    """
+    env = adapter._environment()
+    home = Path(env["PI_CODING_AGENT_DIR"])
+
+    # Process-local, and deliberately not under the work root: `PI_WORK_ROOT` is a volume every
+    # worker replica shares, and this directory is writable runtime state. Putting it there
+    # would swap a host-shared config for a fleet-shared one.
+    assert adapter.work_root not in home.parents
+    assert str(os.getpid()) in home.name, "one config home per process"
+    assert home.is_dir(), "the runtime must not have to create it"
+    assert not (home / "auth.json").exists(), "no stored credential may shadow the configured one"
+    assert not (home / "trust.json").exists(), "trust must come from --approve, not from history"
+
+
+def test_the_launcher_finds_the_pinned_package_without_a_shim_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deployed worker has no `pi` on PATH, and that must not stop it running.
+
+    `npm ci` installs the runtime at `node_modules/@earendil-works/pi-coding-agent`, and the
+    worker image puts only `/app/.venv/bin` on PATH -- so the shim is unreachable. Resolving
+    the shim *before* looking for the package turned a working installation into
+    `PiNotConfigured`, and proving by hand that Node can import the package is not the same as
+    proving the adapter can launch it.
+    """
+    package = tmp_path / "node_modules" / "@earendil-works" / "pi-coding-agent" / "dist"
+    package.mkdir(parents=True)
+    (package / "cli.js").write_text("// pinned entry point", encoding="utf-8")
+    (package.parent / "package.json").write_text('{"version": "0.80.3"}', encoding="utf-8")
+
+    node = tmp_path / ("node.exe" if sys.platform == "win32" else "node")
+    node.write_text("", encoding="utf-8")
+
+    def only_node(name: str) -> str | None:
+        return str(node) if name == "node" else None
+
+    monkeypatch.setattr("rcpia.agents.pi_adapter.shutil.which", only_node)
+    # `_package_roots` yields the `node_modules` directories to search; the scope and
+    # package name are appended by `_find_package`.
+    node_modules = tmp_path / "node_modules"
+    monkeypatch.setattr("rcpia.agents.pi_adapter._package_roots", lambda _: [node_modules])
+
+    adapter = PiAdapter(
+        agents_root=tmp_path / "agents",
+        work_root=tmp_path / "work",
+        api_key="k",
+        base_url="https://example.invalid/openai/v1",
+        pi_command=("pi",),
+        timeout_seconds=30.0,
+    )
+
+    launch, resolved = adapter.launcher()
+    assert launch == [str(node), str(package / "cli.js")]
+    assert resolved == package.parent
 
 
 def link_directory(link: Path, target: Path) -> bool:

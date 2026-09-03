@@ -15,9 +15,15 @@ import json
 import os
 import re
 import shutil
+import signal
+import socket
 import subprocess
+import sys
+import tempfile
+import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -25,17 +31,86 @@ from typing import Any
 
 import anyio.to_thread
 
+from rcpia.agents.lifecycle import Phase, RunTimeline, TimeBudget, TimeoutLayer
 from rcpia.agents.schemas import TaskBundle
 
 # The design fixes ten minutes per agent run; the job lease is fifteen, so a timeout is
 # always recorded by the worker that owns the job rather than by a lease expiring.
 DEFAULT_TIMEOUT_SECONDS = 600.0
 
+# The job lease the queue grants while an agent runs, mirrored here so the three
+# budgets can be validated together. The queue remains its owner.
+DEFAULT_LEASE_SECONDS = 15 * 60
+
+# How much of the event stream to keep for a failure message. The stream itself is
+# hundreds of megabytes and is not the answer; a few lines of it is a diagnostic.
+_STDOUT_TAIL_LINES = 40
+
 JSON_FENCE = re.compile(r"^\s*```(?:json)?\s*(?P<body>.*?)\s*```\s*$", re.DOTALL)
 
 # Agent folder names, and therefore path segments. Deliberately narrow: this value
 # arrives from an HTTP request.
 SAFE_AGENT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,49}$")
+
+
+# The npm package that provides the runtime, and the entry point inside it.
+#
+# **Resolved to its real entry point rather than to the shim.** `npm i -g` installs `pi` as
+# `pi.cmd` / `pi.ps1`, a wrapper that spawns `node`. Running the wrapper puts a process between
+# this code and the agent, and a signal sent to the wrapper does not reach the worker — which is
+# how a 240-second timeout became a 747-second hang before `_kill_tree` existed. Launching
+# `node dist/cli.js` removes the wrapper entirely, so the process this code starts is the
+# process it can stop.
+#
+# It also makes the version knowable: the package directory carries the `package.json` that
+# states it, and a clinical opinion should be attributable to a known harness.
+PI_PACKAGE = "@earendil-works/pi-coding-agent"
+PI_ENTRY = Path("dist") / "cli.js"
+
+# Where to look for the package, in order of preference. A repository-local install is a pinned
+# one; a global install is whatever the machine happens to have.
+def _package_roots(resolved_shim: Path | None) -> list[Path]:
+    """Where the pinned runtime might be installed, nearest first.
+
+    **Walks up rather than checking two fixed levels.** The manifest that pins the runtime sits
+    at the repository root, so `node_modules` does too -- but the process asking may be started
+    from anywhere beneath it: `/app` in the worker image, `apps/api` under pytest, the
+    repository root from a script. Checking only the current directory and its parent found the
+    package from one of those and not the others, which is a difference in working directory
+    masquerading as a missing installation.
+    """
+    roots: list[Path] = []
+    here = Path.cwd().resolve()
+    for directory in (here, *here.parents):
+        roots.append(directory / "node_modules")
+    if resolved_shim is not None:
+        # npm's layout: the shim sits beside the `node_modules` holding the package.
+        roots.append(resolved_shim.parent / "node_modules")
+    return roots
+
+
+def _find_package(resolved_shim: Path | None) -> Path | None:
+    for root in _package_roots(resolved_shim):
+        candidate = root.joinpath(*PI_PACKAGE.split("/"))
+        if (candidate / PI_ENTRY).is_file():
+            return candidate
+    return None
+
+
+def runtime_version(package_dir: Path | None) -> str | None:
+    """The runtime's own version, read from the package that will run.
+
+    `None` when the package cannot be located — the run still happens through whatever `pi` is
+    on PATH, and recording nothing is more honest than recording a guess.
+    """
+    if package_dir is None:
+        return None
+    try:
+        data = json.loads((package_dir / "package.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):  # pragma: no cover - unreadable install
+        return None
+    version = data.get("version")
+    return str(version) if version else None
 
 
 class PiError(Exception):
@@ -82,10 +157,15 @@ class PiRunResult:
     session_bytes: bytes
     provider: str | None
     model: str | None
+    # The version of the runtime that ran, when it could be identified.
+    runtime_version: str | None
     usage: PiUsage
     duration_seconds: float
     stderr: str = ""
     session_id: str | None = None
+    # Phase names and clocks for this run. Carries no run content by construction: see
+    # `rcpia.agents.lifecycle`.
+    timeline: "RunTimeline | None" = None
 
     def output_json(self) -> dict[str, Any]:
         """Parse the agent's answer, tolerating a fenced code block around it."""
@@ -135,6 +215,148 @@ class AgentSettings:
         return cls(provider=str(provider), model=str(model))
 
 
+# How long to wait for a killed tree to release its pipes before giving up on them. The output
+# of a run that timed out is not worth blocking on; the timeout itself is the result.
+_REAP_SECONDS = 10.0
+
+
+def _kill_tree(process: "subprocess.Popen[bytes]") -> None:
+    """Kill the agent and everything it started.
+
+    **`pi` is an npm shim.** On Windows it resolves to `pi.cmd` / `pi.ps1`, which spawns `node`;
+    the Python child is the wrapper, and the model call lives in the grandchild. Killing the
+    child therefore leaves `node` running, holding the stdout pipe open — and the reap that
+    follows blocks until it exits on its own.
+
+    Measured, that turned a 240-second timeout into 426, 747 and 833-second hangs across one
+    fifteen-dossier run: the timeout fired on schedule every time, killed the wrapper, and the
+    runner then sat on an orphaned pipe. Each one ended the moment `node` was killed by hand.
+
+    In a batch that is lost time. In production it is a job that never reports, because the
+    configured limit cannot end it.
+    """
+    if sys.platform == "win32":
+        # No process groups to speak of; `taskkill /T` walks the tree by parent id.
+        subprocess.run(  # noqa: S603
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+            timeout=_REAP_SECONDS,
+        )
+        return
+
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):  # pragma: no cover - already gone
+        pass
+
+
+def _run_with_tree_timeout(
+    command: list[str],
+    *,
+    cwd: str,
+    env: dict[str, str],
+    timeout: float,
+    timeline: RunTimeline | None = None,
+) -> "subprocess.CompletedProcess[bytes]":
+    """`subprocess.run(timeout=...)`, except that the timeout ends the whole process tree.
+
+    Everything else about the call is unchanged: the same command, the same working directory
+    so `.pi/APPEND_SYSTEM.md` still loads `brain.md`, the same captured output.
+    """
+    creationflags = 0
+    start_new_session = False
+    if sys.platform == "win32":
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        # Its own session, so the whole tree can be signalled at once.
+        start_new_session = True
+
+    # stderr is small and carries the runtime's error text, so it is kept whole. stdout is the
+    # event stream and is bounded to its last few lines.
+    out_chunks: deque[bytes] = deque(maxlen=_STDOUT_TAIL_LINES)
+    tail = out_chunks
+    err_chunks: list[bytes] = []
+
+    def pump(stream: Any, sink: list[bytes], *, is_stdout: bool) -> None:
+        """Drain one pipe as it is written, reading each line for its milestone.
+
+        Incremental reading is what makes the phase knowable while the process is still alive:
+        `communicate()` hands nothing over until the child exits, so a ten-minute wait and a
+        dead process looked identical. It also stops a child that fills an unread pipe buffer
+        from blocking on the write, which is a way to hang that looks exactly like a slow
+        provider and is not one.
+
+        The decoded line is read for a marker and then dropped. It is never stored or logged:
+        Pi echoes the prompt, and the prompt is the patient.
+        """
+        try:
+            for raw in iter(stream.readline, b""):
+                # **The stream is read, not kept.** `--mode json` re-serialises the accumulated
+                # conversation on every token, so one agent run over a 93 KB bundle emits
+                # 80-137 MB on stdout -- measured. Appending all of it held that in memory for
+                # no purpose: the answer is read from the session file, and stdout's only job
+                # here is to carry the phase. Only a bounded tail is retained, enough to put in
+                # a failure message.
+                if is_stdout:
+                    tail.append(raw)
+                else:
+                    sink.append(raw)
+                if timeline is not None:
+                    timeline.observe(
+                        raw.decode("utf-8", "replace"), is_stdout=is_stdout, length=len(raw)
+                    )
+        except (ValueError, OSError):  # pragma: no cover - pipe closed under us
+            return
+
+    with subprocess.Popen(  # noqa: S603
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=creationflags,
+        start_new_session=start_new_session,
+    ) as process:
+        if timeline is not None:
+            timeline.record(Phase.process_started)
+        pumps = [
+            threading.Thread(target=pump, args=(stream, sink), kwargs={"is_stdout": is_stdout},
+                             daemon=True)
+            for stream, sink, is_stdout in (
+                (process.stdout, err_chunks, True),
+                (process.stderr, err_chunks, False),
+            )
+            if stream is not None
+        ]
+        for thread in pumps:
+            thread.start()
+
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            if timeline is not None:
+                timeline.timed_out_at = TimeoutLayer.process
+                timeline.record(Phase.timeout)
+            _kill_tree(process)
+            # The tree is dead, so the pumps end on EOF. The grace period guards against a pipe
+            # held by something that survived `taskkill`, not the normal path.
+            for thread in pumps:
+                thread.join(_REAP_SECONDS)
+            raise subprocess.TimeoutExpired(
+                command, timeout, output=b"".join(out_chunks), stderr=b"".join(err_chunks)
+            ) from None
+
+        for thread in pumps:
+            thread.join(_REAP_SECONDS)
+        if timeline is not None:
+            timeline.record(Phase.process_exited)
+
+    return subprocess.CompletedProcess(
+        command, process.returncode, b"".join(out_chunks), b"".join(err_chunks)
+    )
+
+
 @dataclass
 class PiAdapter:
     """Invokes Pi for one agent at a time.
@@ -150,6 +372,23 @@ class PiAdapter:
     pi_command: tuple[str, ...] = ("pi",)
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     extra_env: dict[str, str] = field(default_factory=dict)
+    # How long one provider request may take. Strictly inside `timeout_seconds`, so the
+    # innermost deadline is the one that fires and the failure names a cause rather than a
+    # symptom. Defaults to half the process budget, leaving room for start-up and for the
+    # session to be written after the model answers.
+    provider_timeout_seconds: float | None = None
+    # The lease the job holds while this runs. Not enforced here -- the queue owns it -- but
+    # declared so the three budgets can be checked against each other in one place.
+    lease_seconds: float = DEFAULT_LEASE_SECONDS
+
+    def budget(self) -> TimeBudget:
+        """The nested deadlines, validated. Raises if they do not nest strictly."""
+        provider = self.provider_timeout_seconds or self.timeout_seconds / 2
+        return TimeBudget(
+            provider_seconds=provider,
+            process_seconds=self.timeout_seconds,
+            lease_seconds=self.lease_seconds,
+        )
 
     # ---------------------------------------------------------------- paths
 
@@ -218,11 +457,65 @@ class PiAdapter:
             )
         return resolved
 
+    def launcher(self) -> tuple[list[str], Path | None]:
+        """How to start the runtime, and which package will run.
+
+        Prefers `node <package>/dist/cli.js` over the npm shim, for the reasons on
+        `PI_PACKAGE`: no wrapper process between this code and the agent, and a readable
+        version. Falls back to the shim when the package or `node` cannot be found, because a
+        machine that can only offer the wrapper should still be able to run.
+        """
+        configured = self.pi_command[0]
+
+        # An explicit path to the entry point: honour it and read the version beside it.
+        if configured.endswith(".js"):
+            entry = Path(configured)
+            if not entry.is_file():
+                raise PiNotConfigured(f"Pi entry point not found: {configured!r}")
+            node = shutil.which("node")
+            if node is None:
+                raise PiNotConfigured(
+                    f"PI_BIN points at {configured!r} but `node` is not on PATH."
+                )
+            return [node, str(entry)], entry.parent.parent
+
+        # **The package is searched for before the shim, but only when nothing more specific
+        # was configured.** `executable()` raises when `pi` is absent from PATH, and the
+        # deployed worker image puts only `/app/.venv/bin` there -- so resolving the shim first
+        # turned a perfectly good `npm ci` installation into `PiNotConfigured` before the direct
+        # entry point was ever considered. Proving by hand that Node can import the package
+        # inside the image is not the same as proving this function can launch it.
+        #
+        # An explicitly configured command still wins, because it is the only way to point this
+        # at something else on purpose -- a wrapper, a different install, or the fake runtime
+        # the unit tests run against. Preferring the repository package over *that* would make
+        # a test that asks for a stand-in silently call the real provider.
+        node = shutil.which("node")
+        bare_shim = len(self.pi_command) == 1 and not any(
+            separator in configured for separator in ("/", "\\")
+        )
+        if bare_shim:
+            package = _find_package(None)
+            if package is not None and node is not None:
+                return [node, str(package / PI_ENTRY)], package
+
+        # Otherwise, or when no repository-local package exists, use the configured command and
+        # let `executable()` produce the message that names what is missing.
+        resolved = Path(self.executable())
+        package = _find_package(resolved)
+        if bare_shim and package is not None and node is not None:
+            return [node, str(package / PI_ENTRY)], package
+
+        # Only the launch prefix: `build_command` appends the configured tail itself, and
+        # returning it here too would pass it twice.
+        return [str(resolved)], package
+
     def build_command(
         self, *, settings: AgentSettings, session_path: Path, task_path: Path
     ) -> list[str]:
+        launch, _package = self.launcher()
         command = [
-            self.executable(),
+            *launch,
             *self.pi_command[1:],
             "--provider",
             settings.provider,
@@ -237,19 +530,94 @@ class PiAdapter:
             "--no-skills",
             # Provider, model and session path land in the session for the audit trail.
             "--verbose",
+            # **Without this the agent has no brain.** Pi's documentation is explicit: the
+            # non-interactive modes show no trust prompt, and with no saved decision
+            # `defaultProjectTrust` defaults to `ask`, which ignores project-local `.pi/`
+            # resources. `.pi/APPEND_SYSTEM.md` exists only to say *read brain.md*, so ignoring
+            # it silently downgrades a clinical specialist to a general-purpose agent holding
+            # the case bundle -- and the bundle alone is enough to make the answer look
+            # specialist, which is why nothing downstream noticed.
+            #
+            # Measured against the pinned runtime: the same folder answered *"aucune spécialité
+            # médicale ne m'a été assignée … aucun fichier"* without this flag, and named
+            # `brain.md` and its speciality with it.
+            #
+            # It is safe here for the reason the trust prompt exists: the folder is ours,
+            # mounted read-only, its name is validated against `SAFE_AGENT_NAME`, and the agent
+            # gets `--tools read` with `--no-skills`. Approving is not widening what the agent
+            # may do; it is letting it read the instructions we wrote for it.
+            "--approve",
+            # One JSON object per line on stdout, which is what makes a run's progress visible
+            # while it is still running. Measured against the real runtime, `--verbose` alone
+            # produced three bytes for an entire run, so nothing could be observed; this yields
+            # `session`, `agent_start`, `turn_start`, `message_start`, `message_end`,
+            # `agent_end`. The answer is still read from the session file, so the output path is
+            # unchanged.
+            "--mode",
+            "json",
             "-p",
             f"@{task_path}",
         ]
-        if self.api_key:
-            command += ["--api-key", self.api_key]
         command.append(
             "Complete the task in the attached task bundle file. "
             "Return only the final structured output."
         )
         return command
 
+    def pi_home(self) -> Path:
+        """The config directory a clinical run reads, which is ours and not the host's.
+
+        Pi defaults to `~/.pi/agent`, and everything in it changes how a run behaves: stored
+        provider credentials, `settings.json` (including `defaultProjectTrust`), `trust.json`,
+        and globally installed skills. On a developer machine that directory is full of
+        whatever they were last doing; in a container it is empty. The same command therefore
+        did different things in the two places, which is the opposite of what a clinical
+        harness should offer.
+
+        **This is not tidiness -- it was a live authentication failure.** Pi resolves the Azure
+        credential from stored auth before the environment, so a host holding an older key in
+        `auth.json` answered `401 invalid subscription key` while the configured key sat unused
+        in `AZURE_OPENAI_API_KEY`. Measured on this machine: two keys of equal length, different
+        values, and the stale one won. Pointing the run at a directory we own removes the
+        precedence question entirely.
+
+        **Process-local, not under the work root.** `PI_WORK_ROOT` is a volume shared by every
+        `rcpia-worker` replica, and this directory is writable state: credentials, caches, and
+        whatever else the runtime decides to keep. Putting it there would hand one mutable
+        config directory to every concurrently running agent in the deployment -- replacing a
+        host-shared config with a fleet-shared one. A pid alone is not enough either, because
+        two containers can both hold pid 7; the host name distinguishes them.
+        """
+        return (
+            Path(tempfile.gettempdir())
+            / f"rcpia-pi-home-{socket.gethostname()}-{os.getpid()}"
+        )
+
     def _environment(self) -> dict[str, str]:
+        """The child's environment: the credential, the endpoint, and an isolated config dir.
+
+        The key travels here rather than in argv. Command-line arguments are readable by any
+        process that can list the process table, and they are copied into crash dumps, `ps`
+        output and diagnostic captures. An environment variable is not private either, but it
+        is not published to every reader on the host, and it is where Pi documents the Azure
+        credential belongs.
+        """
         env = dict(os.environ)
+        home = self.pi_home()
+        home.mkdir(parents=True, exist_ok=True)
+
+        # **The one place RCPia can bound Pi's own retrying.** Owning this directory means the
+        # runtime's global settings are ours to write, so a clinical run is not subject to Pi's
+        # defaults -- agent-level retry enabled, three attempts, a 300-second idle timeout --
+        # nested inside our process timeout, inside the lease, inside the queue's attempts.
+        # Written every time rather than once, because the budget can change between runs and a
+        # stale settings file would silently apply the previous one.
+        (home / "settings.json").write_text(
+            json.dumps(self.budget().pi_settings(), indent=2), encoding="utf-8"
+        )
+        env["PI_CODING_AGENT_DIR"] = str(home)
+        if self.api_key:
+            env["AZURE_OPENAI_API_KEY"] = self.api_key
         if self.base_url:
             # Pi reads AZURE_OPENAI_BASE_URL; the name matters, _ENDPOINT is ignored.
             env["AZURE_OPENAI_BASE_URL"] = self.base_url
@@ -263,6 +631,7 @@ class PiAdapter:
         agent_name: str,
         case_id: uuid.UUID,
         run_id: uuid.UUID | None = None,
+        job_id: uuid.UUID | None = None,
     ) -> PiRunResult:
         run_id = run_id or uuid.uuid4()
         agent_dir = self.agent_dir(agent_name)
@@ -283,26 +652,41 @@ class PiAdapter:
         command = self.build_command(
             settings=settings, session_path=session_path, task_path=task_path
         )
+        # Which installation is about to run. Resolved again rather than threaded through
+        # `build_command`, because that method is also used by the extraction reader and its
+        # signature belongs to building a command, not to reporting provenance.
+        _, package_dir = self.launcher()
 
         # Pi runs in a worker thread rather than through asyncio's subprocess support:
         # psycopg's async driver requires the selector event loop on Windows, and that
         # loop cannot spawn subprocesses at all. A thread works the same everywhere.
+        timeline = RunTimeline(
+            run_id=run_id,
+            agent_role=agent_name,
+            job_id=job_id,
+            runtime_version=runtime_version(package_dir),
+            model=settings.model,
+            provider=settings.provider,
+        )
+
         started = time.monotonic()
         try:
             completed = await anyio.to_thread.run_sync(
                 partial(
-                    subprocess.run,
+                    _run_with_tree_timeout,
                     command,
                     cwd=str(agent_dir),  # so .pi/APPEND_SYSTEM.md applies, loading brain.md
                     env=self._environment(),
-                    capture_output=True,
                     timeout=self.timeout_seconds,
+                    timeline=timeline,
                 )
             )
         except subprocess.TimeoutExpired:
+            # Naming the phase and the layer is the difference between a report someone can act
+            # on and one that says only that time passed.
             raise PiRunFailed(
                 f"L'agent {agent_name} a dépassé le délai de "
-                f"{int(self.timeout_seconds)} s."
+                f"{int(self.timeout_seconds)} s. {timeline.summary()}"
             ) from None
 
         duration = time.monotonic() - started
@@ -319,6 +703,8 @@ class PiAdapter:
         # Read the session before judging the exit code: a run that failed partway may
         # still have written the transcript that explains why.
         written = session_path.read_bytes() if session_path.exists() else None
+        if written:
+            timeline.record(Phase.session_written)
 
         if returncode != 0:
             raise PiRunFailed(
@@ -348,9 +734,13 @@ class PiAdapter:
             session_bytes=session_bytes,
             provider=parsed.provider or settings.provider,
             model=parsed.model or settings.model,
+            runtime_version=runtime_version(package_dir),
             usage=parsed.usage,
             duration_seconds=duration,
             stderr=stderr,
+            # Carried out with the result so the phase timings reach the job record rather
+            # than living only in a log line. Contains no run content by construction.
+            timeline=timeline,
             session_id=parsed.session_id,
         )
 

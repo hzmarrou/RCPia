@@ -46,6 +46,9 @@ from rcpia.evidence.models import (
     EvidenceDocument,
 )
 from rcpia.evidence.rerank import Reranker
+from rcpia.safety_rules.catalogue import Ledger
+from rcpia.safety_rules.engine import Passage as SafetyPassage
+from rcpia.safety_rules.engine import SafetyAnnotation, SafetyEngine, SafetyReport
 
 # Both legs offer this many candidates to the fusion. Wide enough that a passage ranked
 # poorly by one leg can still be rescued by the other, narrow enough to stay one query.
@@ -85,6 +88,50 @@ ADMISSIBLE_UNSPECIFIED_REASONS = ("general_principle", "spans_settings")
 # "applies broadly" that a mislabelled passage can hide behind — which is why it is a
 # constant the retrieval evaluation can sweep rather than a rule written into the clause.
 UNIVERSAL_PURPOSE = "general"
+
+# A guideline that writes about localized prostate cancer without narrowing to a risk band is
+# not being vague — it is stating what holds across the bands. The corpus records that
+# faithfully, and the filter then refused it to every question that *did* name a band.
+#
+# The measurement that forced this, on corpus v5.1:
+#
+#     prostate_nonmetastatic_unspecified_risk        318 passages
+#     prostate_localized_intermediate_risk            14
+#     prostate_localized_high_risk                    13
+#     prostate_localized_low_risk                      1
+#
+# An intermediate-risk question could reach 14 passages out of 332, and a low-risk question
+# one. The AUA 2026 localized guideline — the single most relevant document for exactly those
+# questions — was unreachable in its entirety, because its headings are `RISK ASSESSMENT`,
+# `RISK-BASED MANAGEMENT` and `PRINCIPLES OF MANAGEMENT` and its risk bands live in the body
+# of numbered statements. The retrieval evaluation found this on its first run, as `pr-001`
+# scoring zero with both claims attributed to `refused by disease_setting`.
+#
+# **This is a generalisation, not a widening, and the difference is the whole safety argument.**
+# `widen()` refuses to drop the setting because dropping it admits every *sibling* — localized
+# protocols for metastatic disease. A parent admits only what was written about a superset of
+# this patient's situation. An intermediate-risk question gains the risk-unspecified passages
+# and still cannot see `prostate_localized_low_risk`, `prostate_metastatic_hormone_sensitive`
+# or anything else. The relation runs one way and only one way.
+#
+# **Only risk bands are mapped.** `prostate_locally_advanced_non_metastatic` and
+# `prostate_node_positive_non_metastatic` are also non-metastatic, and they are not risk bands
+# — cT3-4 and pN1 are different clinical entities, not a finer grade of localized disease.
+# Folding them in would be the sibling admission this mechanism exists to avoid, so the map
+# says only what the vocabulary's own naming says: `*_unspecified_risk` generalises the risk
+# bands beneath it.
+SETTING_PARENTS: dict[str, str] = {
+    "prostate_localized_low_risk": "prostate_nonmetastatic_unspecified_risk",
+    "prostate_localized_intermediate_risk": "prostate_nonmetastatic_unspecified_risk",
+    "prostate_localized_high_risk": "prostate_nonmetastatic_unspecified_risk",
+    "bladder_nmibc_low_risk": "bladder_nmibc_unspecified_risk",
+    "bladder_nmibc_intermediate_risk": "bladder_nmibc_unspecified_risk",
+    "bladder_nmibc_high_risk": "bladder_nmibc_unspecified_risk",
+    "bladder_nmibc_very_high_risk": "bladder_nmibc_unspecified_risk",
+    # CIS is a pattern rather than a band, but it sits inside NMIBC, so NMIBC guidance written
+    # without narrowing applies to it for the same reason it applies to the bands.
+    "bladder_nmibc_cis": "bladder_nmibc_unspecified_risk",
+}
 
 # Below this, a passage is discarded rather than returned. Measured against the loaded corpus
 # with three probe queries: the worst genuinely relevant candidate scored 0.579, and the best
@@ -185,6 +232,10 @@ class Filter:
     # Whether `general` passages are admitted alongside the requested purposes. Same reason
     # as `admit_unspecified`: measurable rather than inherited.
     admit_universal_purpose: bool = True
+    # Whether a risk-band question also admits its risk-unspecified parent, per
+    # `SETTING_PARENTS`. A parameter for the same reason as the two above: the retrieval
+    # evaluation prices it rather than inheriting it.
+    admit_parent_setting: bool = True
 
     def invariants(self) -> "Filter":
         """The same filter with every routing dimension dropped.
@@ -203,6 +254,7 @@ class Filter:
             self.cancer_type,
             admit_unspecified=self.admit_unspecified,
             admit_universal_purpose=self.admit_universal_purpose,
+            admit_parent_setting=self.admit_parent_setting,
         )
 
     def widen(self) -> "Filter | None":
@@ -247,9 +299,11 @@ class Filter:
                 EvidenceChunk.disease_setting == UNSPECIFIED,
                 EvidenceChunk.not_specified_reason.in_(self.admit_unspecified),
             )
-            clauses.append(
-                sa.or_(EvidenceChunk.disease_setting == self.disease_setting, universal)
-            )
+            admitted = [self.disease_setting]
+            parent = SETTING_PARENTS.get(self.disease_setting)
+            if self.admit_parent_setting and parent is not None:
+                admitted.append(parent)
+            clauses.append(sa.or_(EvidenceChunk.disease_setting.in_(admitted), universal))
         if self.therapy_line is not None:
             clauses.append(
                 EvidenceChunk.therapy_line.in_((self.therapy_line, "not_applicable"))
@@ -297,10 +351,26 @@ class RetrievedChunk:
     # which is the fusion's, because the two are not comparable and the reader should be able
     # to see which one ordered the list.
     relevance: float | None = None
+    # What the safety rules said about this passage for this patient. Empty when no engine
+    # ran, which is the default -- retrieval without a ledger cannot judge patient safety.
+    safety_concerns: tuple[SafetyAnnotation, ...] = ()
 
     @property
     def found_by_both(self) -> bool:
         return self.keyword_rank is not None and self.dense_rank is not None
+
+
+@dataclass(frozen=True)
+class SafetyContext:
+    """What retrieval needs to run the safety rules: an engine and a patient.
+
+    Optional everywhere. Retrieval without a ledger cannot judge whether a passage is safe for
+    a patient it knows nothing about, so the default is to run no rules rather than to run them
+    against an empty ledger and report that nothing fired.
+    """
+
+    engine: SafetyEngine
+    ledger: Ledger
 
 
 # The routing dimensions, each with the clause that tests it. Named so a refusal can say
@@ -491,15 +561,29 @@ class RetrievalReport:
     chunks: list[RetrievedChunk] = field(default_factory=list)
     # Empty unless `trace=True`. Every attempt, in order, strict first.
     attempts: list[AttemptTrace] = field(default_factory=list)
+    # What the safety rules found, or None when no engine was supplied.
+    safety: SafetyReport | None = None
 
 
 def reciprocal_rank_fusion(rankings: list[list[str]], k: int = RRF_K) -> list[tuple[str, float]]:
-    """Combine rankings by position rather than by score."""
+    """Combine rankings by position rather than by score.
+
+    **Ties break on chunk id, and that is not cosmetic.** Passages found at the same rank by
+    the same legs score identically, and Python's sort is stable, so the order of equals was
+    whatever order PostgreSQL happened to return the rows in. Two identical runs of the
+    retrieval evaluation returned the same ten passages for `pr-001` in different orders, and
+    at the rank-10 boundary a tie could push a labelled passage in or out — `bl-006` scored
+    both 0.50 and 1.00 across runs of the same arm.
+
+    That made every comparison in the evaluation untrustworthy: a change of 0.05 between two
+    arms could be the change, or could be a coin toss. Ordering by id is arbitrary but fixed,
+    which is all a comparison needs.
+    """
     scores: dict[str, float] = defaultdict(float)
     for ranking in rankings:
         for rank, chunk_id in enumerate(ranking, start=1):
             scores[chunk_id] += 1.0 / (k + rank)
-    return sorted(scores.items(), key=lambda pair: -pair[1])
+    return sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
 def _to_chunk(
@@ -509,6 +593,7 @@ def _to_chunk(
     relevance: float | None,
     keyword_rank: int | None,
     dense_rank: int | None,
+    safety_concerns: tuple[SafetyAnnotation, ...] = (),
 ) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=row.chunk_id,
@@ -530,6 +615,7 @@ def _to_chunk(
         keyword_rank=keyword_rank,
         dense_rank=dense_rank,
         relevance=relevance,
+        safety_concerns=safety_concerns,
     )
 
 
@@ -592,7 +678,9 @@ async def _keyword_leg(
     statement = (
         _base_select()
         .where(sa.and_(*clauses, matches))
-        .order_by(rank.desc())
+        # Ties broken on chunk id, for the reason given in `reciprocal_rank_fusion`:
+        # otherwise the row order decides, and two identical runs disagree.
+        .order_by(rank.desc(), EvidenceChunk.chunk_id)
         .limit(CANDIDATE_LIMIT)
     )
     return list((await session.execute(statement)).all())
@@ -628,7 +716,7 @@ async def _dense_leg(
                 EvidenceChunk.embedding_model == embedding_model,
             )
         )
-        .order_by(distance)
+        .order_by(distance, EvidenceChunk.chunk_id)
         .limit(CANDIDATE_LIMIT)
     )
     return list((await session.execute(statement)).all())
@@ -646,6 +734,7 @@ async def _search(
     reranker: Reranker | None,
     floor: float,
     trace: bool,
+    safety: "SafetyContext | None" = None,
 ) -> RetrievalReport:
     """Retrieve the passages an agent may see for one clinical question.
 
@@ -703,6 +792,22 @@ async def _search(
 
             fused = reciprocal_rank_fusion([list(keyword_order), list(dense_order)])
 
+            # **Between fusion and reranking**, per the safety-rules build plan. The engine
+            # sees every fused candidate rather than only the head, so a hazard ranked 40th is
+            # still annotated -- and in v1 nothing is removed, because every rule's action is
+            # FLAG. `excluded` is therefore empty and this filter is a no-op that exists so the
+            # path is tested rather than written later under pressure.
+            if safety is not None:
+                report.safety = safety.engine.apply(
+                    safety.ledger,
+                    [
+                        SafetyPassage(chunk_id=chunk_id, text=by_id[chunk_id].text)
+                        for chunk_id, _ in fused
+                    ],
+                )
+                if report.safety.excluded:
+                    fused = [(c, s) for c, s in fused if c not in report.safety.excluded]
+
             if attempt is not None:
                 attempt.keyword_ids = list(keyword_order)
                 attempt.dense_ids = list(dense_order)
@@ -721,6 +826,9 @@ async def _search(
                         relevance=None,
                         keyword_rank=keyword_order.get(chunk_id),
                         dense_rank=dense_order.get(chunk_id),
+                        safety_concerns=(
+                            report.safety.for_chunk(chunk_id) if report.safety else ()
+                        ),
                     )
                     for chunk_id, score in fused[:limit]
                 ]
@@ -754,7 +862,10 @@ async def _search(
                 for (chunk_id, score), relevance in zip(candidates, relevances, strict=True)
             ]
             kept = sorted(
-                (item for item in scored if item[2] >= floor), key=lambda item: -item[2]
+                (item for item in scored if item[2] >= floor),
+                # Relevance first, then chunk id -- a cross-encoder returns equal scores
+                # often enough that the tie must be broken by something reproducible.
+                key=lambda item: (-item[2], item[0]),
             )
 
             if attempt is not None:
@@ -779,6 +890,9 @@ async def _search(
                         relevance=relevance,
                         keyword_rank=keyword_order.get(chunk_id),
                         dense_rank=dense_order.get(chunk_id),
+                        safety_concerns=(
+                            report.safety.for_chunk(chunk_id) if report.safety else ()
+                        ),
                     )
                     for chunk_id, score, relevance in kept[:limit]
                 ]
@@ -828,6 +942,7 @@ async def search(
     limit: int = 10,
     floor: float = RELEVANCE_FLOOR,
     trace: bool = False,
+    safety: "SafetyContext | None" = None,
 ) -> RetrievalReport:
     """Retrieve the passages an agent may see for one clinical question.
 
@@ -852,6 +967,7 @@ async def search(
         reranker=reranker,
         floor=floor,
         trace=trace,
+        safety=safety,
     )
 
 
@@ -865,6 +981,7 @@ async def search_without_reranking(
     filter: Filter,
     limit: int = 10,
     trace: bool = False,
+    safety: "SafetyContext | None" = None,
 ) -> RetrievalReport:
     """Filter, search and fuse, with no cross-encoder and no relevance floor.
 
@@ -887,4 +1004,5 @@ async def search_without_reranking(
         reranker=None,
         floor=RELEVANCE_FLOOR,
         trace=trace,
+        safety=safety,
     )

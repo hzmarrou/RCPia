@@ -1,0 +1,52 @@
+{
+  "document_id": "siog.geriatric-assessment.2014",
+  "note": "Wildiers 2014, SIOG's consensus on geriatric assessment, and one of the two papers SIOG's own guidance pages still list as its formal references. Re-converted on 24 August: the earlier markdown carried 115 symbol-font glyph codes -- `/H11021` for `<`, `/H11350` for `>=` -- which the builder refused, and corpus v4.0 had repaired 27 of them by hand in the release rather than in the source. The new conversion has none, and keeps 134 table rows the old one lost.\n\nNothing in it is about a disease stage. It is about how to assess an older patient with any cancer, which is why corpus v4.0 routes all 114 of its passages to `general_principle` and why this file agrees.\n\nThe journal masthead and the article-type label are headings with no body, so they never become passages and need no rule -- the audit said so, which is what it is for.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Which domains to assess, with which instruments, and what the assessment predicts. True at every stage of every cancer."
+  },
+  "rules": [
+    {
+      "match_section": "REFERENCES",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "AUTHORS' DISCLOSURES",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "AUTHOR CONTRIBUTIONS",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Appendix",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Table A",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "The appendix data tables, which the conversion promoted to top-level sections beside the appendix rather than beneath it. Corpus v4.0 blocked 8 appendix passages of this document the same way."
+    }
+  ]
+}

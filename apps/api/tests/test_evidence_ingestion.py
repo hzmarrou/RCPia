@@ -389,6 +389,79 @@ async def test_an_unchanged_passage_is_not_embedded_again(
     assert second.embedded == []
 
 
+async def test_a_decision_table_is_stored_and_indexed_but_never_embedded(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """A table of bands and cutoffs is exact tokens. Full-text search matches `PSA < 10`; a
+    vector cannot tell it from `PSA > 20`, so the dense leg is given nothing to match."""
+    directory = release(
+        tmp_path, [document()], [chunk(unit_type="decision_table", embedding_eligible=False)]
+    )
+    embedder = FakeEmbedder()
+
+    report = await ingest_release(session, directory=directory, embedder=embedder)
+
+    assert embedder.embedded == [], "a decision table was sent to the embedder"
+    assert report.embedded == 0
+    assert report.chunks_inserted == 1
+    stored = (await session.execute(sa.select(EvidenceChunk))).scalars().all()
+    assert len(stored) == 1
+    # Stored and answerable -- keyword-only is not exclusion.
+    assert stored[0].embedding is None
+    assert stored[0].retrieval_eligible is True
+    assert stored[0].keyword_text
+
+
+async def test_a_keyword_only_passage_is_not_re_embedded_on_every_ingest(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """A passage with no vector is never `fresh` by the usual test, so deciding this after
+    freshness would send every decision table to the embedder on every single ingest."""
+    directory = release(
+        tmp_path, [document()], [chunk(unit_type="decision_table", embedding_eligible=False)]
+    )
+    await ingest_release(session, directory=directory, embedder=FakeEmbedder())
+
+    second = FakeEmbedder()
+    await ingest_release(session, directory=directory, embedder=second)
+
+    assert second.embedded == []
+
+
+async def test_a_passage_that_becomes_keyword_only_loses_its_vector(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Otherwise a table embedded under an earlier release keeps answering the dense leg
+    forever, and the change would be invisible."""
+    await ingest_release(
+        session, directory=release(tmp_path, [document()], [chunk()]), embedder=FakeEmbedder()
+    )
+    before = (await session.execute(sa.select(EvidenceChunk))).scalars().all()
+    assert before[0].embedding is not None
+
+    directory = release(
+        tmp_path, [document()], [chunk(unit_type="decision_table", embedding_eligible=False)]
+    )
+    await ingest_release(session, directory=directory, embedder=FakeEmbedder())
+
+    after = (await session.execute(sa.select(EvidenceChunk))).scalars().all()
+    assert after[0].embedding is None
+    assert after[0].embedding_model is None
+
+
+async def test_a_release_that_says_nothing_about_embedding_is_embedded(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Every release before v5.0 omits the field, and omitting it must not silently strip the
+    corpus of its vectors."""
+    directory = release(tmp_path, [document()], [chunk()])
+    embedder = FakeEmbedder()
+
+    await ingest_release(session, directory=directory, embedder=embedder)
+
+    assert len(embedder.embedded) == 1
+
+
 async def test_an_edited_passage_is_re_embedded_and_replaced(
     session: AsyncSession, tmp_path: Path
 ) -> None:

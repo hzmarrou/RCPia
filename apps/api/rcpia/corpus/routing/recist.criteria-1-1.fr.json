@@ -1,0 +1,13 @@
+{
+  "document_id": "recist.criteria-1-1.fr",
+  "note": "RECIST 1.1, the criteria themselves, in French -- the Eisenhauer revision that defines target and non-target lesions and the four response categories.\n\n**What the corpus carries here is the definition, not the arithmetic.** Whether a 27% shrinkage is a partial response is a calculation, and calculations belong in `rcpia/rules/`, the same line the MNA cut-point sits on. What a passage can usefully say is what counts as a measurable lesion, how many target lesions to follow, and why a response must be confirmed -- the judgements a threshold cannot carry.\n\nNo rules: the document is three passages under two headings and carries no bibliography of its own.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Response evaluation applies to any measurable solid tumour under treatment, whatever the disease setting. Routing it to one would hide it from the others. Serves treatment_response throughout: The criteria define what a response to treatment is. Nothing else.",
+    "purposes": [
+      "treatment_response"
+    ]
+  },
+  "rules": []
+}

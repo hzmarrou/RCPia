@@ -1,0 +1,172 @@
+{
+  "document_id": "nccn.bladder.3.2026",
+  "furniture_ends_section": true,
+  "note": "NCCN Clinical Practice Guidelines in Oncology: bladder cancer, version 3.2026. **`furniture_ends_section` is true for this document, and it is the reason it could be routed at all.** NCCN prints a version banner at `#` on every page while every real chapter is `##`. Dropping the banner as page furniture -- which it plainly is -- left each chapter attached to the last `#` that survived. Here that was `Primary Carcinoma of the Urethra`, holding 156 of the document's 282 passages -- and the urethra is out of scope, so a rule excluding it correctly would have deleted more than half the guideline. It now holds the 5 passages it actually owns. Declaring that the banner ends the section it interrupts puts the chapters back at the root, where a rule can name them.\n\n**The NMIBC rules are stated before the MIBC ones, and the reason is a substring.** NCCN writes `Non–Muscle-Invasive Bladder Cancer` with an en dash, and `Muscle-Invasive Bladder Cancer` sits inside it. A rule naming the muscle-invasive disease would claim the non-muscle-invasive chapters first if it came first -- which is the same trap as mCRPC inside nmCRPC, now seen in three documents. Both values are valid, so nothing would have complained.\n\nLike its prostate counterpart, this guideline also documents diseases that are not bladder cancer: upper-tract urothelial carcinoma, the renal pelvis and ureter, and primary carcinoma of the urethra. `out_of_scope_disease` was created for exactly this document.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "spans_settings",
+    "note": "The principles chapters -- surgical management, imaging, pathology, systemic therapy -- which are written per modality and cross the disease states."
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry"
+    },
+    {
+      "match_section": "ABBREVIATIONS",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "NCCN Clinical Practice Guidelines in Oncology",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "Upper GU Tract",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "out_of_scope_disease"
+    },
+    {
+      "match_section": "Upper Tract Urothelial",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "out_of_scope_disease"
+    },
+    {
+      "match_section": "Upper Tract Tumors",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "out_of_scope_disease",
+      "every_occurrence": true,
+      "note": "`Intrapelvic and Intravesical Therapy for Upper Tract Tumors`, which the two rules above miss: it says neither `Upper GU Tract` nor `Upper Tract Urothelial`. Found by the loader, whose own out-of-scope list is defence in depth and says so -- \"the corpus agent is excluding these sections at source, where the document structure is still available; we only have the flattened path\". It was right and this file was wrong."
+    },
+    {
+      "match_section": "Renal Pelvis",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "out_of_scope_disease",
+      "note": "The AJCC staging table for renal pelvis and ureter."
+    },
+    {
+      "match_section": "Urethra",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "out_of_scope_disease",
+      "note": "Primary carcinoma of the urethra. Five passages now; before the layout was declared it was 156, most of them belonging to other chapters entirely."
+    },
+    {
+      "match_section": "NMIBC",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "every_occurrence": true,
+      "note": "Stated before any muscle-invasive rule. Covers BCG-unresponsive disease, high-risk NMIBC and the intravesical treatment sections."
+    },
+    {
+      "match_section": "Non–Muscle-Invasive",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "every_occurrence": true,
+      "note": "The spelled-out form, with the en dash NCCN uses. Also stated before the muscle-invasive rule, whose needle is a substring of this one."
+    },
+    {
+      "match_section": "Intravesical",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "every_occurrence": true,
+      "note": "Instillation therapy is the non-muscle-invasive treatment."
+    },
+    {
+      "match_section": "BCG",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "every_occurrence": true,
+      "note": "BCG is given for non-muscle-invasive disease; the BCG shortage section is about how to ration it among those patients."
+    },
+    {
+      "match_section": "Muscle-Invasive",
+      "setting": "bladder_mibc_non_metastatic",
+      "every_occurrence": true,
+      "note": "Reaches only what the non-muscle-invasive rules above did not claim."
+    },
+    {
+      "match_section": "Neoadjuvant Chemotherapy",
+      "setting": "bladder_mibc_non_metastatic",
+      "every_occurrence": true,
+      "note": "Cisplatin-based chemotherapy before cystectomy."
+    },
+    {
+      "match_section": "Bladder Preservation",
+      "setting": "bladder_mibc_non_metastatic",
+      "every_occurrence": true,
+      "purposes": [
+        "modality_selection"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `modality_selection` is what the section is for, taken from its own heading."
+    },
+    {
+      "match_section": "Cystectomy",
+      "setting": "bladder_mibc_non_metastatic",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Metastatic Disease",
+      "setting": "bladder_metastatic",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Enfortumab Vedotin",
+      "setting": "bladder_metastatic",
+      "every_occurrence": true,
+      "note": "Offered in the metastatic setting."
+    },
+    {
+      "match_section": "FOLLOW-UP",
+      "setting": "not_specified",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 6 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
+    },
+    {
+      "match_section": "Pathology and Staging",
+      "setting": "not_specified",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 3 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
+    },
+    {
+      "match_section": "Histology",
+      "setting": "not_specified",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
+    }
+  ]
+}

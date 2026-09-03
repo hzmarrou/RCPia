@@ -1,0 +1,14 @@
+{
+  "document_id": "siog.geriatric-screening.2015",
+  "note": "SIOG's screening-tools update, Decoster 2015, and still one of SIOG's two listed formal references for geriatric assessment. This is where the G8 cutoff comes from -- the threshold `rules/referrals.py` fires on at G8 <= 14 and cannot yet be believed, because no loaded guideline supported it. Loading this is what licenses that rule.\n\nCorpus v4.0 routes all 81 of its passages to `general_principle`, and this file agrees: nothing in a paper about which screening instrument to use is about a disease stage.\n\nNo rules at all. Its bibliography -- 64 of its 102 headings -- is marked by stage 1 rather than by a rule, because a rule matches a heading it can name and there is no naming sixty-four citations.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Which instrument, at what cutoff, for whom. True at every stage of every cancer. Serves screening, risk_stratification throughout: Which geriatric screening instrument to use and at what cutoff -- screening in order to stratify, which is why it carries both.",
+    "purposes": [
+      "screening",
+      "risk_stratification"
+    ]
+  },
+  "rules": []
+}

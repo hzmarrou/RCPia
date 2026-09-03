@@ -18,7 +18,13 @@ from dataclasses import asdict, dataclass
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rcpia.cases.fact_schema import FIELDS_BY_KEY, REPORTED_ABSENT, fields_for
+from rcpia.cases.fact_schema import (
+    FIELDS_BY_KEY,
+    REPORTED_ABSENT,
+    absence_answers,
+    fields_for,
+    is_reported_absent,
+)
 from rcpia.core.models import (
     AuditEvent,
     Case,
@@ -54,6 +60,10 @@ class LedgerReading:
     source_excerpt: str | None = None
     source_document_id: str | None = None
     source_chunk_id: str | None = None
+    # Every chunk `source_excerpt` was assembled from, `source_chunk_id` included. A
+    # multi-paragraph imaging report spans several; naming only one meant a citation could
+    # send a reviewer to a page that does not hold the sentence being quoted.
+    source_chunk_ids: tuple[str, ...] = ()
     fact_id: str | None = None
 
 
@@ -71,6 +81,7 @@ class LedgerEntry:
     source_excerpt: str | None = None
     source_document_id: str | None = None
     source_chunk_id: str | None = None
+    source_chunk_ids: tuple[str, ...] = ()
     fact_id: str | None = None
     corrected: bool = False
     # Populated when the dossier says more than one thing: every reading with its own
@@ -90,6 +101,11 @@ def highlight_for(status: FactStatus) -> str:
 # letter of the matching label turns `ptnm` into `Ptnm` and `oms` into `Oms`, which reads
 # as a typo to the clinicians these labels are for.
 DISPLAY_OVERRIDES: dict[str, str] = {
+    # Asked as a question, because it is one, and because the clinician answering it is what
+    # authorises the two prostate nomograms to compute anything at all.
+    "prostate_adenocarcinoma_confirmed": (
+        "Adénocarcinome prostatique confirmé histologiquement ?"
+    ),
     "ptnm": "pTNM",
     "cis": "CIS",
     "who_status": "OMS",
@@ -181,9 +197,44 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
     readings = await current_readings(session, case_id=case.id)
     entries: list[LedgerEntry] = []
 
+    # **A confirmation answers a histology, and stops answering when that histology changes.**
+    # The clinician who confirmed adenocarcinoma did so having read a particular pathology
+    # line; if that line is later corrected, their answer was given about something else and
+    # cannot carry over. Resolved here, where both facts' timestamps are available, so the
+    # stored version -- the thing agents and the fiche read -- already holds the right answer
+    # rather than leaving every reader to work it out again.
+    histology_rows = readings.get("histology") or []
+    histology_recorded_at = histology_rows[0].created_at if histology_rows else None
+
     for spec in fields_for(case.cancer_type):
         rows = readings.get(spec.key) or []
         fact = rows[0] if rows else None
+
+        if (
+            fact is not None
+            and spec.key == ADENOCARCINOMA_CONFIRMATION
+            and histology_recorded_at is not None
+            and fact.created_at is not None
+            and histology_recorded_at > fact.created_at
+        ):
+            entries.append(
+                LedgerEntry(
+                    key=spec.key,
+                    label=display_label(spec.key),
+                    category=str(spec.category),
+                    value=None,
+                    status=str(FactStatus.missing),
+                    origin=str(FactOrigin.machine),
+                    highlight=RED,
+                    unit=spec.unit,
+                    note=(
+                        "Le type histologique a été modifié après cette confirmation : "
+                        "la question doit être posée à nouveau."
+                    ),
+                )
+            )
+            continue
+
         if fact is None:
             entries.append(
                 LedgerEntry(
@@ -199,22 +250,41 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
             )
             continue
 
+        # `RAS` on a field where absence cannot be an answer is an empty box, not a finding.
+        # Recorded as missing so the query builder, the completeness check, the agents and the
+        # rendered page all read it the same way -- and the form's own wording is kept in the
+        # note, because "the box said RAS" and "nobody filled the box" are different facts about
+        # the dossier even though both leave the value unknown.
+        blank_box = (
+            fact.value is not None
+            and is_reported_absent(fact.value)
+            and not absence_answers(spec.key)
+        )
+        note = fact.note
+        if blank_box:
+            note = (
+                "Le formulaire porte « RAS » pour ce champ. « Rien à signaler » ne peut pas "
+                "répondre à un type histologique, un grade ou un stade : la valeur est traitée "
+                "comme absente."
+            )
+
         entries.append(
             LedgerEntry(
                 key=spec.key,
                 label=display_label(spec.key),
                 category=str(spec.category),
-                value=fact.value,
-                status=str(fact.status),
+                value=None if blank_box else fact.value,
+                status=str(FactStatus.missing) if blank_box else str(fact.status),
                 origin=str(fact.origin),
-                highlight=highlight_for(fact.status),
+                highlight=RED if blank_box else highlight_for(fact.status),
                 unit=spec.unit,
-                note=fact.note,
+                note=note,
                 source_excerpt=fact.source_excerpt,
                 source_document_id=(
                     str(fact.source_document_id) if fact.source_document_id else None
                 ),
                 source_chunk_id=str(fact.source_chunk_id) if fact.source_chunk_id else None,
+                source_chunk_ids=tuple(str(cid) for cid in (fact.source_chunk_ids or ())),
                 fact_id=str(fact.id),
                 corrected=fact.origin is FactOrigin.human,
                 readings=tuple(
@@ -227,6 +297,9 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
                         source_chunk_id=(
                             str(row.source_chunk_id) if row.source_chunk_id else None
                         ),
+                        source_chunk_ids=tuple(
+                            str(cid) for cid in (row.source_chunk_ids or ())
+                        ),
                         fact_id=str(row.id),
                     )
                     for row in rows
@@ -235,6 +308,51 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
         )
 
     return entries
+
+
+ADENOCARCINOMA_CONFIRMATION = "prostate_adenocarcinoma_confirmed"
+
+# What the clinician's answer has to be, matched **whole** rather than as a substring.
+#
+# Substring matching is what this project has spent seven rounds of review paying for: an
+# early version of this list accepted "confirmé", which matches inside "à confirmer" -- an
+# answer meaning the opposite, authorising a calculator on a question still open. A yes/no
+# question has two answers, so they are compared exactly and everything else is no answer.
+_CONFIRMED = frozenset({"oui", "yes", "o"})
+_DENIED = frozenset({"non", "no", "n"})
+
+
+def adenocarcinoma_confirmation(entries: list[LedgerEntry]) -> str:
+    """The clinician's answer to the eligibility question: `"yes"`, `"no"` or `"unknown"`.
+
+    **Only a human's answer counts.** Extraction may fill this field in as a suggestion, and
+    a suggestion is exactly what seven rounds of review showed cannot be trusted to authorise
+    a calculator: the machine's reading of free text was defeated by a denial, a hedge, a
+    search result, a percentage of zero. So the origin is checked before the value is, and a
+    machine-origin answer -- however confident, however correct it may happen to be --
+    authorises nothing.
+
+    Returned as a string rather than a `Tristate` because the nomogram package owns that type
+    and the ledger should not have to import it to answer a question about its own contents.
+    """
+    for entry in entries:
+        if entry.key != ADENOCARCINOMA_CONFIRMATION:
+            continue
+        if entry.origin != str(FactOrigin.human):
+            return "unknown"
+        # Case and surrounding whitespace only. **Nothing is stripped from the answer
+        # itself.** An earlier version also stripped `.!?`, which turned "Oui ?" -- a
+        # clinician recording that they are not sure -- into an unqualified yes, and both
+        # calculators duly computed. A punctuation mark a person took the trouble to type is
+        # part of what they said, and the only safe reading of an answer this code does not
+        # recognise is that the question is still open.
+        answer = (entry.value or "").strip().lower()
+        if answer in _CONFIRMED:
+            return "yes"
+        if answer in _DENIED:
+            return "no"
+        return "unknown"
+    return "unknown"
 
 
 def missing_keys(entries: list[LedgerEntry]) -> list[str]:

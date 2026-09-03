@@ -1,0 +1,23 @@
+{
+  "document_id": "aspen.malnutrition-risk-screening-oncology",
+  "note": "ASPEN practice tool: malnutrition risk screening in adult oncology outpatients. This is the document that names the screening instruments themselves -- MST, MUST, MNA, NRS-2002, NUTRISCORE and PG-SGA SF -- and says which are validated for ambulatory cancer patients.\n\nWhat it does **not** carry is the score-to-category cut-point. The clinical recommendation says the six tools were validated 'with various cut-points' and the characteristics table is tool-and-description, with no thresholds. So this document tells the panel which instrument is admissible and why; it does not tell it what an MNA of 7 means. That reading lives in `rcpia/rules/support.py` as `MNA_MALNOURISHED`, which is where instrument scoring belongs -- a threshold is arithmetic, not a retrievable statement.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Screening applies on entry to an oncology pathway, before the tumour setting is known. That is the point of screening. Serves screening throughout: Which instrument to screen with, and which are validated for ambulatory cancer patients. Screening is the whole subject.",
+    "purposes": [
+      "screening"
+    ]
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true
+    }
+  ]
+}

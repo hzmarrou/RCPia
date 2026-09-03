@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rcpia.agents.pi_adapter import PiAdapter
 from rcpia.agents.routes import dedupe_key_for
+from rcpia.agents.schemas import SYNTHESIS_ROLE, AgentOutput, SynthesisOutput
 from rcpia.agents.service import run_agent
 from rcpia.auth import security, throttle
 from rcpia.cases.facts import extract_case_facts
@@ -45,16 +46,26 @@ from rcpia.core.models import (
     User,
     UserRole,
 )
+from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.jobs.models import JobType
 from rcpia.main import app
+from rcpia.nomograms.record import Tristate
 from rcpia.pps import generator
-from rcpia.pps.generator import AGENT_LABELS, agent_label
+from rcpia.pps.generator import (
+    AGENT_LABELS,
+    EXPECTED_PANEL,
+    agent_label,
+    build_framework,
+    build_panel,
+)
 from rcpia.pps.render import render_markdown
 from rcpia.pps.schemas import (
     FORBIDDEN_IN_GENERATED_OUTPUT,
     CareFramework,
     Decision,
     DocumentAssertsADecision,
+    PanelAgreement,
+    PanelPoint,
     PpsDocument,
     RationaleAppendix,
     Referral,
@@ -1272,24 +1283,10 @@ async def test_a_ledger_version_is_required(
 # Agent labels — the document is French, and so must every role name in it
 # --------------------------------------------------------------------------------------
 
-# The routing vocabulary a corpus release declares in its `chunk.schema.json`, plus
-# `nutrition`. Written out here because nothing in this repository owns it yet: the release
-# schema is authored by the corpus build, and until `rcpia.corpus` exists there is no Python
-# constant to import. When it does, this tuple should be replaced by that import — which is
-# the point of writing it as a tuple rather than asserting label-by-label.
-CORPUS_AGENT_ROLES = (
-    "urology_oncology",
-    "medical_oncology",
-    "radiation_oncology",
-    "radiology",
-    "pathology",
-    "genetics_molecular",
-    "renal_safety",
-    "nuclear_medicine",
-    "geriatric_frailty",
-    "palliative_supportive",
-    "nutrition",
-)
+# The routing vocabulary, imported rather than restated. It lived here as a literal tuple for
+# exactly as long as nothing owned it; `rcpia.corpus.vocabulary` now does, so a role added there
+# is checked here without anyone remembering to update two places.
+CORPUS_AGENT_ROLES = tuple(sorted(AGENT_ROLES))
 
 
 def test_every_role_the_corpus_can_route_to_has_a_french_label() -> None:
@@ -1312,3 +1309,314 @@ def test_no_label_is_the_english_fallback() -> None:
         assert agent_label(role) != role.replace("_", " ").capitalize(), (
             f"{role} is rendering through the English fallback"
         )
+
+
+# --- The panel block ---------------------------------------------------------------------------
+
+
+def _synthesis(**overrides: object) -> SynthesisOutput:
+    payload: dict = {
+        "agent_role": SYNTHESIS_ROLE,
+        "case_id": "case-1",
+        "recommendation": "Cystectomie après optimisation.",
+        "rationale": "Motif.",
+        "convergences": [
+            {
+                "point": "Pas de cisplatine en l'état.",
+                "agents_agreeing": ["urology_oncology", "medical_oncology"],
+                # Every named speciality carries a quotation from its own opinion; the
+                # schema refuses a convergence that cannot show one.
+                "support": [
+                    {"role": "urology_oncology", "quote": "DFG sous le seuil usuel"},
+                    {"role": "medical_oncology", "quote": "cisplatine non eligible"},
+                ],
+                "evidence_summary": "DFG sous le seuil usuel.",
+            }
+        ],
+        "coverage_gaps": [
+            {
+                "point": "Le carboplatine ne remplace pas le cisplatine.",
+                "raised_by": [
+                    {"role": "medical_oncology", "quote": "cisplatine non eligible"}
+                ],
+                "silent": ["urology_oncology"],
+                "clinical_impact": "Examiné par une seule spécialité.",
+            }
+        ],
+    }
+    payload.update(overrides)
+    return SynthesisOutput.model_validate(payload)
+
+
+def test_the_panel_block_names_who_held_each_point() -> None:
+    """The defect this block exists for was invisible in the fiche: a speciality was recorded
+    as agreeing to a point it never mentioned, and nothing on the page showed it."""
+    panel = build_panel(
+        _synthesis(), ["rcp_synthesis", "urology_oncology", "medical_oncology"]
+    )
+
+    kinds = [point.kind for point in panel.points]
+    assert kinds == ["convergence", "gap"]
+    assert "Oncologie urologique" in panel.points[0].attribution
+    assert "non abordé par Oncologie urologique" in panel.points[1].attribution
+
+
+def test_the_synthesis_is_not_listed_among_the_opinions_it_compared() -> None:
+    """It is the agent doing the comparing. Listing it read as a third speciality agreeing."""
+    panel = build_panel(
+        _synthesis(), ["rcp_synthesis", "urology_oncology", "medical_oncology"]
+    )
+    assert "Rcp synthesis" not in panel.specialities
+    assert panel.specialities == ["Oncologie urologique", "Oncologie médicale"]
+
+
+def test_the_panel_names_the_specialities_that_were_never_asked() -> None:
+    """Naming only the contributors makes any panel read as a complete one.
+
+    Two specialities of eight look like a board rather than a quarter of one, and the illusion
+    strengthens as agents are added: seven names look like all of them. A reader cannot weigh a
+    silence without knowing who was never invited to break it.
+    """
+    panel = build_panel(
+        _synthesis(), ["rcp_synthesis", "urology_oncology", "medical_oncology"]
+    )
+    assert panel.specialities == ["Oncologie urologique", "Oncologie médicale"]
+    assert panel.absent == [
+        "Radiothérapie",
+        "Radiologie",
+        "Anatomopathologie",
+        "Oncogériatrie",
+        "Nutrition clinique",
+        "Soins de support et palliatifs",
+    ]
+    # The synthesis is not a speciality, so it is neither seated nor missing.
+    assert "Rcp synthesis" not in panel.absent
+
+
+def test_an_agent_that_was_asked_and_crashed_is_not_an_agent_nobody_asked() -> None:
+    """`latest_runs` selects successes, so a crashed agent leaves no trace in the document.
+
+    That was a silent omission until the fiche began naming which specialities did not
+    contribute. From then on it became a positive claim, and a false one: the board would read
+    *not asked* where the truth is *asked, and the answer never came back*. Nobody can recover
+    the opinion of a speciality that was never wired; this one exists to be recovered.
+    """
+    panel = build_panel(
+        _synthesis(),
+        ["rcp_synthesis", "urology_oncology", "medical_oncology"],
+        ["radiation_oncology"],
+    )
+    assert panel.failed == ["Radiothérapie"]
+    assert "Radiothérapie" not in panel.absent
+    # The denominator is unchanged: eight are expected however the shortfall is explained.
+    assert len(panel.specialities) + len(panel.absent) + len(panel.failed) == len(
+        EXPECTED_PANEL
+    )
+
+
+def test_the_fiche_asks_for_a_re_run_only_where_an_opinion_was_expected() -> None:
+    """The two sentences ask different things of the reader, so they are two sentences."""
+    document = _minimal_document()
+    document.panel = PanelAgreement(
+        points=[PanelPoint(kind="gap", point="p", attribution="a")],
+        specialities=["Oncologie urologique"],
+        absent=["Nutrition clinique"],
+        failed=["Radiothérapie"],
+    )
+    body = render_markdown(document)
+    assert "Panel incomplet : 1 spécialité(s) sur 3" in body
+    assert "Non sollicitées à ce jour : Nutrition clinique" in body
+    assert "Avis attendu et non obtenu : Radiothérapie" in body
+    assert "relancez l'analyse" in body
+
+
+async def test_a_failed_run_reaches_the_fiche_as_a_missing_answer(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Through the database, because the distinction is drawn by a query, not by a caller.
+
+    A crashed run is invisible to `latest_runs`, so without this the fiche states that the
+    speciality was never consulted -- on a case where it was consulted and the analysis failed.
+    """
+    _, case = await seed_case(session_factory)
+    await run_the_agent(session_factory, case, adapter, blobs, monkeypatch)
+
+    async with session_factory() as session:
+        version = (
+            await session.execute(
+                sa.select(CaseLedgerVersion)
+                .where(CaseLedgerVersion.case_id == case.id)
+                .order_by(CaseLedgerVersion.version.desc())
+            )
+        ).scalars().first()
+        assert version is not None
+        session.add(
+            AgentRun(
+                case_id=case.id,
+                organization_id=case.organization_id,
+                agent_role="radiation_oncology",
+                status=AgentRunStatus.failed,
+                ledger_version_id=version.id,
+                ledger_version=version.version,
+                bundle={},
+                error_message="le processus ne s'est pas terminé",
+            )
+        )
+        await session.commit()
+
+    document = await build_document(session_factory, case)
+    assert "Radiothérapie" in document.framework.participants
+    assert "échec technique" in document.framework.participants
+    # Named as a failure, not folded into the specialities nobody asked.
+    assert "non sollicitées : Radiothérapie" not in document.framework.participants
+
+
+def test_a_complete_panel_carries_no_shortfall() -> None:
+    """A full board is not made to carry a disclaimer about nothing."""
+    panel = build_panel(_synthesis(), [SYNTHESIS_ROLE, *EXPECTED_PANEL])
+    assert panel.absent == []
+
+
+def test_the_fiche_states_the_shortfall_where_it_names_the_participants() -> None:
+    """The panel block only exists for a panel. A single-agent fiche has none, and then this
+    field is the only place saying who was consulted."""
+    framework = build_framework(agent_roles=["urology_oncology"], models=["claude-opus-5"])
+    assert "Panel incomplet : 1 spécialité(s) sur 8" in framework.participants
+    assert "Oncogériatrie" in framework.participants
+
+
+def test_a_single_specialist_produces_no_panel_block() -> None:
+    """One agent has nothing to converge with, and a block announcing unanimity among a single
+    speciality would be worse than no block."""
+    lone = AgentOutput.model_validate(
+        {
+            "agent_role": "urology_oncology",
+            "case_id": "case-1",
+            "recommendation": "Cystectomie.",
+            "rationale": "Motif.",
+        }
+    )
+    assert build_panel(lone, ["urology_oncology"]).points == []
+
+
+def test_the_rendered_block_states_that_silence_is_not_consent() -> None:
+    """A reader who never opens a JSON file has to be able to read the provenance rule."""
+    document = _minimal_document()
+    document.panel = build_panel(
+        _synthesis(), ["rcp_synthesis", "urology_oncology", "medical_oncology"]
+    )
+    body = render_markdown(document)
+
+    assert "Concordance du panel" in body
+    assert "n'y a pas consenti" in body
+    assert "Non traité par tous" in body
+    # The block belongs before the plan: a reader should know what was disputed before
+    # reading what is proposed.
+    assert body.index("Concordance du panel") < body.index("PROPOSITIONS DE TRAITEMENTS")
+
+
+# --------------------------------------------------------------------------------------
+# Computed scores on the fiche
+# --------------------------------------------------------------------------------------
+
+PROSTATE_FACTS = {
+    "age": "70",
+    "psa_total": "7.53",
+    "gleason": "7 (3+4)",
+    "ct_dre": "T2a",
+    "cores_positive": "5",
+    "cores_total": "21",
+    "hormone_therapy": "Non",
+    "radiation_therapy": "Non",
+    # Without this, both nomograms now correctly refuse to compute (finding 3): histology is
+    # an eligibility question, and an unrecorded one is `NOT_POSSIBLE`, not `CALCULATED`.
+    "histology": "Adénocarcinome acinaire",
+}
+
+
+def test_a_computed_score_reaches_the_fiche_with_its_model_named() -> None:
+    """**A percentage on a tumour-board document is indistinguishable from an estimate**
+    unless it carries its source, and the whole reason this layer exists is that a language
+    model asked for a probability produces a convincing one."""
+    from rcpia.pps.generator import build_nomograms
+
+    figures = build_nomograms(
+        dict(PROSTATE_FACTS),
+        cancer_type="prostate",
+        # The clinician's answer to the eligibility question. Without it both calculators
+        # correctly refuse, and this test would assert the gate rather than the score.
+        adenocarcinoma_confirmed=Tristate.yes,
+    )
+    briganti = next(f for f in figures if "Briganti" in f.display_name)
+
+    assert briganti.estimates["lymph_node_invasion_percent"] == pytest.approx(3.06, abs=0.01)
+    assert briganti.inputs_used["psa_ng_ml"] == "7.53"
+
+
+def test_the_reconstruction_caveat_is_printed_not_stored() -> None:
+    """Briganti 2012's coefficients were read off a published graphic rather than released as
+    an equation. A reader who cannot see that cannot weigh the number, so it travels onto the
+    page rather than living in a docstring."""
+    from rcpia.pps.generator import build_nomograms
+    from rcpia.pps.render import _nomograms
+
+    class Document:
+        nomograms = build_nomograms(dict(PROSTATE_FACTS), cancer_type="prostate")
+
+    rendered = "\n".join(_nomograms(Document()))
+
+    assert "Coefficients reconstruits" in rendered
+    assert "non une décision" in rendered
+
+
+def test_a_refusal_is_printed_and_names_what_is_missing() -> None:
+    """An absent row is a silence nobody questions; "manque l'antécédent d'hormonothérapie"
+    is an instruction the board can act on."""
+    from rcpia.pps.generator import build_nomograms
+    from rcpia.pps.render import _nomograms
+
+    silent = {k: v for k, v in PROSTATE_FACTS.items() if "therapy" not in k}
+
+    class Document:
+        nomograms = build_nomograms(silent, cancer_type="prostate")
+
+    rendered = "\n".join(_nomograms(Document()))
+
+    assert "non calculé" in rendered
+    assert "antécédent d'hormonothérapie" in rendered
+
+
+def test_the_board_reads_french_not_schema_keys() -> None:
+    """The calculators name their inputs in the published models' terms, which are code. The
+    fiche is the one place those must not appear."""
+    from rcpia.pps.generator import build_nomograms
+    from rcpia.pps.render import _nomograms
+
+    class Document:
+        nomograms = build_nomograms(
+            dict(PROSTATE_FACTS),
+            cancer_type="prostate",
+            adenocarcinoma_confirmed=Tristate.yes,
+        )
+
+    rendered = "\n".join(_nomograms(Document()))
+
+    assert "psa_ng_ml" not in rendered
+    assert "hormone_therapy" not in rendered
+    assert "PSA 7.53" in rendered
+
+
+def test_a_bladder_fiche_carries_no_prostate_score() -> None:
+    """Briganti and the MSKCC prostate models have nothing to say about a bladder tumour, and
+    an empty block prints nothing at all."""
+    from rcpia.pps.generator import build_nomograms
+    from rcpia.pps.render import _nomograms
+
+    class Document:
+        nomograms = build_nomograms({"psa_total": "7.5"}, cancer_type="bladder")
+
+    assert Document.nomograms == []
+    assert _nomograms(Document()) == []

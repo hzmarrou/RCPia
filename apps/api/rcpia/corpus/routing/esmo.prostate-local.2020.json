@@ -1,0 +1,65 @@
+{
+  "document_id": "esmo.prostate-local.2020",
+  "note": "ESMO Clinical Practice Guideline: local and locoregional prostate cancer. Every rule in this file is leaf-matched, and that is not a stylistic choice. The conversion promoted running text to headings, so the ancestors are false: the journal running head `Annals of Oncology` became the parent of the entire document, so almost every passage claims to sit inside it. A rule that named an ancestor would claim the wrong passages with complete confidence. The leaf headings, by contrast, are the guideline's own section titles and say exactly what each passage is about.\n\nThe document is localised and locoregional disease throughout, so the default carries the setting and the rules mark the two places it moves: biochemical recurrence after local treatment, which is a different setting, and the very-high-risk or node-positive chapter, which spans two.",
+  "default": {
+    "setting": "prostate_nonmetastatic_unspecified_risk",
+    "note": "Localised and locoregional prostate cancer, without narrowing the risk group: the management chapters discuss the risk groups together."
+  },
+  "rules": [
+    {
+      "match_section": "REFERENCES",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry"
+    },
+    {
+      "match_section": "METHODOLOGY",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "ACKNOWLEDGEMENTS",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "BCR",
+      "setting": "prostate_biochemical_recurrence",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Claims the biochemical-recurrence chapter and its subsections in one substring: follow-up and BCR, risk stratification, restaging, and observation versus systemic therapy. Recurrence after local treatment is a different setting from the localised disease this guideline otherwise addresses."
+    },
+    {
+      "match_section": "Nodal recurrences based on novel imaging",
+      "setting": "prostate_biochemical_recurrence",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Recurrence detected on PSMA imaging after maximal local therapy. Filed with biochemical recurrence, not with node-positive disease at presentation, because the patient here has already been treated."
+    },
+    {
+      "match_section": "Adjuvant versus salvage RT",
+      "setting": "prostate_biochemical_recurrence",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "MANAGEMENT OF VERY HIGH-RISK AND/OR cN+ DISEASE",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "note": "Very high-risk localised disease and node-positive disease are two settings, and the chapter deliberately treats them together -- its title says `and/or`. Routing it to either one would hide it from the other half of the patients it is written about, so it is left spanning them. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
+    }
+  ]
+}

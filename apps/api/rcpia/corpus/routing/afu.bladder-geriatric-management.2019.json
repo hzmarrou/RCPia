@@ -1,0 +1,65 @@
+{
+  "document_id": "afu.bladder-geriatric-management.2019",
+  "note": "AFU 2019, optimising bladder cancer management in older patients. The most operational of the three: resection complications, instillation therapy, and what a cystectomy costs an older patient. Superseded for treatment decisions by AFU 2024-2026; what it carries is the geriatric adaptation.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Method, resection complications and perioperative management apply to any bladder tumour being resected, whatever its stage."
+  },
+  "rules": [
+    {
+      "match_section": "ScienceDirect",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Références",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Déclaration de liens d'intérêts",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true
+    },
+    {
+      "match_section": "Cystectomie totale",
+      "setting": "bladder_mibc_non_metastatic",
+      "note": "MUST precede the BCG rule. The conversion filed `Cystectomie totale chez le sujet âgé` beneath `BCG-thérapie`, so a rule naming BCG claims the cystectomy sections too -- and cystectomy in an older patient is the question dossier 2 turns on.",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Alternatives à la chirurgie à visée curative",
+      "setting": "bladder_mibc_non_metastatic",
+      "note": "Bladder-preserving alternatives, which arise for muscle-invasive disease."
+    },
+    {
+      "match_section": "Le traitement chirurgical doit-il être modifié",
+      "setting": "bladder_mibc_non_metastatic"
+    },
+    {
+      "match_section": "Mitomycine C",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "note": "Intravesical chemotherapy, given for non-muscle-invasive disease."
+    },
+    {
+      "match_section": "BCG-thérapie",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "note": "Intravesical BCG, given for intermediate and high risk NMIBC. The risk group is not narrowed here.",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Instillation endovésicale",
+      "setting": "bladder_nmibc_unspecified_risk"
+    }
+  ]
+}

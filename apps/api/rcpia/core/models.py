@@ -34,7 +34,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -388,7 +388,19 @@ class ExtractedFact(TimestampMixin, Base):
     )
 
     source_document_id: Mapped[uuid.UUID | None] = mapped_column()
+    # The chunk a reviewer is sent to. Kept as the *first* contributing chunk -- never
+    # renamed or repurposed -- so the existing FK constraint below keeps enforcing that a
+    # machine fact always names one real, traceable location.
     source_chunk_id: Mapped[uuid.UUID | None] = mapped_column()
+    # **Every** chunk the excerpt was assembled from, in order, `source_chunk_id` included.
+    # An imaging report can run across a heading, several findings paragraphs and a
+    # conclusion; `source_excerpt` already quotes all of it, but until this column existed
+    # nothing recorded where the *rest* of it lived, so a citation pointed a reviewer at
+    # `source_chunk_id` alone -- often the acquisition-protocol paragraph the report opens
+    # with -- for a quotation whose diagnostic sentence sat several chunks later. No FK: an
+    # array element can't carry one in Postgres, so traceability for the append-only audit
+    # trail still rests on `source_chunk_id`, and this column is supplementary, not load-bearing.
+    source_chunk_ids: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
     source_excerpt: Mapped[str | None] = mapped_column(Text)
 
     supersedes_fact_id: Mapped[uuid.UUID | None] = mapped_column()
@@ -544,6 +556,12 @@ class AgentRun(TimestampMixin, Base):
     # The deployment that produced the opinion, recorded rather than implied.
     provider: Mapped[str | None] = mapped_column(String(100))
     model: Mapped[str | None] = mapped_column(String(100))
+    # The agent runtime that produced this opinion. Provider and model say which brain
+    # answered; this says which harness put the question, and the two are not the same
+    # deployment. `UploadedDocument.parser_provider_version` records the parser for the same
+    # reason. `None` when the runtime could not be identified, which is the honest reading of
+    # an installation resolved from PATH.
+    runtime_version: Mapped[str | None] = mapped_column(String(50))
 
     bundle: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     output: Mapped[dict | None] = mapped_column(JSONB)
@@ -707,6 +725,110 @@ class AnalysisJob(TimestampMixin, Base):
                 "dedupe_key IS NOT NULL "
                 "AND status IN ('queued', 'running', 'waiting_for_user')"
             ),
+        ),
+    )
+
+
+class AnalysisPanel(TimestampMixin, Base):
+    """One request to run a set of specialists together, on one version of one case.
+
+    **Append-only.** Nothing updates a row here. A panel is a statement about what was asked
+    for at a moment — these roles, this ledger version, this question — and rewriting it later
+    would destroy the only record of what the resulting fiche was actually answering.
+
+    The ledger version is the reason this table exists rather than a list in a job payload. A
+    panel that reported "analysed at version 4" while one of its agents had read version 3
+    would be presenting a comparison between two different patients as if it were one.
+    """
+
+    __tablename__ = "analysis_panels"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    case_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    # The version every job in this panel is pinned to, copied here so the panel can be read
+    # without reassembling it from its jobs.
+    ledger_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    requested_roles: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    clinical_question: Mapped[str | None] = mapped_column(Text)
+    requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column()
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "organization_id"],
+            ["cases.id", "cases.organization_id"],
+            ondelete="RESTRICT",
+            name="fk_analysis_panels_case_same_organization",
+        ),
+        CheckConstraint("ledger_version >= 1", name="panel_pins_a_real_version"),
+        Index("ix_analysis_panels_case_id_created_at", "case_id", "created_at"),
+    )
+
+
+class AnalysisPanelJob(TimestampMixin, Base):
+    """Which job this panel relies on for which speciality.
+
+    **A join table rather than a `panel_id` column on `analysis_jobs`,** because one job can
+    legitimately serve several panels: two panels asking the same speciality the same question
+    about the same ledger version want the same opinion, and running the agent twice would
+    spend a Pi run to produce a second copy of an answer already held. A column would force
+    that job to name one owner and lie to the other.
+
+    One row per (panel, role): a panel that named a speciality has exactly one job it is
+    waiting on for it, which is what makes the synthesis gate decidable.
+    """
+
+    __tablename__ = "analysis_panel_jobs"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    panel_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    agent_role: Mapped[str] = mapped_column(String(64), nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["panel_id"], ["analysis_panels.id"], ondelete="RESTRICT",
+            name="fk_analysis_panel_jobs_panel",
+        ),
+        ForeignKeyConstraint(
+            ["job_id"], ["analysis_jobs.id"], ondelete="RESTRICT",
+            name="fk_analysis_panel_jobs_job",
+        ),
+        UniqueConstraint("panel_id", "agent_role", name="uq_analysis_panel_jobs_panel_role"),
+        Index("ix_analysis_panel_jobs_job_id", "job_id"),
+    )
+
+
+class AnalysisPanelDispatch(TimestampMixin, Base):
+    """That a panel has dispatched a piece of follow-on work, recorded once and for all.
+
+    **This row is the idempotency guarantee, not a log of one.** The synthesis gate is
+    evaluated by whichever worker finishes the last specialist, and two specialists can finish
+    at the same instant on different workers. The unique constraint on `(panel_id,
+    dispatch_kind)` is what makes "exactly one synthesis per panel" a fact the database holds,
+    rather than a property of the order two transactions happened to commit in.
+    """
+
+    __tablename__ = "analysis_panel_dispatches"
+
+    SYNTHESIS = "synthesis"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    panel_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    dispatch_kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["panel_id"], ["analysis_panels.id"], ondelete="RESTRICT",
+            name="fk_analysis_panel_dispatches_panel",
+        ),
+        ForeignKeyConstraint(
+            ["job_id"], ["analysis_jobs.id"], ondelete="RESTRICT",
+            name="fk_analysis_panel_dispatches_job",
+        ),
+        UniqueConstraint(
+            "panel_id", "dispatch_kind", name="uq_analysis_panel_dispatches_panel_kind"
         ),
     )
 

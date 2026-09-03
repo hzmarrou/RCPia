@@ -156,6 +156,120 @@ def _support(item: SupportItem) -> list[str]:
     return [*lines, ""]
 
 
+# The marker for each kind of panel point. A convergence and a disagreement must not look
+# alike at a glance: the board scans this block before it reads it.
+PANEL_MARKS = {"convergence": "🟢", "divergence": "🔴", "gap": "⚪"}
+
+PANEL_KIND_LABELS = {
+    "convergence": "Accord",
+    "divergence": "Désaccord",
+    "gap": "Non traité par tous",
+}
+
+
+def _panel(document: PpsDocument) -> list[str]:
+    """What the specialists agreed on, disagreed on, and did not both address.
+
+    **Not a numbered section.** The six numbered sections are the hospital's own form, and
+    inserting a seventh would renumber a document clinicians read by position. This is a titled
+    block before section 3, the same shape as `Points signalés par RCPia`.
+
+    Rendered only for a panel. One agent has nothing to converge with, and a block announcing
+    unanimity among a single speciality would be actively misleading.
+
+    **Rendered even when no point survives.** Coverage gaps are filtered by `gap_policy` before
+    they reach here, so a panel whose only structure was suppressed silences would otherwise drop
+    the whole block — and with it the sentence saying which specialities were never consulted,
+    exactly when the document looks most settled.
+    """
+    if (
+        not document.panel.points
+        and not document.panel.specialities
+        and not document.panel.failed
+    ):
+        return []
+
+    out = ["**Concordance du panel — lectures non validées**", ""]
+    if document.panel.specialities:
+        out += [
+            "Avis comparés : " + ", ".join(document.panel.specialities) + ".",
+            "",
+        ]
+    if document.panel.absent or document.panel.failed:
+        # The count, not only the names: "2 of 8" is what stops the list reading as the roster.
+        seated = len(document.panel.specialities)
+        total = seated + len(document.panel.absent) + len(document.panel.failed)
+        out += [f"> ⚠️ **Panel incomplet : {seated} spécialité(s) sur {total}.**", ""]
+    if document.panel.absent:
+        out += [
+            "> Non sollicitées à ce jour : "
+            + ", ".join(document.panel.absent)
+            + ". Leur silence dans ce document ne signifie pas qu'elles n'ont rien à dire : "
+            "elles n'ont pas été interrogées.",
+            "",
+        ]
+    if document.panel.failed:
+        # A different sentence, because it asks something different of the reader. Nobody can
+        # recover the opinion of a speciality that was never wired; this one exists to be
+        # recovered, and the document below was assembled without it.
+        # Agreement matters in a document a clinician reads: one speciality failing is the
+        # common case, and "ces spécialités ont été sollicitées" after a single name reads as
+        # carelessness in exactly the sentence that has to be believed.
+        many = len(document.panel.failed) > 1
+        out += [
+            "> ⚠️ **Avis attendu et non obtenu : "
+            + ", ".join(document.panel.failed)
+            + ".** "
+            + (
+                "Ces spécialités ont été sollicitées et leur analyse a échoué."
+                if many
+                else "Cette spécialité a été sollicitée et son analyse a échoué."
+            )
+            + " Le présent document a été établi sans "
+            + ("leur avis" if many else "son avis")
+            + " ; relancez l'analyse avant de vous appuyer sur ce panel.",
+            "",
+        ]
+    if not document.panel.points:
+        out += [
+            "Aucun point de comparaison n'est retenu pour affichage sur ce dossier.",
+            "",
+        ]
+        return out
+    # Stated once, here, because it is the thing this block exists to make visible: an
+    # agreement is only an agreement among the specialities named on its line.
+    out += [
+        "> Chaque point porte les spécialités qui l'ont soutenu. Une spécialité qui ne s'est "
+        "pas exprimée sur un point n'y a pas consenti : elle figure alors comme non traitée.",
+        "",
+    ]
+
+    rows = [("", "Point", "Positions")]
+    for point in document.panel.points:
+        mark = PANEL_MARKS.get(point.kind, "•")
+        label = PANEL_KIND_LABELS.get(point.kind, point.kind)
+        # Separated, because attribution and reasoning are different claims: who held the
+        # point, then why. Run together they read as one sentence and the provenance -- the
+        # thing this block exists to show -- stops being legible. A dash rather than a line
+        # break: `_no_html` keeps markup out of this document, and the renderer should not
+        # grant itself an exemption from a rule it enforces on agent text.
+        detail = f" — *{_inline(point.detail)}*" if point.detail else ""
+        rows.append(
+            (
+                mark,
+                f"**{label}.** {_inline(point.point)}",
+                f"**{_inline(point.attribution)}**{detail}",
+            )
+        )
+
+    out.append("| " + " | ".join(rows[0]) + " |")
+    out.append("|---|---|---|")
+    for row in rows[1:]:
+        out.append("| " + " | ".join(row) + " |")
+    out.append("")
+    return out
+
+
 def render_markdown(document: PpsDocument) -> str:
     """The whole document. French throughout, because the readers are the RCP."""
     out: list[str] = ["# FICHE RCP — PROPOSITION DE PRISE EN CHARGE (PPS)", ""]
@@ -218,6 +332,10 @@ def render_markdown(document: PpsDocument) -> str:
     for referral in document.decision.referrals:
         out += _referral(referral)
 
+    # The panel's agreement structure, before the plan it produced: a reader should know
+    # what was disputed before reading what is proposed.
+    out += _panel(document)
+
     # ------------------------------------------------------------------ 3
     out += [f"# 3 — {SECTION_TITLES[2]}", ""]
     if document.treatments.withheld:
@@ -229,6 +347,8 @@ def render_markdown(document: PpsDocument) -> str:
             "raisonnement complet figure en annexe.",
             "",
         ]
+    out += _nomograms(document)
+
     for index, step in enumerate(document.treatments.steps, start=1):
         out += _step(step, index)
 
@@ -358,6 +478,91 @@ def _evidence_register(document: PpsDocument) -> list[str]:
             f"| `{_escape(entry.id)}` | {_escape(entry.quote)} | {_escape(entry.supports)} |"
         )
     return [*out, ""]
+
+
+# How each endpoint is named for a reader. The keys are the calculators' own, which are
+# English and terse because they are code; a tumour board reads French.
+ENDPOINT_LABELS = {
+    "lymph_node_invasion_percent": "Envahissement ganglionnaire",
+    "lni_percent": "Envahissement ganglionnaire",
+    "ocd_percent": "Maladie confinée à l'organe",
+    "ece_percent": "Extension extracapsulaire",
+    "svi_percent": "Invasion des vésicules séminales",
+    "progression_free_5y_percent": "Survie sans progression à 5 ans",
+}
+
+# The calculators name their inputs in the published models' terms, which are English and
+# terse because they are code. The same names on a tumour-board document would be the one
+# place this project speaks to clinicians in the vocabulary of its own schema.
+INPUT_LABELS = {
+    "age_years": "âge",
+    "psa_ng_ml": "PSA",
+    "clinical_t_stage_dre": "stade clinique T (TR)",
+    "gleason_primary": "Gleason primaire",
+    "gleason_secondary": "Gleason secondaire",
+    "gleason_grade_group": "groupe ISUP",
+    "systematic_positive_cores": "carottes positives",
+    "systematic_negative_cores": "carottes négatives",
+    "systematic_total_cores": "carottes totales",
+    "positive_systematic_cores_percent": "carottes positives (%)",
+    "hormone_therapy": "antécédent d'hormonothérapie",
+    "radiation_therapy": "antécédent de radiothérapie",
+    "prostate_adenocarcinoma_confirmed": (
+        "confirmation d'un adénocarcinome prostatique par le clinicien"
+    ),
+}
+
+
+def _field_label(key: str) -> str:
+    return INPUT_LABELS.get(key, key.replace("_", " "))
+
+
+def _nomograms(document: PpsDocument) -> list[str]:
+    """Computed risks, printed with the model that produced them and its limits.
+
+    **Never a bare percentage.** A figure on a tumour-board document is indistinguishable
+    from an estimate unless it carries its source, and the whole reason this layer exists is
+    that a language model asked for a probability will produce a convincing one. So the model
+    name, the inputs it used and its limitation travel with the number.
+
+    A refusal prints too, naming the measurement it lacks — that is an instruction to the
+    board, where an absent row is merely a silence nobody questions.
+    """
+    if not document.nomograms:
+        return []
+
+    out: list[str] = ["**Scores calculés**", ""]
+    for figure in document.nomograms:
+        if figure.estimates:
+            rows = [
+                (
+                    ENDPOINT_LABELS.get(key, key),
+                    f"{value:.1f} %".replace(".", ","),
+                )
+                for key, value in figure.estimates.items()
+            ]
+            out += [f"*{_inline(figure.display_name)}*", ""]
+            out += _table(rows)
+            out.append("")
+            if figure.inputs_used:
+                used = ", ".join(
+                    f"{_inline(_field_label(key))} {_inline(value)}"
+                    for key, value in figure.inputs_used.items()
+                    if not key.endswith("_used") and not key.startswith("model_")
+                )
+                out += [f"Données utilisées : {used}.", ""]
+        else:
+            missing = ", ".join(
+                _inline(_field_label(item)) for item in figure.missing_fields
+            )
+            out += [
+                f"*{_inline(figure.display_name)}* — non calculé"
+                + (f" : donnée manquante ({missing})." if missing else "."),
+                "",
+            ]
+        if figure.limitation:
+            out += [f"> {_inline(figure.limitation)}", ""]
+    return out
 
 
 def _appendices(document: PpsDocument) -> list[str]:

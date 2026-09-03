@@ -1,0 +1,211 @@
+{
+  "document_id": "eau.prostate.2026",
+  "note": "EAU prostate 2026. This document could not be routed until stage 1 repaired its heading hierarchy: 343 of its passages arrived carrying a deep subsection with no chapter above it, because the markdown's `#` level saturates at three while EAU's numbering runs to seven. With the hierarchy restored, every rule below matches a chapter title rather than a bare number -- `6.4` as a substring also matches `6.6.4`, and the number alone cannot be trusted.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "not_determinable",
+    "note": "EAU numbers every section, so a passage reaching the default sits under a heading that names no clinical situation -- a technique, a complication, a method. That is routing debt to work down with more rules, not a licence to read the body text, which is how v4.0 came to route a passage about diabetes and metformin as locally advanced disease."
+  },
+  "rules": [
+    {
+      "match_section": "9. REFERENCES",
+      "setting": "not_specified",
+      "reason": "not_determinable",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "note": "118 passages -- a fifth of the document. Written as prose rather than as the numbered tables the split stage recognises by shape, so nothing else catches them. Corpus v4.0 excluded 179 bibliography passages this same way, by the section heading."
+    },
+    {
+      "match_section": "10. CONFLICT OF INTEREST",
+      "setting": "not_specified",
+      "reason": "not_determinable",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "11. CITATION INFORMATION",
+      "setting": "not_specified",
+      "reason": "not_determinable",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "12. COPYRIGHT AND TERMS OF USE",
+      "setting": "not_specified",
+      "reason": "not_determinable",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "TABLE OF CONTENTS",
+      "setting": "not_specified",
+      "reason": "not_determinable",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "note": "The contents pages, and the two stray chapter headings that precede them carrying page numbers -- `7. FOLLOW-UP 151` -- which are contents entries the converter promoted to headings."
+    },
+    {
+      "match_section": "FOLLOW-UP 151",
+      "setting": "not_specified",
+      "reason": "not_determinable",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "note": "A contents entry the converter promoted to a chapter heading, page number and all. It appears before chapter 1 in the file. Excluded here so the real chapter 7 rule claims only the real chapter."
+    },
+    {
+      "match_section": "PROSTATE CANCER 157",
+      "setting": "not_specified",
+      "reason": "not_determinable",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "note": "The same, for chapter 8. Without it the chapter-8 rule matches two places and the audit refuses it -- correctly, since one of them is a line from the contents."
+    },
+    {
+      "match_section": "Adverse effects of PCa therapies",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety"
+      ],
+      "every_occurrence": true,
+      "note": "Named `safety_reviewer` because this is a section about harm -- what a treatment costs the patient -- which is what that agent reads for. Its role was absent from the vocabulary until the fitness review; it is earned here, per section, rather than taken from the curation's document-level tag which 84% of records carry. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing. The chapter and its fourteen children -- 18 passages, the largest single block of harm guidance in the corpus."
+    },
+    {
+      "match_section": "5.1 Individual early detection",
+      "setting": "no_known_cancer",
+      "note": "Screening addresses men without a diagnosis. Offering it to a patient already staged is the failure a separate setting exists to prevent."
+    },
+    {
+      "match_section": "5.2 Diagnostic tools",
+      "setting": "no_known_cancer",
+      "note": "PSA, MRI and biomarkers as applied before a diagnosis exists."
+    },
+    {
+      "match_section": "5.3 Pathology of prostate needle biopsies",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "note": "Biopsy reporting applies at every stage. Stated, rather than left to the default, because `spans_settings` is admitted by retrieval and `not_determinable` is not."
+    },
+    {
+      "match_section": "6.2.1.b Active surveillance",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "note": "The chapter covers low and selected intermediate risk together and does not separate them, so neither is claimed."
+    },
+    {
+      "match_section": "6.3.2",
+      "setting": "prostate_localized_intermediate_risk"
+    },
+    {
+      "match_section": "6.3.3",
+      "setting": "prostate_localized_high_risk",
+      "note": "Management of high-risk localised disease. v4.0 routed 6.3.3.a and 6.3.3.b to intermediate risk because their prose mentions intermediate risk, inside a chapter whose title says high. The chapter wins."
+    },
+    {
+      "match_section": "6.3.4.b",
+      "setting": "prostate_node_positive_non_metastatic",
+      "note": "cN1 M0 specifically. MUST precede 6.3.4, the wider locally-advanced chapter that contains it."
+    },
+    {
+      "match_section": "6.3.4",
+      "setting": "prostate_locally_advanced_non_metastatic"
+    },
+    {
+      "match_section": "6.3.5.f",
+      "setting": "prostate_node_positive_non_metastatic",
+      "note": "Adjuvant treatment in pN1 disease."
+    },
+    {
+      "match_section": "6.3.6",
+      "setting": "prostate_biochemical_recurrence",
+      "note": "Persistent PSA after radical prostatectomy. v4.0 sent most of this chapter to intermediate risk on the strength of its prose."
+    },
+    {
+      "match_section": "6.4 Management of PSA-only recurrence",
+      "setting": "prostate_biochemical_recurrence",
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
+    },
+    {
+      "match_section": "6.6 Management of metastatic prostate cancer",
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
+    },
+    {
+      "match_section": "6.7.15",
+      "setting": "prostate_nonmetastatic_castration_resistant",
+      "note": "Non-metastatic castration-resistant disease, and now routed to it. Until 24 August the vocabulary had no value for this, so the rule recorded what could be said -- non-metastatic, risk not narrowed -- and lost `castration-resistant`; corpus v3 made the same substitution. `prostate_nonmetastatic_castration_resistant` was added later that day for AUA's advanced prostate guideline, and this rule was not revisited at the time. Found by a check for rules whose match sets overlap. MUST precede 6.7, whose rule routes castration-resistant disease to the metastatic setting."
+    },
+    {
+      "match_section": "6.7 Treatment: Castration-resistant",
+      "setting": "prostate_metastatic_castration_resistant",
+      "purposes": [
+        "therapy_indication"
+      ],
+      "note": "Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading."
+    },
+    {
+      "match_section": "6.2 Treatment modalities",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "note": "How a treatment is delivered -- surgical technique, radiotherapy dose, complications -- rather than who should receive it. It applies wherever the modality is indicated. Stated rather than left to the default because `spans_settings` is admitted by retrieval and `not_determinable` is not: leaving these on the default makes 100+ passages about operative technique unreachable by every question. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
+    },
+    {
+      "match_section": "6.5 Systemic treatments",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "note": "The drugs themselves. Which patient receives them is decided in 6.3, 6.6 and 6.7, each of which has its own rule."
+    },
+    {
+      "match_section": "8. QUALITY OF LIFE",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "note": "Quality-of-life outcomes are reported across stages. Placed after the exclusion rules so the stray contents entry carrying a page number is excluded rather than routed here."
+    },
+    {
+      "match_section": "5. DIAGNOSTIC EVALUATION",
+      "setting": "not_specified",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 50 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for.",
+      "reason": "not_determinable"
+    },
+    {
+      "match_section": "7. FOLLOW-UP",
+      "setting": "not_specified",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 29 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for.",
+      "reason": "not_determinable"
+    },
+    {
+      "match_section": "3.2.1.b Germline mutations",
+      "setting": "not_specified",
+      "purposes": [
+        "genetics"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `genetics` is taken from the heading, which names what the section is for.",
+      "reason": "not_determinable"
+    }
+  ]
+}

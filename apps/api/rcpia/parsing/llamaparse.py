@@ -19,6 +19,7 @@ from rcpia.parsing.base import (
     BlockType,
     ParsedBlock,
     ParsedDocument,
+    ParsedMarkdown,
     ParseRequest,
     ParserFailed,
     ParserNotConfigured,
@@ -129,6 +130,49 @@ class LlamaParseParser:
                     f"({int(self._timeout_seconds)} s)."
                 )
             await asyncio.sleep(self._poll_interval)
+
+    async def parse_markdown(self, request: ParseRequest) -> ParsedMarkdown:
+        """Convert a document to markdown, reusing the upload and polling above.
+
+        Corpus stage 1 reads `#` levels to rebuild a section path, so the corpus wants the
+        markdown result rather than the JSON one. Everything before the final fetch is
+        identical, and duplicating it here would mean two copies of the retry and failure
+        translation drifting apart.
+        """
+        if self._client is not None:
+            return await self._parse_markdown_with(self._client, request)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            return await self._parse_markdown_with(client, request)
+
+    async def _parse_markdown_with(
+        self, client: httpx.AsyncClient, request: ParseRequest
+    ) -> ParsedMarkdown:
+        job_id = await self._upload(client, request)
+        await self._await_completion(client, job_id)
+        markdown = await self._fetch_markdown(client, job_id)
+        return ParsedMarkdown(provider=self.name, markdown=markdown, job_id=job_id)
+
+    async def _fetch_markdown(self, client: httpx.AsyncClient, job_id: str) -> str:
+        try:
+            response = await client.get(
+                f"{self._base_url}/job/{job_id}/result/markdown", headers=self._headers()
+            )
+        except httpx.HTTPError as exc:
+            raise ParserFailed(f"LlamaParse est injoignable : {exc}") from exc
+
+        if response.status_code >= 400:
+            raise ParserFailed(
+                f"Résultat LlamaParse indisponible (HTTP {response.status_code})."
+            )
+
+        payload = response.json()
+        markdown = payload.get("markdown")
+        if not isinstance(markdown, str) or not markdown.strip():
+            raise ParserFailed(
+                "LlamaParse a renvoyé un markdown vide. Le PDF est probablement une image "
+                "sans couche texte."
+            )
+        return markdown
 
     async def _fetch_result(self, client: httpx.AsyncClient, job_id: str) -> dict[str, Any]:
         try:

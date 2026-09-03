@@ -1,0 +1,128 @@
+{
+  "document_id": "afu.prostate.2024-2026",
+  "note": "AFU prostate. 'Indications therapeutiques' states one risk group per numbered recommendation, so those headings carry the routing and everything beneath them inherits it.",
+  "default": {
+    "setting": "prostate_nonmetastatic_unspecified_risk",
+    "note": "The document is overwhelmingly about non-metastatic prostate cancer, so an unclaimed passage is that -- with the risk group not narrowed. 116 of 144 passages land here, which is high; narrowing it is corpus work, not a format problem."
+  },
+  "rules": [
+    {
+      "match_section": "Complications",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety"
+      ],
+      "every_occurrence": true,
+      "note": "Named `safety_reviewer` because this is a section about harm -- what a treatment costs the patient -- which is what that agent reads for. Its role was absent from the vocabulary until the fitness review; it is earned here, per section, rather than taken from the curation's document-level tag which 84% of records carry. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing."
+    },
+    {
+      "match_section": "Contre-indications",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety"
+      ],
+      "every_occurrence": true,
+      "note": "Named `safety_reviewer` because this is a section about harm -- what a treatment costs the patient -- which is what that agent reads for. Its role was absent from the vocabulary until the fitness review; it is earned here, per section, rather than taken from the curation's document-level tag which 84% of records carry. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing."
+    },
+    {
+      "match_section": "depistage",
+      "setting": "no_known_cancer",
+      "note": "Screening and early detection address men who do not yet have a diagnosis. Routing them as prostate cancer guidance would return screening advice for a patient already staged."
+    },
+    {
+      "match_section": "detection precoce",
+      "setting": "no_known_cancer"
+    },
+    {
+      "match_section": "localise de faible risque",
+      "setting": "prostate_localized_low_risk"
+    },
+    {
+      "match_section": "localise de risque intermediaire",
+      "setting": "prostate_localized_intermediate_risk"
+    },
+    {
+      "match_section": "localise a haut risque",
+      "setting": "prostate_localized_high_risk"
+    },
+    {
+      "match_section": "cn1",
+      "setting": "prostate_node_positive_non_metastatic",
+      "note": "The Python used a word-boundary regex. Verified against the fixture: 'cn1' occurs in one heading and in no longer word, so a substring match is equivalent here."
+    },
+    {
+      "match_section": "stadification > metastatique",
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "note": "Named as a path fragment, not a word. A bare 'metastatique' also reached 'Genetique des formes metastatiques' in a different chapter -- both are metastatic guidance and both were wanted, but one rule spanning two chapters cannot survive a heading being moved. Each chapter names itself."
+    },
+    {
+      "match_section": "genetique des formes metastatiques",
+      "setting": "prostate_metastatic_hormone_sensitive"
+    },
+    {
+      "match_section": "metastases",
+      "setting": "prostate_metastatic_hormone_sensitive"
+    },
+    {
+      "match_section": "Biopsies",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 13 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Diagnostic",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 13 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Stadification",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "staging"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 12 passages that were already falling through. `staging` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Surveillance active",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 10 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Génétique",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "genetics"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 4 passages that were already falling through. `genetics` is taken from the heading, which names what the section is for."
+    }
+  ]
+}

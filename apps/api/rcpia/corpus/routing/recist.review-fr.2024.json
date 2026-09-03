@@ -1,0 +1,24 @@
+{
+  "document_id": "recist.review-fr.2024",
+  "note": "Médecine Nucléaire 2024: a French review of RECIST -- its history, how it is applied, and how the criteria have been adapted. In French, which matters: the tumour board works in French and the corpus keyword leg is configured for both languages.\n\nDistinct from the criteria document beside it, and checked rather than assumed: not one sampled sentence from the other RECIST file appears in this one. This is commentary on the criteria; that one is the criteria.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Response evaluation applies to any measurable solid tumour under treatment, whatever the disease setting. Routing it to one would hide it from the others. Serves treatment_response throughout: A review of those criteria -- their history, application and adaptation.",
+    "purposes": [
+      "treatment_response"
+    ]
+  },
+  "rules": [
+    {
+      "match_section": "Références",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "One rule covers both spellings: the engine normalises `Références` and `References` to the same needle, so stating both is a repeat it refuses -- correctly, since which was meant could not be recovered."
+    }
+  ]
+}

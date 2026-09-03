@@ -1,0 +1,78 @@
+{
+  "document_id": "aua.prostate-early-detection.2026",
+  "note": "AUA/SUO: early detection of prostate cancer, 2023 amended 2026. The whole document is about men who do not have a prostate cancer diagnosis -- PSA screening, whether to biopsy, how to biopsy, and what to do about a biopsy showing HGPIN, ASAP or AIP. None of those patients has cancer yet.\n\nThat makes `no_known_cancer` the setting, and this is the first document in the corpus to use it. It matters for the opposite reason to most routing: these passages must *not* surface for a patient who already has a diagnosis, where the screening question is settled and the treatment question is not what this guideline answers.\n\nThe conversion filed the bibliography inside the closing panel chapter, so the `REFERENCES` rule is stated before the chapter rule that would otherwise claim it.",
+  "default": {
+    "setting": "no_known_cancer",
+    "note": "Detection and diagnosis, before a cancer is established. Serves screening, diagnosis throughout: Whether and how to look for prostate cancer in a man who does not have a diagnosis. The document's setting is `no_known_cancer` for the same reason.",
+    "purposes": [
+      "screening",
+      "diagnosis"
+    ]
+  },
+  "rules": [
+    {
+      "match_section": "REFERENCES",
+      "setting": "no_known_cancer",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "note": "22 passages, filed by the conversion inside the panel chapter below. Stated first so they are excluded as a bibliography rather than as appendix content."
+    },
+    {
+      "match_section": "PANEL, CONSULTANTS, AND STAFF",
+      "setting": "no_known_cancer",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "METHODOLOGY",
+      "setting": "no_known_cancer",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "Chapter and all eight children -- panel formation, searches, abstraction, risk of bias, synthesis, evidence strength, nomenclature, peer review. Checked: none of them is clinical. Also claims `SUMMARY > Methodology`."
+    },
+    {
+      "match_section": "Guideline Panel",
+      "setting": "no_known_cancer",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Amendment Panel",
+      "setting": "no_known_cancer",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Amendment Staff and Consultants",
+      "setting": "no_known_cancer",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "ABBREVIATIONS",
+      "setting": "no_known_cancer",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Biopsy Technique",
+      "setting": "no_known_cancer",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 5 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    }
+  ]
+}

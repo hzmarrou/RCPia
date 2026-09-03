@@ -1,0 +1,68 @@
+{
+  "document_id": "who-iarc.urinary-male-genital.2022",
+  "note": "WHO Classification of Tumours, 5th edition: urinary and male genital tumours. The authority on what a histological diagnosis *is* -- which the guidelines in this corpus assume rather than state. When the EAU-ESMO consensus argues about micropapillary and plasmacytoid variants of urothelial carcinoma, this is the book that defines them.\n\n**This is the first file in the corpus whose default excludes.** Every other document here is about prostate or bladder cancer and the question is which setting a passage belongs to. This one is a reference work covering the whole urinary tract and male genital system: 308 top-level entities, of which kidney, testis, penis, scrotum and adrenal are the majority and none of them is in `CANCER_TYPES`.\n\nWith an admitting default, every entity no rule happened to name would enter the corpus as a general principle -- and `Birt-Hogg-Dube syndrome`, `Seminoma` and `Nephroblastoma` would be retrievable for a prostate question. Inverting it makes the failure mode safe: an entity nobody classified is left out, which loses a passage rather than answering with the wrong disease. Excluding is not deleting; every one of these passages is still written, hashed and traceable, and simply never answers.\n\n**The urethra is deliberately out too.** `out_of_scope_disease` was created when NCCN's bladder guideline turned out to document upper-tract urothelial carcinoma, urothelial carcinoma of the prostate and primary carcinoma of the urethra alongside bladder. Urethral carcinoma has no setting here for the same reason UTUC does not, so the urethral entities and the urethral TNM tables stay out.\n\n**The admitted entities carry `not_specified` rather than an organ setting, and that cost a rewrite.** The first version routed the prostate entities to `prostate_nonmetastatic_unspecified_risk` and the urothelial ones to `bladder_nmibc_unspecified_risk`, because an organ-prefixed setting is the only thing in the vocabulary that separates prostate from bladder passage by passage -- `cancer_types` is a property of the document, and this document is both.\n\nIt was wrong. `Invasive urothelial carcinoma` is precisely not non-muscle-invasive disease, and a histological definition holds at every stage of the disease it defines. Buying organ discrimination by asserting a stage the text does not claim is the failure this whole design exists to prevent, and it would have been invisible: both values are valid, and the audit passes either way.\n\nThe cost of the honest version is real and worth stating: a prostate question can now retrieve a urothelial definition, because both are `not_specified` under a document tagged with both cancer types. That is a ranking problem rather than a correctness one. The fix, if the retrieval evaluation shows it matters, is to split this book into a prostate document and a bladder document with their own specs -- not to relabel the passages.\n\n**A note is not a rule.** The paragraph above always said the urethra was out of scope, and for one passage it was not: the broad `urotheli` admission reached inside the urethral TNM chapter before the default could exclude it. An explicit `urethra` exclusion now leads the file. Anything this file means to keep out has to be stated as a rule, because the default is only consulted for what no rule claimed.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "exclude": true,
+    "exclusion_reason": "out_of_scope_disease",
+    "note": "Kidney, testis, penis, scrotum, adrenal, the genetic tumour syndromes, the mesenchymal and haematolymphoid chapters, the 212 passages of references and the front matter. Anything not explicitly admitted below. Serves pathology, staging throughout: A tumour classification. It says what a diagnosis *is* and carries the TNM tables; it holds no view on treatment.",
+    "purposes": [
+      "pathology",
+      "staging"
+    ]
+  },
+  "rules": [
+    {
+      "match_section": "urethra",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "out_of_scope_disease",
+      "every_occurrence": true,
+      "note": "Stated before every admitting rule, and that placement is the whole point. The file's note always said the urethra was out of scope, but it was left to the default -- and a default only decides what no rule claimed. `urotheli` claimed one passage first: `TNM staging of carcinomas of the urethra > TNM clinical classification > urothelial (transitional cell) carcinoma of the prostate`, which is urothelial carcinoma of the prostatic urethra and one of the three diseases `out_of_scope_disease` was created for. Found by review, not by us: an intention recorded in prose is not a rule."
+    },
+    {
+      "match_section": "Prostatic",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "note": "Acinar adenocarcinoma -- the largest single prostate entity at 28 passages -- plus ductal, intraductal, stromal tumours, cystadenoma and the treatment-related neuroendocrine carcinoma.",
+      "reason": "general_principle"
+    },
+    {
+      "match_section": "of the prostate",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "note": "The entities written the other way round: squamous, adenosquamous and adenoid cystic carcinoma of the prostate, the ICD-O coding table, the chapter introduction and the prostate TNM staging tables.",
+      "reason": "general_principle"
+    },
+    {
+      "match_section": "seminal vesicle",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "note": "Filed with prostate: the seminal vesicle is the organ prostate staging already reaches into -- T3b is seminal vesicle invasion -- and it has no cancer type of its own in the vocabulary.",
+      "reason": "general_principle"
+    },
+    {
+      "match_section": "urotheli",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "note": "Invasive urothelial carcinoma at 41 passages, carcinoma in situ, the non-invasive papillary carcinomas at both grades, papilloma, inverted papilloma, PUNLMP and the squamous carcinoma of the urothelial tract.",
+      "reason": "general_principle"
+    },
+    {
+      "match_section": "bladder",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "note": "Reaches the bladder TNM staging table and verrucous carcinoma of the bladder. Note this admits the urothelial entities under a setting that names a risk group it cannot know; see the note on the file's limits below.",
+      "reason": "general_principle"
+    },
+    {
+      "match_section": "Urachal",
+      "setting": "not_specified",
+      "every_occurrence": true,
+      "note": "A bladder-dome tumour, and one the guidelines in this corpus barely mention.",
+      "reason": "general_principle"
+    }
+  ]
+}

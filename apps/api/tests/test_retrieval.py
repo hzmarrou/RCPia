@@ -1459,3 +1459,199 @@ async def test_attribution_survives_a_filter_that_excludes_general_purposes(
     only = decision.passages[0]
     assert only.found and not only.admitted
     assert only.refused_by == ("clinical_purpose",)
+
+
+# --------------------------------------------------------------------------------------
+# A risk band admits its risk-unspecified parent, and nothing else
+# --------------------------------------------------------------------------------------
+
+
+async def test_a_risk_band_question_reaches_guidance_written_across_the_bands(
+    session: AsyncSession,
+) -> None:
+    """The failure the retrieval evaluation found on its first run.
+
+    AUA's localized guideline heads its chapters `RISK ASSESSMENT` and `RISK-BASED MANAGEMENT`
+    and names risk bands only inside numbered statements, so the corpus routes all 318 of those
+    passages to `prostate_nonmetastatic_unspecified_risk`. Against 14 passages carrying the
+    intermediate band, an intermediate-risk question could see 14 of 332 -- and the single most
+    relevant document for that question was unreachable in its entirety.
+    """
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "across-bands",
+        disease_setting="prostate_nonmetastatic_unspecified_risk",
+        embedding_index=1,
+    )
+
+    decision = await filter_admits(
+        session,
+        filter=Filter(
+            "prostate", disease_setting="prostate_localized_intermediate_risk",
+            clinical_purpose=("therapy_indication",),
+        ),
+        chunk_ids=["across-bands"],
+    )
+    assert decision.admitted == frozenset({"across-bands"})
+
+
+async def test_the_parent_relation_runs_one_way_only(session: AsyncSession) -> None:
+    """**The whole safety argument.** A generalisation admits what was written about a superset
+    of this patient; a widening admits siblings. `widen()` refuses to drop the setting because
+    dropping it offers localized protocols for metastatic disease -- and this must not reopen
+    that door by another route.
+
+    So: intermediate-risk admits risk-unspecified, and risk-unspecified does *not* admit
+    intermediate-risk, because a passage written specifically about one band is not guidance
+    about the others.
+    """
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "intermediate-only",
+        disease_setting="prostate_localized_intermediate_risk",
+        embedding_index=1,
+    )
+
+    decision = await filter_admits(
+        session,
+        filter=Filter(
+            "prostate", disease_setting="prostate_nonmetastatic_unspecified_risk",
+            clinical_purpose=("therapy_indication",),
+        ),
+        chunk_ids=["intermediate-only"],
+    )
+    assert decision.admitted == frozenset()
+    assert decision.passages[0].refused_by == ("disease_setting",)
+
+
+async def test_a_sibling_risk_band_is_still_refused(session: AsyncSession) -> None:
+    """Low-risk and high-risk guidance are not interchangeable. Radical treatment recommended
+    for high-risk disease reaching a low-risk question is the harm this filter exists to stop,
+    and admitting a shared parent must not admit the siblings under it.
+    """
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "high-risk-only",
+        disease_setting="prostate_localized_high_risk",
+        embedding_index=1,
+    )
+
+    decision = await filter_admits(
+        session,
+        filter=Filter(
+            "prostate", disease_setting="prostate_localized_low_risk",
+            clinical_purpose=("therapy_indication",),
+        ),
+        chunk_ids=["high-risk-only"],
+    )
+    assert decision.admitted == frozenset()
+
+
+async def test_a_metastatic_passage_is_never_admitted_by_a_localized_question(
+    session: AsyncSession,
+) -> None:
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "metastatic",
+        disease_setting="prostate_metastatic_hormone_sensitive",
+        embedding_index=1,
+    )
+
+    decision = await filter_admits(
+        session,
+        filter=Filter(
+            "prostate", disease_setting="prostate_localized_intermediate_risk",
+            clinical_purpose=("therapy_indication",),
+        ),
+        chunk_ids=["metastatic"],
+    )
+    assert decision.admitted == frozenset()
+
+
+async def test_a_setting_with_no_parent_is_unaffected(session: AsyncSession) -> None:
+    """`prostate_locally_advanced_non_metastatic` is non-metastatic and is *not* a risk band.
+    cT3-4 is a different clinical entity, not a finer grade of localized disease, so it has no
+    parent in the map and gains nothing from this mechanism.
+    """
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "across-bands",
+        disease_setting="prostate_nonmetastatic_unspecified_risk",
+        embedding_index=1,
+    )
+
+    decision = await filter_admits(
+        session,
+        filter=Filter(
+            "prostate", disease_setting="prostate_locally_advanced_non_metastatic",
+            clinical_purpose=("therapy_indication",),
+        ),
+        chunk_ids=["across-bands"],
+    )
+    assert decision.admitted == frozenset()
+
+
+async def test_parent_admission_can_be_switched_off_for_measurement(
+    session: AsyncSession,
+) -> None:
+    """A parameter rather than a constant, for the same reason as `admit_unspecified`: the
+    retrieval evaluation prices the choice instead of inheriting it.
+    """
+    await add_document(session, "doc")
+    await add_chunk(
+        session,
+        "across-bands",
+        disease_setting="prostate_nonmetastatic_unspecified_risk",
+        embedding_index=1,
+    )
+
+    decision = await filter_admits(
+        session,
+        filter=Filter(
+            "prostate", disease_setting="prostate_localized_intermediate_risk",
+            clinical_purpose=("therapy_indication",),
+            admit_parent_setting=False,
+        ),
+        chunk_ids=["across-bands"],
+    )
+    assert decision.admitted == frozenset()
+
+
+async def test_the_admission_option_survives_into_the_invariant_filter(
+    session: AsyncSession,
+) -> None:
+    """`invariants()` had already lost `admit_universal_purpose` once, which broke refusal
+    attribution. The same trap, one field along.
+    """
+    strict = Filter(
+        "prostate",
+        disease_setting="prostate_localized_intermediate_risk",
+        admit_parent_setting=False,
+    )
+    assert strict.invariants().admit_parent_setting is False
+
+
+def test_fusion_ties_break_on_chunk_id_so_two_runs_agree() -> None:
+    """**A reproducibility property, found by the evaluation rather than by reasoning.**
+
+    Two runs of the same arm returned the same ten passages for one question in different
+    orders, and at the rank-10 boundary a tie pushed a labelled passage in on one run and out
+    on the next -- the same question scoring 0.50 and 1.00 with nothing changed. Every
+    comparison between two arms was worth less than the noise it sat in.
+    """
+    # `beta` and `alpha` are found at the same rank by the same legs, so they score equal.
+    forward = reciprocal_rank_fusion([["beta", "alpha"], ["alpha", "beta"]])
+    backward = reciprocal_rank_fusion([["alpha", "beta"], ["beta", "alpha"]])
+    assert [chunk_id for chunk_id, _ in forward] == ["alpha", "beta"]
+    assert forward == backward
+
+
+def test_fusion_still_orders_by_score_first() -> None:
+    """The tiebreak must not reorder passages that are not tied."""
+    fused = reciprocal_rank_fusion([["zeta", "alpha"], ["zeta", "alpha"]])
+    assert [chunk_id for chunk_id, _ in fused] == ["zeta", "alpha"]

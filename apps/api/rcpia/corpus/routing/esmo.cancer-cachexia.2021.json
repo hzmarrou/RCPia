@@ -1,0 +1,51 @@
+{
+  "document_id": "esmo.cancer-cachexia.2021",
+  "note": "Cancer cachexia in adult patients, ESMO Clinical Practice Guidelines 2021. Cachexia assessment and multimodal treatment in advanced disease -- the axis the corpus was blind to.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Cachexia is defined by the patient's metabolic state rather than by the tumour's stage. A patient with metastatic bladder cancer and one with locally advanced prostate cancer are the same question here. Serves supportive_care throughout: Recognising and managing cachexia.",
+    "purposes": [
+      "supportive_care"
+    ]
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Leaf-matched and every occurrence: the conversion files the reference list under whichever chapter happens to be last, so its path is not predictable but its own heading is."
+    },
+    {
+      "match_section": "ACKNOWLEDGEMENTS",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "FUNDING",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "DISCLOSURE",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    }
+  ]
+}

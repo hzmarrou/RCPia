@@ -448,3 +448,32 @@ def test_a_guideline_passage_carries_what_a_clinician_needs_to_check_it() -> Non
 
     assert passage.clinical_status == "poc_unreviewed"
     assert (passage.page, passage.recommendation_number) == (42, 12)
+
+
+def test_a_full_bundle_cannot_trigger_the_runtime_s_compaction() -> None:
+    """The bundle ceiling is derived from compaction, not chosen.
+
+    The runtime summarises when `contextTokens > contextWindow - reserveTokens`, keeping only
+    the most recent tokens verbatim. A bundle large enough to cross that line would have part
+    of the patient's ledger replaced by a summary, silently, and the agent would reason about a
+    dossier it can no longer quote.
+
+    The previous limit was a round 1,000,000 bytes — roughly 250,000 tokens, nearly double a
+    128k window — so a case at the limit would have been compacted before the agent read it.
+    """
+    from rcpia.agents.bundle import (
+        ASSUMED_CONTEXT_WINDOW_TOKENS,
+        CHARACTERS_PER_TOKEN,
+        MAX_BUNDLE_BYTES,
+        PI_RESERVE_TOKENS,
+    )
+
+    budget_tokens = ASSUMED_CONTEXT_WINDOW_TOKENS - PI_RESERVE_TOKENS
+    bundle_tokens = MAX_BUNDLE_BYTES / CHARACTERS_PER_TOKEN
+
+    assert bundle_tokens < budget_tokens, (
+        "a maximal bundle would be compacted before the agent read it"
+    )
+    # And it leaves room for the agent's own reasoning, tool results and answer, none of which
+    # exist when the bundle is measured.
+    assert bundle_tokens <= budget_tokens / 2

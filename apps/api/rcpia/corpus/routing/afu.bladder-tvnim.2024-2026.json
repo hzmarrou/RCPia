@@ -1,0 +1,85 @@
+{
+  "document_id": "afu.bladder-tvnim.2024-2026",
+  "note": "AFU non-muscle-invasive bladder. The guideline states its risk groups as headings under 'Classification pronostique', so routing follows the authors' own stratification rather than anything inferred from the passages.",
+  "default": {
+    "setting": "bladder_nmibc_unspecified_risk",
+    "note": "The whole document is about NMIBC, so a passage no rule claims is still NMIBC guidance -- diagnosis, resection technique, instillation practice -- and applies at any risk. Absent here means 'risk not narrowed', not 'unknown disease'."
+  },
+  "rules": [
+    {
+      "match_section": "Contre-indications",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "roles": [
+        "urology_oncology",
+        "medical_oncology",
+        "radiation_oncology",
+        "radiology",
+        "pathology",
+        "safety_reviewer"
+      ],
+      "purposes": [
+        "safety"
+      ],
+      "every_occurrence": true,
+      "note": "Named `safety_reviewer` because this is a section about harm -- what a treatment costs the patient -- which is what that agent reads for. Its role was absent from the vocabulary until the fitness review; it is earned here, per section, rather than taken from the curation's document-level tag which 84% of records carry. The setting is the one these passages already carry, so this rule adds roles and purposes and moves nothing."
+    },
+    {
+      "match_section": "tres haut risque",
+      "setting": "bladder_nmibc_very_high_risk",
+      "note": "MUST precede 'haut risque', which is a substring of it. Reversing these two lines silently routes every very-high-risk passage to high risk."
+    },
+    {
+      "match_section": "hauts risques",
+      "setting": "bladder_nmibc_high_risk",
+      "note": "'Nouvelles therapies pour les hauts risques' -- plural, so 'haut risque' does not reach it. Kept as its own rule rather than loosened, because a needle matching both singular and plural would also start matching 'tres haut risque'."
+    },
+    {
+      "match_section": "haut risque",
+      "setting": "bladder_nmibc_high_risk"
+    },
+    {
+      "match_section": "risque intermediaire",
+      "setting": "bladder_nmibc_intermediate_risk"
+    },
+    {
+      "match_section": "faible risque",
+      "setting": "bladder_nmibc_low_risk"
+    },
+    {
+      "match_section": "bas grade",
+      "setting": "bladder_nmibc_low_risk",
+      "note": "'Recidive sous forme d'une tumeur de bas grade multi-recidivante' -- the guideline treats recurrent low-grade disease as low risk without repeating the risk label."
+    },
+    {
+      "match_section": "cis isole",
+      "setting": "bladder_nmibc_cis"
+    },
+    {
+      "match_section": "Anatomopathologie",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 6 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Suivi des TVNIM",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 4 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Bilan diagnostique initial",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 4 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    }
+  ]
+}

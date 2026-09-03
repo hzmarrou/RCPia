@@ -1,0 +1,150 @@
+{
+  "document_id": "aua.prostate-localized.2026",
+  "note": "AUA/ASTRO: clinically localized prostate cancer, 2022 amended 2026. One setting for almost the whole document -- localized disease -- and the risk group is deliberately not narrowed: `RISK-BASED MANAGEMENT` and `PRINCIPLES OF MANAGEMENT` discuss low, intermediate and high risk together, and splitting them by path would claim a stratification the headings do not make. One chapter does name its risk group, and is routed to it.\n\n**`INTRODUCTION` is not excluded wholesale here, unlike in the advanced-prostate file.** Its children are the methodology sections *and* a real `Background`. Excluding the chapter would have taken two passages of clinical background with it, so the methodology subsections are named individually instead. The difference between the two documents was checked rather than assumed.",
+  "default": {
+    "setting": "prostate_nonmetastatic_unspecified_risk",
+    "note": "Clinically localized disease across risk groups, which is what the guideline is about."
+  },
+  "rules": [
+    {
+      "match_section": "REFERENCES",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "note": "22 passages, the largest single block in the document."
+    },
+    {
+      "match_section": "PANEL, CONSULTANTS, AND STAFF",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "The closing chapter and its thirteen subsections: two years of panels, consultants, staff, disclosures, peer reviewers and the disclaimer."
+    },
+    {
+      "match_section": "Guideline Panel",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Amendment Panel",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Amendment Staff and Consultants",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "ABBREVIATIONS",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Methodology",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true,
+      "note": "Leaf-matched: `INTRODUCTION > Methodology` and `SUMMARY > Methodology`, without touching the sibling `INTRODUCTION > Background`, which is clinical."
+    },
+    {
+      "match_section": "Data Sources and Searches",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Study Selection",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Data Abstraction",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Risk of Bias Assessment",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Data Synthesis and Determination of Evidence Strength",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "AUA Nomenclature",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "Peer Review and Document Approval",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "match_leaf": true
+    },
+    {
+      "match_section": "TREATMENT INTENSIFICATION FOR HIGH-RISK DISEASE",
+      "setting": "prostate_localized_high_risk",
+      "every_occurrence": true,
+      "note": "The one chapter that names its risk group. Everything else in this guideline spans the three groups and stays on the default. Purposes added to an existing rule, which changes no routing: the rule already claimed these passages and already gave them this setting. `therapy_indication` is what the section is for, taken from its own heading.",
+      "purposes": [
+        "therapy_indication"
+      ]
+    },
+    {
+      "match_section": "STAGING",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "staging"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 13 passages that were already falling through. `staging` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "FOLLOW-UP AFTER TREATMENT",
+      "setting": "prostate_nonmetastatic_unspecified_risk",
+      "purposes": [
+        "follow_up"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `follow_up` is taken from the heading, which names what the section is for."
+    }
+  ]
+}

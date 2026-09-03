@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import {
   CATEGORY_LABELS,
+  convenePanel,
   correctField,
   type Ledger,
   type LedgerEntry,
@@ -82,6 +83,24 @@ export default function LedgerTable({ initial }: { initial: Ledger }) {
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [convening, setConvening] = useState(false);
+  const [convened, setConvened] = useState(false);
+  const [convenError, setConvenError] = useState<string | null>(null);
+
+  async function convene() {
+    setConvenError(null);
+    setConvening(true);
+    try {
+      await convenePanel(ledger.case_id);
+      setConvened(true);
+    } catch (cause) {
+      setConvenError(
+        cause instanceof Error ? cause.message : "L'analyse n'a pas pu être lancée",
+      );
+    } finally {
+      setConvening(false);
+    }
+  }
 
   function startCorrection(entry: LedgerEntry) {
     setEditing(entry);
@@ -129,6 +148,37 @@ export default function LedgerTable({ initial }: { initial: Ledger }) {
           <p className="error" role="alert">
             L&apos;analyse ne peut pas être lancée tant que les données bloquantes
             ci-dessus ne sont pas renseignées.
+          </p>
+        ) : null}
+
+        {/*
+          The clinician starts the analysis, not the extraction. This button is the moment the
+          page's promise -- check and correct first, the agents only see that version -- stops
+          being a claim and becomes what happens.
+        */}
+        <div className="actions">
+          <button
+            type="button"
+            onClick={convene}
+            disabled={!ledger.can_run_analysis || convening}
+          >
+            {convening ? "Analyse en cours…" : "Lancer l'analyse"}
+          </button>
+        </div>
+        {convened ? (
+          <p role="status">
+            Analyse lancée. Les spécialistes travaillent quelques minutes ; la fiche
+            apparaîtra sur la page du dossier.
+          </p>
+        ) : (
+          <p className="muted">
+            Les spécialistes ne liront que la version affichée ci-dessous. Corrigez
+            d&apos;abord ce qui doit l&apos;être.
+          </p>
+        )}
+        {convenError ? (
+          <p className="error" role="alert">
+            {convenError}
           </p>
         ) : null}
       </section>

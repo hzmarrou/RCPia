@@ -164,6 +164,40 @@ class EvidenceEntry(Strict):
     supports: str | None = None
     source_document_id: str | None = None
     page: int | None = None
+    # Set only when the quotation spans more than one page -- a multi-paragraph imaging
+    # report, typically -- so the register can say "p. 3-5" rather than implying the whole
+    # excerpt sits on page 3.
+    page_end: int | None = None
+
+
+class NomogramFigure(Strict):
+    """One validated calculator's answer, as the board reads it.
+
+    **A computed figure, never an agent's estimate.** The clinician asked for exactly this
+    separation — *nous voulons éviter que le modèle estime lui-même un risque sans utiliser le
+    calculateur validé* — and a number printed on a tumour-board document is where that
+    distinction either holds or is lost, because a plausible estimate and a nomogram's output
+    look identical on the page.
+
+    So the figure never appears without its model, its version and its limitation. Briganti
+    2012's coefficients were reconstructed from a published graphic rather than released as an
+    equation; a reader who cannot see that cannot weigh the number.
+
+    **A refusal is printed too.** "MSKCC : manque l'antécédent d'hormonothérapie" tells the
+    board what to obtain, and is more use to them than an absent row they never think to ask
+    about.
+    """
+
+    display_name: str
+    status: str
+    # Endpoint label to percentage, already rounded for display. Several for MSKCC: organ
+    # confinement drives nerve-sparing and nodal involvement drives the dissection, and those
+    # are separate decisions that a single number would collapse.
+    estimates: dict[str, float] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    inputs_used: dict[str, str] = Field(default_factory=dict)
+    limitation: str = ""
+    source_url: str = ""
 
 
 class RationaleAppendix(Strict):
@@ -277,6 +311,45 @@ class CareFramework(Strict):
     review: str
 
 
+class PanelPoint(Strict):
+    """One line of the panel's agreement structure, as the board reads it.
+
+    Flattened from the synthesis output into a single shape, because a reader scanning the
+    section cares about *what kind of point this is and who held it* before anything else.
+    `kind` drives the marker; `attribution` is the sentence that makes the provenance visible
+    without opening a JSON file — which is precisely what a board cannot do.
+    """
+
+    kind: Literal["convergence", "divergence", "gap"]
+    point: str
+    attribution: str
+    detail: str = ""
+
+
+class PanelAgreement(Strict):
+    """What the specialists agreed on, disagreed on, and did not both address.
+
+    Empty when a single agent produced the document: there is no panel to report on, and a
+    section announcing unanimity among one speciality would be worse than no section.
+    """
+
+    points: list[PanelPoint] = Field(default_factory=list)
+    # Named so the reader knows whose silence is being reported. A gap is only meaningful
+    # against a known set of participants.
+    specialities: list[str] = Field(default_factory=list)
+    # And the ones that did not sit. Naming only the contributors makes any panel read as a
+    # complete one: two specialities of eight look like a board rather than a quarter of one,
+    # and the illusion strengthens as agents are added, because seven names look like all of
+    # them. A reader cannot weigh a silence without knowing who was never asked to speak.
+    absent: list[str] = Field(default_factory=list)
+    # Kept apart from `absent`, because they are different facts and they ask different things
+    # of the board. A speciality nobody wired has no opinion to recover. One that was asked and
+    # whose run failed has an opinion that a re-run would produce, and the decision below was
+    # taken without it. Folding the second into the first makes the fiche assert that nobody
+    # asked, which is not true and is worse than the silence it replaced.
+    failed: list[str] = Field(default_factory=list)
+
+
 class PpsDocument(Strict):
     """A provisional PPS, ready to render.
 
@@ -302,7 +375,13 @@ class PpsDocument(Strict):
     banner: str = PROVISIONAL_BANNER
     synthesis: Synthesis
     decision: Decision
+    # Empty unless a synthesis agent reconciled several specialists.
+    panel: PanelAgreement = Field(default_factory=PanelAgreement)
     treatments: Treatments
+    # Printed inside section 3, before the proposals: the nodal-invasion risk is what decides
+    # whether an extended dissection is proposed, and reading the proposal before its input is
+    # backwards. Empty for a bladder case, where the prostate models do not apply.
+    nomograms: list[NomogramFigure] = Field(default_factory=list)
     support: SupportCare
     social: SocialAssessment
     framework: CareFramework

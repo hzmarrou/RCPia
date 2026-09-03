@@ -1,0 +1,120 @@
+{
+  "document_id": "aua.prostate-advanced.2026",
+  "note": "AUA/SUO: advanced prostate cancer, 2023 amended 2026. Unlike the two AUA bladder guidelines, this one does not sit in a single setting -- it covers four, and names each of them in a top-level chapter. So here the rules carry the setting and the default carries only the remainder.\n\nThe four are biochemical recurrence without metastasis, metastatic hormone-sensitive, non-metastatic castration-resistant, and metastatic castration-resistant. The third is the reason `prostate_nonmetastatic_castration_resistant` was added to the vocabulary on 24 August: this document gives it a chapter whose treatment subsections are apalutamide, darolutamide and enzalutamide, and no existing setting was true of it.\n\n**Rule order is load-bearing in this file.** `METASTATIC CASTRATION-RESISTANT` is a substring of `NON-METASTATIC CASTRATION-RESISTANT`, so the non-metastatic rule is stated first and claims its chapter before the metastatic rule sees it. Reversing those two rules would silently file every nmCRPC recommendation under metastatic disease -- the exact error the new setting exists to prevent, and one that no test would catch because both values are valid.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "spans_settings",
+    "note": "What is left after the four chapters are claimed: the background on disease states and terminology, radiologic considerations, performance status, and future directions. Those discuss advanced prostate cancer across the castration states rather than within one, which is what `spans_settings` says."
+  },
+  "rules": [
+    {
+      "match_section": "REFERENCES",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "PANEL, CONSULTANTS, AND STAFF",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "The chapter and its six subsections: the 2026 panel, consultants, staff, and three years of conflict-of-interest disclosures."
+    },
+    {
+      "match_section": "PEER REVIEW",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "Case-insensitive substring, so it claims the `PEER REVIEWERS 2020`, `2023` and `2026` chapters with their board, external-reviewer and public-commenter subsections, and also `Peer Review and Document Approval` in the front matter. Twelve passages of names."
+    },
+    {
+      "match_section": "INTRODUCTION",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "Every child of this chapter is methodology -- panel formation, searches, data abstraction, risk-of-bias assessment, data synthesis, evidence strength, the AUA nomenclature table. Checked before writing this rule rather than assumed: the chapter has no clinical subsection to lose."
+    },
+    {
+      "match_section": "Methodology",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "The copy in the front-matter SUMMARY, which sits outside the INTRODUCTION chapter above."
+    },
+    {
+      "match_section": "Guideline Panel",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Amendment Panel",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Staff and Consultants",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "ABBREVIATIONS",
+      "setting": "not_specified",
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "NON-METASTATIC CASTRATION-RESISTANT",
+      "setting": "prostate_nonmetastatic_castration_resistant",
+      "every_occurrence": true,
+      "note": "Stated before the metastatic castration-resistant rule, because that rule's needle is a substring of this one. Claims the chapter, its prognosis and treatment subsections -- apalutamide, darolutamide, enzalutamide -- and the matching background section."
+    },
+    {
+      "match_section": "METASTATIC CASTRATION-RESISTANT",
+      "setting": "prostate_metastatic_castration_resistant",
+      "every_occurrence": true,
+      "note": "Reached only by paths the rule above did not claim, which is what makes the shorter needle safe here. Covers prognosis, treatment (abiraterone, enzalutamide), bone health, and the matching background section."
+    },
+    {
+      "match_section": "METASTATIC HORMONE-SENSITIVE",
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "every_occurrence": true
+    },
+    {
+      "match_section": "13. Clinicians should obtain a baseline PSA",
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "every_occurrence": true,
+      "note": "A recommendation the conversion promoted to a top-level chapter, which then swallowed the whole mHSPC treatment section beneath it: abiraterone, apalutamide, enzalutamide, darolutamide, docetaxel and therapeutic decision-making. Twelve passages that would otherwise fall to the document default and lose the setting entirely. The heading names mHSPC itself, and its closing subsection is `THERAPEUTIC DECISION-MAKING IN MHSPC`, so the routing reports the document rather than repairing it."
+    },
+    {
+      "match_section": "BIOCHEMICAL RECURRENCE",
+      "setting": "prostate_biochemical_recurrence",
+      "every_occurrence": true,
+      "note": "Claims the guideline-statement copy, the full chapter with its prognosis and treatment subsections, and the background section -- all three spellings share this substring."
+    }
+  ]
+}

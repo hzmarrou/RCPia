@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
+import AutoRefresh from "./AutoRefresh";
 import { fetchCase, type CaseDocument } from "@/lib/cases";
 
 const SERVER_API_BASE_URL = process.env.API_INTERNAL_BASE_URL ?? API_BASE_URL;
@@ -76,8 +77,17 @@ export default async function CasePage({
     notFound();
   }
 
+  // Still moving: a document that has not finished parsing, or a case that has not yet
+  // reached a reviewable state. Both resolve without the clinician doing anything, so the
+  // page refreshes itself rather than asking them to.
+  const working =
+    clinicalCase.documents.some(
+      (document) => document.parse_status === "pending" || document.parse_status === "parsing",
+    ) || clinicalCase.status === "parsing";
+
   return (
     <section>
+      <AutoRefresh active={working} />
       <h1>{clinicalCase.reference}</h1>
       <dl>
         <dt>Localisation</dt>

@@ -12,6 +12,7 @@ Nothing in this module touches the database; it turns chunks into candidate fact
 
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from rcpia.cases.fact_schema import (
@@ -20,6 +21,7 @@ from rcpia.cases.fact_schema import (
     REPORTED_ABSENT,
     FactCategory,
     FactField,
+    absence_answers,
     is_reported_absent,
 )
 from rcpia.core.models import CancerType, FactStatus
@@ -40,6 +42,33 @@ def normalize_label(label: str) -> str:
 BARE_SCORE_PATTERNS: dict[str, re.Pattern[str]] = {
     "who_status": re.compile(r"\bOMS\s+([0-4])\b", re.IGNORECASE),
 }
+
+# The clinical T stage a urologist writes inside the rectal-examination line.
+#
+#     Toucher rectal : T2a apex droit
+#     Toucher rectal : induration de la base gauche classé T2b.
+#
+# `T` followed by 1-4 and an optional a/b/c, as its own word. Bounded deliberately: `T2`
+# also appears throughout mpMRI reports as a sequence name ("hyposignal T2"), which is why
+# this is read only from `digital_rectal_exam` and never from the dossier at large.
+CLINICAL_T_IN_PROSE = re.compile(r"\b(c?T[1-4][a-c]?)\b")
+
+def clinical_t_from_rectal_exam(value: str) -> str | None:
+    """The cT a urologist wrote in the rectal-examination line, or nothing.
+
+    **Never inferred.** Five of the seven dossiers with a `Toucher rectal` line describe the
+    finding and stop -- "prostate ferme de plus de 60 g", "prostate dure à la palpation, de
+    paroi postérieure irrégulière". Those are the examining urologist's observations, and the
+    stage they imply is the judgment they chose not to record. Reading one out would
+    manufacture a nomogram input from a physical finding, which is the failure the whole
+    calculator layer exists to prevent.
+
+    So this returns a value only where a stage token is literally present.
+    """
+    match = CLINICAL_T_IN_PROSE.search(value)
+    if match is None:
+        return None
+    return match.group(1).lstrip("cC")
 
 # Words that name an imaging study. A label line naming one starts a *new* report and
 # therefore ends the previous one, whether or not the catalogue knows it.
@@ -64,6 +93,45 @@ MODALITY_LABEL = re.compile(
 # Appended to a report cut short by the character cap, so a reader and an agent can both
 # see that what follows the cut was not considered.
 TRUNCATION_MARKER = " […rapport tronqué]"
+
+# Appended to an imaging report that turned out to be its own preamble: the acquisition
+# protocol and nothing read off it.
+#
+# Measured on the fifteen regenerated dossiers: thirteen sources contained a `CONCLUSION`
+# section and *none* of the stored `ct_tap` values did, because the report was cut at the
+# end of its first chunk. A field holding "Examen fait sans et avec injection de produit de
+# contraste" looks filled in and answers no clinical question, and the specialists said so —
+# "Conclusions complètes de la TDM TAP" was their single most frequent missing_information
+# entry while the conclusion sat in the dossier. Marking is deliberate rather than
+# discarding: the technique is genuinely what the dossier gave us for that field, and a
+# clinician needs to see that it is all we got.
+INCOMPLETE_MARKER = " […rapport incomplet : technique seule]"
+
+# Words that mean a report is describing how the image was taken.
+TECHNIQUE_CUE = re.compile(
+    r"\b(techniques?|acquisitions?|protocoles?|s[ée]quences?|reconstructions?)\b",
+    re.IGNORECASE,
+)
+
+# Words that mean a report is describing what was seen. Deliberately broad, and weighted
+# towards the vocabulary of a negative report (`sans anomalie`, `absence de`) as much as a
+# positive one: a normal study is a finding, and must not be marked incomplete.
+FINDING_CUE = re.compile(
+    r"\b(conclusions?|mesur\w+|[ée]paississement|nodules?|l[ée]sions?|ad[ée]nom[ée]galies?"
+    r"|masses?|tumeurs?|m[ée]tastases?|hyper?signal|hyposignal|rehauss\w+|infiltrat\w+"
+    r"|[ée]panchement|absence|normale?s?|sans anomalie|suspecte?s?|kystes?|stade)\b",
+    re.IGNORECASE,
+)
+
+
+def is_technique_only(value: str) -> bool:
+    """Whether an imaging report says how the picture was taken and nothing about it.
+
+    Both cues are required rather than just the absence of findings: a short report that
+    mentions neither is more likely to be a shape this rule has not seen than a preamble,
+    and silently labelling it incomplete would be its own kind of wrong.
+    """
+    return bool(TECHNIQUE_CUE.search(value)) and not FINDING_CUE.search(value)
 
 
 def starts_a_new_report(label: str) -> bool:
@@ -114,6 +182,20 @@ class FactCandidate:
     chunk_id: object | None = None
     document_id: object | None = None
     reported_absent: bool = False
+    # Every chunk that contributed a line, in order, starting with `chunk_id`. An imaging
+    # report runs across many chunks -- a heading, its findings, its conclusion -- and a
+    # clinician asked to check one has to be able to reach all of them, not just the
+    # heading the fact happens to cite.
+    chunk_ids: tuple[object, ...] = ()
+    # True when the value is an imaging report that contains only its own acquisition
+    # protocol. Carried as a field rather than left to the reader of the text, because the
+    # completeness rules and the ledger both need to treat it as less than a report.
+    technique_only: bool = False
+    # True when the value was read out of a sentence rather than a `Label : value` line. The
+    # distinction has to survive as far as the rendered page: a grade taken from prose is a
+    # different kind of fact from one taken from a filled field, and the clinician holding the
+    # document is the person who needs to know which it was.
+    from_narrative: bool = False
 
 
 def extract_from_text(
@@ -123,16 +205,31 @@ def extract_from_text(
     document_id: object | None = None,
     following_text: str | None = None,
     following_chunk_id: object | None = None,
+    following_chunks: Sequence[tuple[str, object]] | None = None,
 ) -> list[FactCandidate]:
     """Find every recognised field in one chunk of dossier text.
 
     Three shapes seen in real dossiers are handled beyond the plain `Label : value`:
 
     - a label whose report sits on the following lines (`Evaluation cardiaque :`), which
-      the parser may split across chunks — hence `following_text`;
+      the parser may split across chunks — hence `following_chunks`;
     - a label nested inside another's value (`Autres : ALAT : 5`);
     - a score written without a colon (`OMS 1`).
+
+    **An imaging report is not one chunk.** The parser emits a paragraph per chunk, so a
+    radiology report arrives as a heading, then its findings one paragraph at a time, then
+    its conclusion. Reading only the label's own chunk therefore stored the acquisition
+    protocol and dropped the diagnosis; `following_chunks` lets the report run to the next
+    label the catalogue knows, across as many chunks as it takes. `following_text` and
+    `following_chunk_id` remain as the single-chunk form of the same argument.
     """
+    if following_chunks is not None:
+        following_segments: tuple[tuple[str, object], ...] = tuple(following_chunks)
+    elif following_text is not None:
+        following_segments = ((following_text, following_chunk_id),)
+    else:
+        following_segments = ()
+
     lines = text.splitlines()
     candidates: list[FactCandidate] = []
 
@@ -164,40 +261,73 @@ def extract_from_text(
 
         excerpt = line.strip()
         source_chunk = chunk_id
+        spanned: tuple[object, ...] = (chunk_id,) if chunk_id is not None else ()
 
         if not value:
             scalar = field_spec.category in _SCALAR_CATEGORIES
-            continuation, consumed = _read_continuation(lines, index + 1, scalar=scalar)
-            if not continuation and following_text:
-                # The label ended this chunk; its report opens the next one. The value
-                # then lives in that chunk, so that is the chunk the fact must cite —
-                # an excerpt has to be findable in the text it points at.
-                continuation, consumed = _read_continuation(
-                    following_text.splitlines(), 0, scalar=scalar
-                )
-                if continuation:
-                    source_chunk = following_chunk_id
-                    value = continuation
-                    excerpt = "\n".join(consumed).strip()
-            elif continuation:
-                value = continuation
-                excerpt = "\n".join([line.strip(), *consumed]).strip()
+            spans, truncated = _read_report(
+                lines,
+                index + 1,
+                own_chunk_id=chunk_id,
+                following=following_segments,
+                scalar=scalar,
+                multi_chunk=field_spec.category in _REPORT_CATEGORIES,
+            )
+            if spans:
+                collected = [item for _, consumed in spans for item in consumed]
+                value = _joined(collected, truncated=truncated)
+                # The fact cites the first chunk that actually contributed text: an
+                # excerpt has to be findable in the text it points at.
+                source_chunk = spans[0][0]
+                spanned = tuple(identifier for identifier, _ in spans)
+                excerpt = (
+                    "\n".join([line.strip(), *collected])
+                    if source_chunk == chunk_id
+                    else "\n".join(collected)
+                ).strip()
 
         if not value:
             # A label with nothing after it says nothing; treat the field as absent
             # rather than inventing an empty value.
             continue
 
+        absent = is_reported_absent(value)
+        technique_only = (
+            field_spec.category is FactCategory.imaging and not absent and is_technique_only(value)
+        )
+        stored = REPORTED_ABSENT if absent else value[:MAX_VALUE_LENGTH]
+        if technique_only:
+            stored = stored[: MAX_VALUE_LENGTH - len(INCOMPLETE_MARKER)] + INCOMPLETE_MARKER
+
         candidates.append(
             FactCandidate(
                 key=field_spec.key,
-                value=REPORTED_ABSENT if is_reported_absent(value) else value[:MAX_VALUE_LENGTH],
+                value=stored,
                 excerpt=excerpt[:MAX_VALUE_LENGTH],
                 chunk_id=source_chunk,
                 document_id=document_id,
-                reported_absent=is_reported_absent(value),
+                reported_absent=absent,
+                chunk_ids=spanned,
+                technique_only=technique_only,
             )
         )
+
+        # The clinical T a urologist wrote inside the rectal-examination line. Emitted as its
+        # own field rather than parsed later, so the value carries the excerpt it came from
+        # and a reviewer can see the sentence that staged the patient.
+        if field_spec.key == "digital_rectal_exam" and not absent:
+            staged = clinical_t_from_rectal_exam(value)
+            if staged is not None:
+                candidates.append(
+                    FactCandidate(
+                        key="ct_dre",
+                        value=staged,
+                        excerpt=excerpt[:MAX_VALUE_LENGTH],
+                        chunk_id=source_chunk,
+                        document_id=document_id,
+                        chunk_ids=spanned,
+                    )
+                )
 
         # `Autres : ALAT : 5` also occurs under a *recognised* label.
         if _looks_like_label_line(value):
@@ -240,11 +370,100 @@ _SCALAR_CATEGORIES = frozenset(
     {FactCategory.biology, FactCategory.performance, FactCategory.identity}
 )
 
+# Categories whose value is a report that the parser splits across chunks, and which may
+# therefore be read past the end of the chunk its label sits in.
+#
+# Imaging only, deliberately. Pathology reports have the same shape and almost certainly
+# the same defect, but histology and Gleason feed the completeness gate that decides
+# whether a case is analysable at all, so widening this is a clinical change and belongs
+# in its own reviewed step rather than riding along with the imaging fix.
+_REPORT_CATEGORIES = frozenset({FactCategory.imaging})
+
+
+def _joined(collected: list[str], *, truncated: bool) -> str:
+    """One report's lines as a single value, marked if the cap cut it short."""
+    text = " ".join(collected)[:MAX_VALUE_LENGTH]
+    if truncated:
+        text = text[: MAX_VALUE_LENGTH - len(TRUNCATION_MARKER)] + TRUNCATION_MARKER
+    return text
+
+
+def _read_report(
+    lines: list[str],
+    start: int,
+    *,
+    own_chunk_id: object | None,
+    following: Sequence[tuple[str, object]],
+    scalar: bool,
+    multi_chunk: bool,
+) -> tuple[list[tuple[object, list[str]]], bool]:
+    """Read a value that begins under a bare label, across chunks where it needs to.
+
+    Returns the chunks that contributed, each with its lines, so the caller can cite the
+    first and record all of them. A report stops where it always stopped -- at the next
+    label the catalogue knows, or a heading that starts another study, or the character
+    cap -- and the only thing that changed is that the end of a chunk is no longer one of
+    those places.
+    """
+    spans: list[tuple[object, list[str]]] = []
+    collected, stopped, truncated = _collect_lines(lines, start, scalar=scalar)
+    if collected:
+        spans.append((own_chunk_id, collected))
+        rest = following
+    else:
+        # The label ended this chunk; its report opens the next one.
+        rest = ()
+        if following:
+            head_text, head_id = following[0]
+            collected, stopped, truncated = _collect_lines(
+                head_text.splitlines(), 0, scalar=scalar
+            )
+            if collected:
+                spans.append((head_id, collected))
+                rest = following[1:]
+
+    if not spans or scalar or not multi_chunk:
+        return spans, truncated
+
+    # **`RAS` ends the field, and reading on would contradict the clinician.** A bare
+    # `TDM TAP :` answered `RAS` on the next line is the clinician saying there is nothing
+    # to report; continuing into the following paragraphs attaches somebody else's findings
+    # to that answer and produces a report the dossier does not contain. The dossiers seen
+    # so far write `TDM TAP : RAS` inline, which never enters this path -- which is exactly
+    # why the guard is here rather than left to the shapes we happen to have met.
+    if is_reported_absent(" ".join(item for _, consumed in spans for item in consumed)):
+        return spans, truncated
+
+    used = sum(len(item) for _, consumed in spans for item in consumed)
+    for segment_text, segment_id in rest:
+        if stopped or truncated:
+            break
+        more, stopped, truncated = _collect_lines(
+            segment_text.splitlines(), 0, scalar=False, budget=MAX_VALUE_LENGTH - used
+        )
+        if more:
+            spans.append((segment_id, more))
+            used += sum(len(item) for item in more)
+
+    return spans, truncated
+
 
 def _read_continuation(
     lines: list[str], start: int, *, scalar: bool = False
 ) -> tuple[str, list[str]]:
+    """The value under a bare label, within one chunk. See `_collect_lines`."""
+    collected, _stopped, truncated = _collect_lines(lines, start, scalar=scalar)
+    return _joined(collected, truncated=truncated), collected
+
+
+def _collect_lines(
+    lines: list[str], start: int, *, scalar: bool = False, budget: int = MAX_VALUE_LENGTH
+) -> tuple[list[str], bool, bool]:
     """Collect the lines under a bare label, stopping at the next recognised label.
+
+    Reports whether it stopped *at a label* or merely ran out of lines, because those mean
+    different things once a value may continue into the next chunk: the first is the end of
+    the report, the second is the end of the paragraph.
 
     **Blank lines do not end the report.** Radiology and pathology reports are written in
     paragraphs, and the first one is almost always boilerplate:
@@ -282,6 +501,7 @@ def _read_continuation(
     """
     collected: list[str] = []
     truncated = False
+    stopped_at_label = False
     for line in lines[start:]:
         stripped = line.strip()
         if not stripped:
@@ -298,17 +518,15 @@ def _read_continuation(
             # `"28.2 30.1"` — uncomparable, and visibly so. A malformed value someone can see
             # beats a plausible one nobody can question.
             if scalar or normalize_label(label) in LABEL_INDEX or starts_a_new_report(label):
+                stopped_at_label = True
                 break
         collected.append(stripped)
-        if sum(len(item) for item in collected) > MAX_VALUE_LENGTH:
+        if sum(len(item) for item in collected) > budget:
+            # Silence here would present a partial report as a whole one.
             truncated = True
             break
 
-    text = " ".join(collected)[:MAX_VALUE_LENGTH]
-    if truncated:
-        # Silence here would present a partial report as a whole one.
-        text = text[: MAX_VALUE_LENGTH - len(TRUNCATION_MARKER)] + TRUNCATION_MARKER
-    return text, collected
+    return collected, stopped_at_label, truncated
 
 
 def normalize_value(value: str | None) -> str:
@@ -370,6 +588,23 @@ def resolve(
                 )
             )
             continue
+
+        # An empty box does not contradict a reading. Where absence cannot be an answer --
+        # a histology, a grade, a stage -- `RAS` means the field was not filled in, so it must
+        # not compete with a value read elsewhere in the dossier. Without this, recovering
+        # `Gleason 9 (5+4)` from the narrative turned a missing grade into a *contested* one,
+        # and the agents refused for a new reason instead of the old one.
+        #
+        # It is dropped only when something else was read: `RAS` alone is still the dossier
+        # saying the clinician left the box empty, and that survives into the ledger's note.
+        if not absence_answers(field_spec.key):
+            answered = [
+                candidate
+                for candidate in found
+                if not (candidate.value and is_reported_absent(candidate.value))
+            ]
+            if answered:
+                found = answered
 
         distinct = {normalize_value(candidate.value) for candidate in found}
         first = found[0]

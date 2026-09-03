@@ -14,13 +14,27 @@ other would otherwise be silently reduced to whichever was seen first.
 import hashlib
 import re
 import uuid
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rcpia.agents.pi_adapter import PiAdapter
 from rcpia.cases.extraction import FactCandidate, ResolvedFact, extract_from_text, resolve
-from rcpia.cases.fact_schema import FIELDS_BY_KEY
+from rcpia.cases.fact_schema import (
+    FIELDS_BY_KEY,
+    absence_answers,
+    fields_for,
+    is_reported_absent,
+)
+from rcpia.cases.llm_extractor import (
+    NarrativeExtraction,
+    RejectedFact,
+    extract,
+    flatten,
+)
+from rcpia.cases.narrative_reader import reader_for
 from rcpia.core.models import (
     AnalysisJob,
     AuditEvent,
@@ -43,8 +57,15 @@ DATE_PATTERNS = (
 )
 
 
-async def extract_case_facts(session: AsyncSession, job: AnalysisJob) -> JobOutcome | None:
-    """Extract facts for the whole case, reading every parsed document together."""
+async def extract_case_facts(
+    session: AsyncSession, job: AnalysisJob, *, adapter: PiAdapter | None = None
+) -> JobOutcome | None:
+    """Extract facts for the whole case, reading every parsed document together.
+
+    `adapter` enables the narrative pass. Without one the deterministic reading stands
+    alone, which is the behaviour every environment without a model runtime needs — and
+    the behaviour every test gets unless it asks for otherwise.
+    """
     case = await session.scalar(
         sa.select(Case).where(
             Case.id == job.case_id, Case.organization_id == job.organization_id
@@ -86,6 +107,18 @@ async def extract_case_facts(session: AsyncSession, job: AnalysisJob) -> JobOutc
     for document in documents:
         candidates.extend(await _candidates_for(session, document))
 
+    # Second pass: read the prose for what the label matcher could not fill. It runs only on
+    # fields still unanswered after the first pass, appends its candidates *after* the form's so
+    # `resolve` keeps the form's reading, and is skipped entirely when no runtime is configured.
+    narrative = await _narrative_pass(
+        session,
+        case=case,
+        documents=documents,
+        candidates=candidates,
+        adapter=adapter,
+    )
+    candidates.extend(narrative.candidates)
+
     resolved = resolve(candidates, cancer_type=case.cancer_type)
     for fact in resolved:
         for row in _to_rows(case, fact, signature):
@@ -102,11 +135,177 @@ async def extract_case_facts(session: AsyncSession, job: AnalysisJob) -> JobOutc
                 "documents": len(documents),
                 "facts": len(resolved),
                 "extraction_signature": signature,
+                # What the second pass was asked for and what it contributed, so a ledger that
+                # changed can be explained — and a fill rate measured — without re-running
+                # anything. The field names are recorded, not just the counts: "it filled four
+                # fields" and "it filled the grade" are different facts about a run.
+                # False means the second pass never ran -- no model runtime configured, or
+                # no adapter passed by the caller. Without it, a worker wired without an
+                # adapter is indistinguishable from a dossier whose form answered everything.
+                "narrative_ran": narrative.ran,
+                "narrative_wanted": len(narrative.still_missing) + len(narrative.candidates),
+                "narrative_facts": len(narrative.candidates),
+                "narrative_filled": sorted(
+                    {candidate.key for candidate in narrative.candidates}
+                ),
+                "narrative_rejected": len(narrative.rejected),
+                "narrative_rejected_reasons": sorted(
+                    {item.reason for item in narrative.rejected}
+                ),
+                "narrative_seconds": round(narrative.seconds, 1),
             },
         )
     )
     await session.flush()
     return None
+
+
+async def _narrative_pass(
+    session: AsyncSession,
+    *,
+    case: Case,
+    documents: list[UploadedDocument],
+    candidates: list[FactCandidate],
+    adapter: "PiAdapter | None",
+) -> NarrativeExtraction:
+    """Ask a model to read the dossier's prose for the fields the form left unanswered.
+
+    **Which fields are asked for is derived, never guessed.** A field is wanted when the first
+    pass produced nothing for it, or produced `RAS` where absence cannot be an answer — the
+    dossier-8 case, where the form's boxes are empty and the diagnosis is in a sentence. Fields
+    the form answered are not re-read: the deterministic reading is better evidence than a
+    model's, and re-opening a settled field would only manufacture conflicts.
+    """
+    reader = reader_for(adapter, case.id)
+    if reader is None:
+        # No model runtime, so nothing was asked. Recorded as such: the counts alone cannot
+        # tell "asked and found nothing" from "never asked", and the second reads like a
+        # clean run in an audit trail.
+        return NarrativeExtraction(ran=False)
+
+    found: dict[str, str | None] = {}
+    for candidate in candidates:
+        if candidate.value and candidate.key not in found:
+            found[candidate.key] = candidate.value
+
+    wanted = [
+        spec.key
+        for spec in fields_for(case.cancer_type)
+        if _needs_narrative_reading(found.get(spec.key), spec.key)
+    ]
+    if not wanted:
+        # A genuinely empty ask: the form answered every field, so the pass ran and had
+        # nothing to do.
+        return NarrativeExtraction(ran=True)
+
+    # A field cannot be both *already found* and *still wanted*. The first run of this pass on
+    # dossier 8 listed `gleason = RAS` under the fields already read while also asking for
+    # gleason, and the model obeyed the instruction not to re-extract a field the first pass had
+    # answered — so it skipped the one value the whole pass exists to recover. `RAS` was never an
+    # answer; it must not appear as one here either.
+    known = {key: value for key, value in found.items() if key not in set(wanted)}
+
+    passages = await _passages(session, documents)
+    text = "\n\n".join(passage.text for passage in passages)
+
+    result = await extract(reader, dossier_text=text, known=known, wanted=wanted)
+    return _made_traceable(replace(result, ran=True), passages)
+
+
+@dataclass(frozen=True)
+class _Passage:
+    """One chunk of one document, with the flattened form used to locate a quotation."""
+
+    document_id: uuid.UUID
+    chunk_id: uuid.UUID
+    text: str
+    flattened: str
+
+
+async def _passages(
+    session: AsyncSession, documents: list[UploadedDocument]
+) -> list[_Passage]:
+    passages: list[_Passage] = []
+    for document in documents:
+        rows = (
+            (
+                await session.execute(
+                    sa.select(DocumentChunk.id, DocumentChunk.text)
+                    .where(
+                        DocumentChunk.document_id == document.id,
+                        DocumentChunk.parse_run == document.current_parse_run,
+                    )
+                    .order_by(DocumentChunk.ordinal)
+                )
+            )
+            .tuples()
+            .all()
+        )
+        passages.extend(
+            _Passage(
+                document_id=document.id,
+                chunk_id=chunk_id,
+                text=chunk_text or "",
+                flattened=flatten(chunk_text or ""),
+            )
+            for chunk_id, chunk_text in rows
+        )
+    return passages
+
+
+def _made_traceable(
+    result: NarrativeExtraction, passages: list[_Passage]
+) -> NarrativeExtraction:
+    """Pin each narrative reading to the chunk its quotation came from, or drop it.
+
+    A machine fact must name the document, the chunk and the excerpt it was read from —
+    `machine_facts_are_traceable` enforces that in the database, and it is the constraint that
+    makes a citation checkable rather than decorative. A quotation verified against the whole
+    dossier but not locatable in any single chunk is one that spans a chunk boundary; it cannot
+    be pinned, so it is refused rather than stored with an approximate source.
+    """
+    placed: list[FactCandidate] = []
+    rejected = list(result.rejected)
+
+    for candidate in result.candidates:
+        needle = flatten(candidate.excerpt)
+        passage = next((p for p in passages if needle and needle in p.flattened), None)
+        if passage is None:
+            rejected.append(
+                RejectedFact(
+                    candidate.key,
+                    candidate.value or "",
+                    "citation non localisable dans un passage unique du dossier",
+                )
+            )
+            continue
+        placed.append(
+            replace(
+                candidate, document_id=passage.document_id, chunk_id=passage.chunk_id
+            )
+        )
+
+    placed_keys = {candidate.key for candidate in placed}
+    return NarrativeExtraction(
+        candidates=placed,
+        still_missing=sorted(set(result.still_missing) | (
+            {candidate.key for candidate in result.candidates} - placed_keys
+        )),
+        rejected=rejected,
+        raw_response=result.raw_response,
+        seconds=result.seconds,
+        # Rebuilt field by field, so a flag added to the dataclass and forgotten here would
+        # silently reset to its default -- which for `ran` means a pass that ran reporting
+        # that it did not.
+        ran=result.ran,
+    )
+
+
+def _needs_narrative_reading(value: str | None, key: str) -> bool:
+    if value is None or not value.strip():
+        return True
+    # `RAS` on a diagnosis is an empty box, and the value may be written in prose elsewhere.
+    return is_reported_absent(value) and not absence_answers(key)
 
 
 def extraction_signature(documents: list[UploadedDocument]) -> str:
@@ -119,6 +318,25 @@ def extraction_signature(documents: list[UploadedDocument]) -> str:
         sorted(f"{document.id}:{document.current_parse_run}" for document in documents)
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+async def _document_text(session: AsyncSession, document: UploadedDocument) -> str:
+    """The document as one string, in reading order — what the narrative pass is given."""
+    chunks = (
+        (
+            await session.execute(
+                sa.select(DocumentChunk.text)
+                .where(
+                    DocumentChunk.document_id == document.id,
+                    DocumentChunk.parse_run == document.current_parse_run,
+                )
+                .order_by(DocumentChunk.ordinal)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return "\n".join(chunk for chunk in chunks if chunk)
 
 
 async def _candidates_for(
@@ -141,16 +359,18 @@ async def _candidates_for(
 
     candidates: list[FactCandidate] = []
     for position, chunk in enumerate(chunks):
-        # A label can end one chunk with its report opening the next, so each chunk is
-        # given a look at the one after it.
-        following = chunks[position + 1] if position + 1 < len(chunks) else None
+        # A label can end one chunk with its report opening the next, and an imaging report
+        # runs across as many chunks as it has paragraphs, so each chunk is given the rest
+        # of the document to read into. Extraction stops at the next label it recognises,
+        # not at the chunk boundary.
         candidates.extend(
             extract_from_text(
                 chunk.text,
                 chunk_id=chunk.id,
                 document_id=document.id,
-                following_text=following.text if following else None,
-                following_chunk_id=following.id if following else None,
+                following_chunks=[
+                    (later.text, later.id) for later in chunks[position + 1 :]
+                ],
             )
         )
     return candidates
@@ -192,6 +412,12 @@ def _to_rows(case: Case, fact: ResolvedFact, signature: str) -> list[ExtractedFa
             origin=FactOrigin.machine,
             source_document_id=reading.document_id,
             source_chunk_id=reading.chunk_id,
+            # Every chunk the excerpt was actually assembled from. `reading.chunk_ids` was
+            # already captured correctly at extraction time and simply never read past this
+            # point -- a multi-chunk imaging report kept the diagnostic paragraphs in its own
+            # `source_excerpt`, but a citation back to it could only ever point at
+            # `source_chunk_id`, the first contributing chunk.
+            source_chunk_ids=list(reading.chunk_ids) if reading.chunk_ids else None,
             source_excerpt=reading.excerpt,
             note=note,
             extraction_signature=signature,

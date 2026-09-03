@@ -1,0 +1,117 @@
+{
+  "document_id": "aua.bladder-nmibc.2024",
+  "note": "AUA/SUO: diagnosis and treatment of non-muscle invasive bladder cancer, amended 2024. Same two-pass shape as the MIBC guideline -- statement summary then full discussion -- but the conversion handled it worse: `TURBT/ Repeat Resection` became a top-level chapter that swallowed intravesical therapy, BCG relapse, cystectomy and enhanced cystoscopy, which are its siblings in the PDF.\n\nThat damage is survivable here because it does not change the setting. The document is NMIBC throughout, and the default carries it.\n\n**What the conversion gave back is worth more than what it cost.** It promoted individual numbered recommendation statements to headings, and those name their risk group in the heading itself -- `16. In a low-risk patient...`, `17. In an intermediate-risk patient...`. Those are routed to the risk group they name. This is the one place in the corpus where a rule can be that precise without reading the body, and it is precise because AUA wrote the risk group into the sentence, not because the path implies it.",
+  "default": {
+    "setting": "bladder_nmibc_unspecified_risk",
+    "note": "The guideline covers NMIBC across risk groups and most of its discussion spans them. Narrowing the default to a risk group would claim a stratification the text does not make."
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Stated before the chapter rule, not after. The conversion files the bibliography *inside* the closing panel chapter, so the chapter rule would otherwise claim it first and exclude 18 passages of citations as `appendix_content` -- true enough to pass review and wrong about what they are. Ordering it first also means a later edition that moves the bibliography back out is still claimed."
+    },
+    {
+      "match_section": "PANEL, CONSULTANTS, AND STAFF",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "The closing chapter and its eighteen subsections: rosters, disclosures, peer reviewers, public commenters, disclaimer -- and the reference list, which the conversion filed inside it rather than beside it."
+    },
+    {
+      "match_section": "Methodology",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "Substring and case-insensitive, so it claims the front-matter `Methodology` and the whole `METHODOLOGY` chapter -- systematic review, data extraction, risk-of-bias assessment, evidence-strength nomenclature and process."
+    },
+    {
+      "match_section": "Guideline Panel",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Amendment Panel",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "every_occurrence": true,
+      "note": "Substring, so it claims the 2020 and 2024 rosters in the front matter under either of the two spellings the document uses, and their disclosure subsections."
+    },
+    {
+      "match_section": "Staff and Consultants",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "Abbreviations",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "exclude": true,
+      "exclusion_reason": "appendix_content",
+      "match_leaf": true,
+      "every_occurrence": true
+    },
+    {
+      "match_section": "In a low-risk patient",
+      "setting": "bladder_nmibc_low_risk",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Statement 16, on withholding induction intravesical therapy. The risk group is in the sentence AUA wrote, so routing it here reports the guideline rather than interpreting it."
+    },
+    {
+      "match_section": "In an intermediate-risk patient",
+      "setting": "bladder_nmibc_intermediate_risk",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Statement 17, on a six-week induction course of intravesical chemotherapy or immunotherapy. Five passages, the longest single statement in the document."
+    },
+    {
+      "match_section": "Risk Stratification",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "risk_stratification"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 4 passages that were already falling through. `risk_stratification` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Staging and Grading",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "staging"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `staging` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Diagnosis",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for."
+    },
+    {
+      "match_section": "Variant Histologies",
+      "setting": "bladder_nmibc_unspecified_risk",
+      "purposes": [
+        "pathology"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `pathology` is taken from the heading, which names what the section is for."
+    }
+  ]
+}

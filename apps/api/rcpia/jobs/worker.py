@@ -26,6 +26,9 @@ from rcpia.jobs.models import DEFAULT_LEASE, JobOutcome
 logger = logging.getLogger(__name__)
 
 Handler = Callable[[AsyncSession, AnalysisJob], Awaitable[JobOutcome | None]]
+# Work done every poll regardless of what is claimed. It shares the reaper's session and
+# is committed with it, so a failure here fails the poll rather than half-applying.
+Housekeeping = Callable[[AsyncSession], Awaitable[object]]
 
 
 def default_worker_name() -> str:
@@ -42,12 +45,18 @@ class Worker:
         lease: timedelta = DEFAULT_LEASE,
         poll_interval: float = 2.0,
         heartbeat_interval: float | None = None,
+        housekeeping: "Housekeeping | None" = None,
     ) -> None:
         self.session_factory = session_factory
         self.name = name or default_worker_name()
         self.job_types = job_types
         self.lease = lease
         self.poll_interval = poll_interval
+        # Run on every poll, before a job is claimed, in the same session as the lease reaper.
+        # Reconciliation that must not depend on any particular handler having run belongs
+        # here: a handler only observes the jobs it was given, and a job can reach a terminal
+        # state without one -- a crash, an expired lease, a worker killed mid-run.
+        self.housekeeping = housekeeping
         # Renew well before the lease lapses, so a slow handler keeps its job.
         self.heartbeat_interval = heartbeat_interval or lease.total_seconds() / 3
         self._handlers: dict[str, Handler] = {}
@@ -66,6 +75,8 @@ class Worker:
         """
         async with self.session_factory() as session:
             await service.reap_expired_leases(session)
+            if self.housekeeping is not None:
+                await self.housekeeping(session)
             job = await service.claim_next(
                 session, worker=self.name, job_types=self.job_types, lease=self.lease
             )

@@ -24,7 +24,7 @@ dependencies = [
 # install it, which is why the adapter imports the SDK lazily.
 # The [aio] extra pulls in aiohttp; without it the async client raises ImportError at
 # construction time, so the plain package is not enough for this adapter.
-azure = ["azure-storage-blob[aio]>=12.23"]
+azure = ["azure-storage-blob[aio]>=12.23", "azure-identity>=1.19"]
 
 [dependency-groups]
 dev = [
@@ -47,6 +47,9 @@ packages = ["rcpia"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Tests that launch the real pinned Pi runtime and talk to the configured provider. They
+# skip themselves when either is absent, so the default run stays hermetic.
+markers = ["integration: exercises the real Pi runtime and provider"]
 
 [tool.ruff]
 line-length = 100

@@ -35,10 +35,15 @@ from rcpia.agents.pi_adapter import (
 )
 from rcpia.agents.schemas import (
     AgentOutput,
+    CitationInWrongChannel,
+    SynthesisOutput,
     TaskBundle,
+    UnattestedAgreement,
     UncitedEvidence,
     UngroundedRecommendation,
     check_citations,
+    check_synthesis,
+    output_model_for,
 )
 from rcpia.cases.ledger import latest_version
 from rcpia.core.models import (
@@ -50,6 +55,8 @@ from rcpia.core.models import (
     CaseLedgerVersion,
     JobStatus,
 )
+from rcpia.evidence.embedding import Embedder
+from rcpia.evidence.rerank import Reranker
 from rcpia.jobs.models import JobOutcome
 from rcpia.storage.base import BlobStore, StorageError
 from rcpia.storage.keys import pi_session_key
@@ -68,16 +75,47 @@ def _retryable(message: str) -> JobOutcome:
     return JobOutcome(status=JobStatus.failed, error_message=message, retryable=True)
 
 
+# Every way `check_citations` can refuse an output, named once.
+#
+# **A tuple rather than an inline `except`, because the inline form already failed.**
+# `CitationInWrongChannel` was added to `check_citations` and not to the handler, so it
+# escaped `run_agent`: the worker rolled back, failed the job generically, and lost the
+# `AgentRun` row and its transcript link -- exactly the record a reviewer needs when an agent
+# cites into the wrong channel. A test asserts this tuple covers every citation refusal
+# `schemas` defines, so the next one added cannot slip through the same gap.
+CITATION_FAILURES = (
+    CitationInWrongChannel,
+    UncitedEvidence,
+    UngroundedRecommendation,
+)
+
+
 async def run_agent(
     session: AsyncSession,
     job: AnalysisJob,
     *,
     adapter: PiAdapter,
     blobs: BlobStore,
+    embedder: Embedder | None = None,
+    reranker: Reranker | None = None,
 ) -> JobOutcome | None:
-    """Run the agent named in the job payload. Returns None on success."""
+    """Run the agent named in the job payload. Returns None on success.
+
+    **The retriever is optional and its absence is visible.** Without an embedder and a
+    reranker the bundle carries no guideline passages, the constraints tell the agent so, and
+    the fiche's section 6 says no referential was supplied. That is the state the build was in
+    before evidence retrieval existed, and it stays reachable rather than becoming a crash --
+    a deployment without model credentials should degrade to an ungrounded opinion that says
+    it is ungrounded, not fail to produce a fiche at all.
+    """
     agent_role = str(job.payload.get("agent_role") or DEFAULT_AGENT_ROLE)
     clinical_question = job.payload.get("clinical_question") or None
+    # Written by the panel dispatcher, absent for a single-agent run. Read here rather than
+    # looked up, so the run analyses the panel it was dispatched for even if the case has
+    # since acquired another.
+    raw_panel = job.payload.get("panel_id")
+    panel_id = uuid.UUID(str(raw_panel)) if raw_panel else None
+    missing_roles = [str(role) for role in (job.payload.get("missing_roles") or [])]
 
     # Job delivery is at-least-once. A worker that answered and died before committing
     # would otherwise pay for a second opinion on the same question.
@@ -114,6 +152,10 @@ async def run_agent(
             agent_role=agent_role,
             version=version,
             clinical_question=clinical_question,
+            panel_id=panel_id,
+            missing_roles=missing_roles,
+            embedder=embedder,
+            reranker=reranker,
         )
     except BundleError as exc:
         return _terminal(str(exc))
@@ -200,6 +242,7 @@ async def run_agent(
         job_id=job.id,
         provider=result.provider,
         model=result.model,
+        runtime_version=result.runtime_version,
         bundle=built.bundle.model_dump(by_alias=True),
         output=output.model_dump(),
         session_blob_key=pi_session_key(case.id, agent_role, run_id),
@@ -258,8 +301,11 @@ def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
     """Parse, validate, and reject anything the agent was not entitled to say."""
     payload = result.output_json()
 
+    # The schema the answer is checked against is the schema the bundle asked for -- one
+    # call decides both, so a synthesis is not rejected for returning the fields it was told
+    # to return.
     try:
-        output = AgentOutput.model_validate(payload)
+        output = output_model_for(bundle.inputs.agent_role).model_validate(payload)
     except ValidationError as exc:
         raise PiOutputInvalid(
             f"La réponse de {result.agent_name} ne respecte pas le schéma demandé : "
@@ -281,8 +327,18 @@ def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
 
     try:
         check_citations(output, bundle)
-    except (UncitedEvidence, UngroundedRecommendation) as exc:
+    except CITATION_FAILURES as exc:
         raise PiOutputInvalid(str(exc)) from exc
+
+    # A synthesis claims agreements between agents it read. Each claim must be quotable from
+    # the agent's own opinion, for the same reason an evidence citation must resolve: an
+    # assertion nobody can check is not reviewable, and a fabricated consensus reads exactly
+    # like a real one on the rendered page.
+    if isinstance(output, SynthesisOutput):
+        try:
+            check_synthesis(output, bundle)
+        except UnattestedAgreement as exc:
+            raise PiOutputInvalid(str(exc)) from exc
 
     return output
 
@@ -339,6 +395,7 @@ async def _record_failure(
         job_id=job.id,
         provider=result.provider if result else None,
         model=result.model if result else None,
+        runtime_version=result.runtime_version if result else None,
         bundle=built.bundle.model_dump(by_alias=True),
         error_message=message,
         # Only a run whose transcript reached storage has one to point at. A crashed run

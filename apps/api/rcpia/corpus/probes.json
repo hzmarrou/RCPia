@@ -1,0 +1,117 @@
+[
+  {
+    "question": "BCG dans une TVNIM à haut risque",
+    "note": "The question the AFU TVNIM rules exist to answer. If the ordering trap between 'haut risque' and 'très haut risque' is ever reversed, the high-risk chapter stops being reachable and this is what says so.",
+    "filter": {
+      "cancer_type": "bladder",
+      "disease_setting": "bladder_nmibc_high_risk",
+      "agent_role": "urology_oncology"
+    },
+    "must_reach": ["afu.bladder-tvnim.2024-2026"],
+    "must_not_reach": {"disease_setting": ["bladder_metastatic", "bladder_mibc_non_metastatic"]}
+  },
+  {
+    "question": "Traitement du CIS isolé",
+    "note": "A setting reached by exactly one rule. Its two passages disappear if that rule is renamed or reordered.",
+    "filter": {"cancer_type": "bladder", "disease_setting": "bladder_nmibc_cis"},
+    "must_reach": ["afu.bladder-tvnim.2024-2026"],
+    "must_not_reach": {"disease_setting": ["bladder_metastatic"]}
+  },
+  {
+    "question": "Chimiothérapie néoadjuvante avant cystectomie",
+    "filter": {
+      "cancer_type": "bladder",
+      "disease_setting": "bladder_mibc_non_metastatic",
+      "clinical_purpose": ["therapy_indication"]
+    },
+    "must_reach": ["afu.bladder-tvim.2024-2026"],
+    "must_not_reach": {"disease_setting": ["bladder_nmibc_high_risk", "bladder_nmibc_cis"]}
+  },
+  {
+    "question": "Stratégies de traitement de 1re ligne en TVIM métastatique",
+    "filter": {"cancer_type": "bladder", "disease_setting": "bladder_metastatic"},
+    "must_reach": ["afu.bladder-tvim.2024-2026"],
+    "must_not_reach": {"disease_setting": ["bladder_nmibc_unspecified_risk"]}
+  },
+  {
+    "question": "Sécurité rénale avant cisplatine",
+    "note": "Dossier 2 turns on this: an 85-year-old with a clearance of 30. The role filter is the point — a renal question must reach renal passages.",
+    "filter": {
+      "cancer_type": "bladder",
+      "disease_setting": "bladder_mibc_non_metastatic",
+      "agent_role": "renal_safety"
+    },
+    "must_reach": ["afu.bladder-tvim.2024-2026"],
+    "must_not_reach": {}
+  },
+  {
+    "question": "Prise en charge d'un CaP localisé à haut risque",
+    "filter": {
+      "cancer_type": "prostate",
+      "disease_setting": "prostate_localized_high_risk",
+      "clinical_purpose": ["therapy_indication"]
+    },
+    "must_reach": ["afu.prostate.2024-2026"],
+    "must_not_reach": {"disease_setting": ["no_known_cancer"]}
+  },
+  {
+    "question": "Surveillance active dans un CaP de risque intermédiaire",
+    "filter": {
+      "cancer_type": "prostate",
+      "disease_setting": "prostate_localized_intermediate_risk"
+    },
+    "must_reach": ["afu.prostate.2024-2026"],
+    "must_not_reach": {"disease_setting": ["prostate_metastatic_hormone_sensitive"]}
+  },
+  {
+    "question": "Détection précoce du cancer de la prostate",
+    "note": "Screening addresses men without a diagnosis. A patient already staged must never be offered it, which is why no_known_cancer is a setting of its own.",
+    "filter": {"cancer_type": "prostate", "disease_setting": "no_known_cancer"},
+    "must_reach": ["afu.prostate.2024-2026"],
+    "must_not_reach": {
+      "disease_setting": ["prostate_metastatic_hormone_sensitive", "prostate_localized_high_risk"]
+    }
+  },
+  {
+    "question": "Bilan d'extension d'un CaP métastatique",
+    "filter": {
+      "cancer_type": "prostate",
+      "disease_setting": "prostate_metastatic_hormone_sensitive",
+      "clinical_purpose": ["staging"]
+    },
+    "must_reach": ["afu.prostate.2024-2026"],
+    "must_not_reach": {"disease_setting": ["no_known_cancer"]}
+  },
+  {
+    "question": "cN1 : atteinte ganglionnaire non métastatique",
+    "note": "One passage, reached by one rule matching a word-boundary case the format cannot express directly. Worth a probe for that reason alone.",
+    "filter": {
+      "cancer_type": "prostate",
+      "disease_setting": "prostate_node_positive_non_metastatic"
+    },
+    "must_reach": ["afu.prostate.2024-2026"],
+    "must_not_reach": {"disease_setting": ["no_known_cancer"]}
+  },
+  {
+    "question": "Anatomopathologie d'une TVNIM",
+    "filter": {
+      "cancer_type": "bladder",
+      "disease_setting": "bladder_nmibc_unspecified_risk",
+      "agent_role": "pathology"
+    },
+    "must_reach": ["afu.bladder-tvnim.2024-2026"],
+    "must_not_reach": {"disease_setting": ["bladder_metastatic"]}
+  },
+  {
+    "question": "Une question prostate ne doit jamais atteindre un document vessie",
+    "note": "The acceptance criterion Phase 6 was given in the implementation plan, as a standing check rather than a one-off probe.",
+    "filter": {"cancer_type": "prostate"},
+    "must_reach": ["afu.prostate.2024-2026"],
+    "must_not_reach": {
+      "document_id": [
+        "afu.bladder-tvnim.2024-2026",
+        "afu.bladder-tvim.2024-2026"
+      ]
+    }
+  }
+]

@@ -1,0 +1,104 @@
+{
+  "document_id": "esmo.prostate-advanced.2020",
+  "note": "ESMO Clinical Practice Guideline: advanced and metastatic prostate cancer. Leaf-matched throughout, because the conversion again made the journal running head `Annals of Oncology` a parent and promoted several bolded captions; the leaves are the guideline's own section titles and they name the castration state outright.\n\nESMO writes mCSPC -- metastatic castration-sensitive -- where AUA writes mHSPC, metastatic hormone-sensitive. Same patients, same setting, so mCSPC routes to `prostate_metastatic_hormone_sensitive`. Recording the two vocabularies as one setting is the point of having a setting at all.\n\n**`mCRPC` is a substring of `nmCRPC`, so the non-metastatic rules are stated first.** This is the second document in the corpus to carry that trap -- AUA's advanced prostate guideline has it too -- and it is worth naming twice, because both values are valid and an audit passes either way. Reversed, every non-metastatic castration-resistant recommendation would file under metastatic disease and nothing would complain.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "spans_settings",
+    "note": "The document spans castration-sensitive and castration-resistant disease, and its front matter -- incidence, diagnosis, staging, molecular biology -- applies across both."
+  },
+  "rules": [
+    {
+      "match_section": "REFERENCES",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry"
+    },
+    {
+      "match_section": "DISCLOSURE",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "METHODOLOGY",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "ACKNOWLEDGEMENTS",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "FUNDING",
+      "setting": "not_specified",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "reason": "spans_settings",
+      "exclude": true,
+      "exclusion_reason": "appendix_content"
+    },
+    {
+      "match_section": "nmCRPC",
+      "setting": "prostate_nonmetastatic_castration_resistant",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Stated before every mCRPC rule below, because `mcrpc` is a substring of `nmcrpc`. Claims the management chapter and the high-risk nmCRPC section."
+    },
+    {
+      "match_section": "mCSPC",
+      "setting": "prostate_metastatic_hormone_sensitive",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Metastatic castration-sensitive disease: de novo and relapsed, metastasis-directed therapy, treatment of the primary tumour, supportive care and follow-up. ESMO's mCSPC is AUA's mHSPC."
+    },
+    {
+      "match_section": "metastatic CRPC",
+      "setting": "prostate_metastatic_castration_resistant",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Spelled out rather than abbreviated in the biomarker-testing section, so the `mCRPC` needle does not reach it."
+    },
+    {
+      "match_section": "mCRPC",
+      "setting": "prostate_metastatic_castration_resistant",
+      "match_leaf": true,
+      "every_occurrence": true,
+      "note": "Reaches only what the nmCRPC rule above did not claim: biomarker testing, management with and without known genetic alterations, sequencing and combination treatment, aggressive variants, molecularly defined subgroups, metastasis-directed therapy, supportive care and follow-up."
+    },
+    {
+      "match_section": "DIAGNOSIS, PATHOLOGY AND MOLECULAR BIOLOGY",
+      "setting": "not_specified",
+      "purposes": [
+        "diagnosis"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `diagnosis` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
+    },
+    {
+      "match_section": "STAGING AND RISK ASSESSMENT",
+      "setting": "not_specified",
+      "purposes": [
+        "staging"
+      ],
+      "every_occurrence": true,
+      "note": "Purpose only. The setting and reason are the document's own default, so this rule changes no routing -- it sits after every rule above it and claims only the 2 passages that were already falling through. `staging` is taken from the heading, which names what the section is for.",
+      "reason": "spans_settings"
+    }
+  ]
+}

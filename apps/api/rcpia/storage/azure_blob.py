@@ -26,12 +26,36 @@ CHECKSUM_METADATA_KEY = "sha256"
 
 
 class AzureBlobStore:
-    def __init__(self, connection_string: str, container: str) -> None:
-        if not connection_string:
+    """Blob storage reached either by account key or by managed identity.
+
+    **Managed identity is not a hardening nicety here; for some tenants it is the only way
+    in.** A subscription policy can forbid shared-key access entirely, and then a connection
+    string fails at the first write with
+
+        KeyBasedAuthenticationNotPermitted: Key based authentication is not permitted on
+        this storage account.
+
+    Measured on the first Azure deployment: `allowSharedKeyAccess` was already `false` on a
+    freshly created account, and setting it to `true` silently returned `false` again, because
+    the policy and not the account owns that decision.
+
+    So an account URL with a credential is preferred where one is given, and the connection
+    string remains for local emulators and for tenants that still permit keys.
+    """
+
+    def __init__(
+        self,
+        connection_string: str,
+        container: str,
+        account_url: str = "",
+    ) -> None:
+        if not connection_string and not account_url:
             raise StorageError(
-                "BLOB_PROVIDER=azure requires AZURE_STORAGE_CONNECTION_STRING to be set"
+                "BLOB_PROVIDER=azure requires AZURE_STORAGE_ACCOUNT_URL (managed identity) "
+                "or AZURE_STORAGE_CONNECTION_STRING (account key)"
             )
         self._connection_string = connection_string
+        self._account_url = account_url
         self._container = container
 
     def _container_client(self) -> "ContainerClient":
@@ -43,7 +67,21 @@ class AzureBlobStore:
                 "Install the 'azure' extra."
             ) from exc
 
-        service = BlobServiceClient.from_connection_string(self._connection_string)
+        if self._account_url:
+            try:
+                from azure.identity.aio import DefaultAzureCredential
+            except ModuleNotFoundError as exc:  # pragma: no cover - depends on extras
+                raise StorageError(
+                    "AZURE_STORAGE_ACCOUNT_URL needs the azure-identity package. "
+                    "Install the 'azure' extra."
+                ) from exc
+            # Resolves the container app's managed identity in Azure, and a developer's
+            # `az login` locally, without either being named here.
+            service = BlobServiceClient(
+                account_url=self._account_url, credential=DefaultAzureCredential()
+            )
+        else:
+            service = BlobServiceClient.from_connection_string(self._connection_string)
         return service.get_container_client(self._container)
 
     async def put_bytes(self, key: str, content: bytes, content_type: str) -> BlobInfo:

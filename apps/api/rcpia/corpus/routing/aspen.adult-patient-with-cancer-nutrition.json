@@ -1,0 +1,23 @@
+{
+  "document_id": "aspen.adult-patient-with-cancer-nutrition",
+  "note": "ASPEN clinician summary: why nutrition matters for the adult patient with cancer. Two claims the corpus otherwise states nowhere in a citable form -- that malnutrition in cancer is common and carries worse outcomes, and that nutrition support changes those outcomes -- plus the care pathway that turns a positive screen into an action.\n\nIt is a summary, not a guideline: it earns its place by supplying the *warrant* for raising nutrition at all, which the panel needs before an ESPEN recommendation is relevant.",
+  "default": {
+    "setting": "not_specified",
+    "reason": "general_principle",
+    "note": "Nutritional risk and the response to it apply across the disease course. Serves supportive_care throughout: Why nutrition matters in cancer, and what a positive screen should lead to.",
+    "purposes": [
+      "supportive_care"
+    ]
+  },
+  "rules": [
+    {
+      "match_section": "References",
+      "setting": "not_specified",
+      "reason": "general_principle",
+      "exclude": true,
+      "exclusion_reason": "bibliography_entry",
+      "match_leaf": true,
+      "every_occurrence": true
+    }
+  ]
+}

@@ -263,6 +263,26 @@ FIELDS: tuple[FactField, ...] = (
     FactField(
         "histology", ("type histologique",), FactCategory.pathology, required_for=BOTH
     ),
+    # **The one question that authorises a nomogram, asked of a person.**
+    #
+    # Briganti and the MSKCC preoperative models were fitted on prostate adenocarcinoma, and
+    # for seven rounds of review the code decided whether a patient had one by reading the
+    # free-text histology field. Every version of that reading was defeated by a phrasing
+    # nobody had anticipated -- a denial, a hedge, a search result, a percentage of zero, a
+    # grade outside its own scale -- and each failure produced a confident risk score for a
+    # patient whose report denied the disease. Free text can suggest this answer; it cannot
+    # be trusted to authorise a calculator.
+    #
+    # Deliberately not `required_for` and not in `BLOCKING_FIELDS`: an unanswered question
+    # withholds the two nomograms and nothing else. The panel still convenes and the fiche is
+    # still produced, because a tumour board that cannot see a lymph-node probability can
+    # still discuss the case, while one handed a wrong one is worse off than one handed none.
+    FactField(
+        "prostate_adenocarcinoma_confirmed",
+        ("adénocarcinome prostatique confirmé histologiquement",),
+        FactCategory.pathology,
+        cancer_types=(PROSTATE,),
+    ),
     # Applicable to both — a prostatectomy specimen is staged — but only required for
     # bladder. None of the eight real prostate dossiers records a TNM at all: those cases
     # are characterised by Gleason, ISUP, PSA and PIRADS, and requiring a pTNM manufactured
@@ -299,6 +319,33 @@ FIELDS: tuple[FactField, ...] = (
     FactField(
         "ctnm", ("ctnm", "stade clinique"),
         FactCategory.pathology,
+    ),
+    # **The clinical T alone, from the digital rectal examination, and nothing else.**
+    #
+    # Briganti 2012 takes PSA, this stage, the primary and secondary biopsy Gleason patterns
+    # and the percentage of positive systematic cores. It does **not** take cN or cM: those
+    # are not regression inputs, and requiring a complete `ctnm` string before the nomogram
+    # would run made it refuse every dossier for a variable the model never asked for.
+    #
+    # Kept apart from `ctnm` for the same reason `ctnm` is kept apart from `ptnm`: the source
+    # decides whether the value may be used. EAU §4.5 is explicit — *"Clinical stage should be
+    # based on digital rectal examination only; additional staging information based on
+    # imaging or pathology should be reported separately."* A T stage read off an mpMRI is a
+    # real fact and the wrong input here; the narrative pass filled exactly that on one
+    # dossier (`T3aNOMx`, quoted from an MRI report) and it must not reach a nomogram.
+    #
+    # No dossier carries a label for it. Two of the seven with a `Toucher rectal` line state
+    # the stage inside the sentence:
+    #
+    #     dossier 3   Toucher rectal : T2a apex droit
+    #     dossier 7   Toucher rectal : induration de la base gauche classé T2b.
+    #
+    # The other five describe the finding and stop — "prostate ferme de plus de 60 g". Those
+    # must stay empty. Turning a description into a cT is the clinical judgment the examining
+    # urologist made and did not write down.
+    FactField(
+        "ct_dre", ("stade clinique tr",),
+        FactCategory.examination, cancer_types=(PROSTATE,),
     ),
     # Likewise `Grade`: prostate grades with Gleason and ISUP below, and 8/8 real prostate
     # dossiers reported their grade missing while the value sat in the text.
@@ -339,6 +386,60 @@ FIELDS: tuple[FactField, ...] = (
         "intraepithelial_neoplasia", ("pin",), FactCategory.pathology,
         cancer_types=(PROSTATE,),
     ),
+    # Read from the fifteen dossiers on 30 August, and previously discarded. Only labels that
+    # name a clinical field are added: the survey's long tail is report structure -- `Conclusion`,
+    # `Technique`, `À l'étage thoracique`, `Latéralement` -- and those must stay unrecognised, or
+    # every radiology paragraph becomes a fact.
+    FactField(
+        "digital_rectal_exam", ("toucher rectal", "tr"), FactCategory.examination,
+        cancer_types=(PROSTATE,),
+    ),
+    FactField("vaginal_exam", ("toucher vaginal",), FactCategory.examination),
+    # Treatment already under way. The query builder reads androgen deprivation out of free
+    # text to decide castration resistance; a named field is a better source than prose.
+    FactField("hormone_therapy", ("hormonothérapie", "hormonotherapie"), FactCategory.history),
+    # **The other question MSKCC asks before anything else.** Its pre-prostatectomy calculator
+    # disqualifies a patient who has had either prior hormone therapy or prior radiotherapy,
+    # and asks both explicitly before accepting any clinical input.
+    #
+    # `hormone_therapy` already existed; this did not, so the ledger could not hold the answer
+    # and the page could not even show it in red. Two dossiers hold every other input the model
+    # needs and produce no figure for want of these two answers.
+    FactField(
+        "radiation_therapy",
+        ("radiothérapie", "radiotherapie", "antécédent de radiothérapie",
+         "antecedent de radiotherapie", "radiothérapie antérieure"),
+        FactCategory.history,
+    ),
+    FactField("procedure_performed", ("geste",), FactCategory.history),
+    # Ureteral stents: obstruction management, and directly relevant to renal function and to
+    # whether a platinum agent can be considered.
+    FactField(
+        "ureteral_stent_right",
+        ("sonde double jj droite", "sonde double j droite"),
+        FactCategory.history,
+    ),
+    FactField(
+        "ureteral_stent_left",
+        ("sonde double jj gauche", "sonde double j gauche"),
+        FactCategory.history,
+    ),
+    # Biology that gates systemic therapy. Bilirubin and platelets in particular decide whether
+    # a cytotoxic can be given at all, and were being read and dropped.
+    FactField("bilirubin_total", ("bilirubine totale",), FactCategory.biology, unit="mg/L"),
+    FactField("bilirubin_free", ("bilirubine libre",), FactCategory.biology, unit="mg/L"),
+    FactField(
+        "bilirubin_conjugated", ("bilirubine conjuguée", "bilirubine conjuguee"),
+        FactCategory.biology, unit="mg/L",
+    ),
+    FactField("ggt", ("ggt",), FactCategory.biology, unit="UI/L"),
+    FactField("platelets", ("plq", "plaquettes"), FactCategory.biology),
+    FactField("bicarbonate", ("bicar", "bicarbonates"), FactCategory.biology, unit="mmol/L"),
+    FactField("phosphorus", ("phosphore",), FactCategory.biology, unit="mg/L"),
+    FactField("uric_acid", ("acide urique",), FactCategory.biology, unit="mg/L"),
+    FactField(
+        "vitamin_d", ("vitamine d2/d3", "vitamine d"), FactCategory.biology, unit="ng/mL"
+    ),
     FactField(
         "margin_details",
         ("précisions sur les marges", "precisions sur les marges"),
@@ -371,6 +472,70 @@ def fields_for(cancer_type: CancerType) -> tuple[FactField, ...]:
 
 def required_fields_for(cancer_type: CancerType) -> tuple[FactField, ...]:
     return tuple(field_spec for field_spec in FIELDS if field_spec.is_required_for(cancer_type))
+
+
+# Fields where "rien à signaler" cannot be the answer.
+#
+# `RAS` means the clinician looked and found nothing to report. That is information about a
+# symptom — no haematuria, no pain — and nonsense about an identity: there is no such thing as a
+# tumour with no histological type, a prostate cancer with no grade, or a stage that is "nothing
+# to report". A form carrying `Gleason : RAS` has an empty box, not a patient without a grade.
+#
+# Dossier 8 is why this exists. Its form read `Type histologique : RAS`, `Gleason : RAS`,
+# `ISUP : RAS`, while its own narrative recorded *adénocarcinome acinaire Gleason 9 (5+4),
+# ISUP 5*. Every one was stored as a confirmed value, the disease setting could not be derived
+# from a grade of "RAS", and all three agents refused. A man with documented high-volume
+# metastatic disease reached the tumour board with no document at all.
+#
+# `completeness.satisfies_blocking` already refused these values, but it runs *after* the ledger
+# is built — too late for the query builder, which had already staged from `RAS`. Treating the
+# value as absent at the point the ledger is assembled is what makes every later reader agree.
+ABSENCE_IS_NOT_AN_ANSWER: frozenset[str] = frozenset(
+    {
+        "histology",
+        "gleason",
+        "isup",
+        "ctnm",
+        "ptnm",
+        # Added because the test checking this set against `BLOCKING_FIELDS` refused a
+        # hand-written list: muscle invasion decides between conservative treatment and
+        # cystectomy, and its answer is Oui or Non. "Rien à signaler" is neither.
+        "muscle_invasion",
+        # **A score is a number, or it was not done.** The identity fields above were the
+        # first half of the rule; these are the second, and an agent put it better than we
+        # would: *« Score G8 chiffré ; "RAS" n'est pas interprétable comme résultat. »*
+        #
+        # Measured: `g8_score` reads `RAS` in fourteen dossiers of fifteen and rendered as
+        # filled in, so nobody was ever prompted for it, while the specialists asked for it
+        # repeatedly. Frailty decides eligibility for cisplatin, for major surgery and for
+        # chemoradiation in patients aged 64 to 79.
+        #
+        # These are *not* blocking fields -- `BLOCKING_FIELDS` is a separate and much smaller
+        # set -- so this makes them visible and correctable, and stops no analysis.
+        "pallia10",
+        "g8_score",
+        "iief5",
+        "ipss",
+        "mna",
+        "adl",
+        "who_status",
+        # Ambiguous rather than merely absent, which is worse: nothing distinguishes "no
+        # positive cores" from "not counted", and the two give very different answers from a
+        # nomogram that takes the percentage as an input.
+        "cores_positive",
+    }
+)
+
+# **Where the rule stops, and why.** `RAS` remains a legitimate answer for a symptom -- no
+# haematuria, no allergy, no family history -- and for a test whose negative result is itself
+# a finding. An ECBU reading `RAS` means a sterile sample, which is a result; reading it as an
+# empty box would ask a clinician to re-enter something they already answered. The same holds
+# for `pregnancy`, which is a yes/no question and not a measurement.
+
+
+def absence_answers(key: str) -> bool:
+    """Whether `RAS` is a legitimate reading for this field."""
+    return key not in ABSENCE_IS_NOT_AN_ANSWER
 
 
 def is_reported_absent(value: str) -> bool:
