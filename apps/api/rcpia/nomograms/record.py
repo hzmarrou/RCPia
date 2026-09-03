@@ -182,20 +182,49 @@ _PLAIN_DESCRIPTION = frozenset(
 
 _WORDS = re.compile(r"[^\W\d_]+", re.UNICODE)
 
+# **The quantitative forms a diagnosis may legitimately carry, and nothing else.** Numbers
+# and symbols were once simply not looked at -- the word scan skipped them -- so
+# "Adénocarcinome : 0 %", "Adénocarcinome : -", "Adénocarcinome ?" and "Adénocarcinome 0/10"
+# all read as plain statements of adenocarcinoma. Each is a denial or a query written in
+# figures rather than words, and each produced a calculated risk score.
+#
+# So grading is parsed explicitly and consumed; whatever numeral or symbol is left after that
+# has no recognised meaning here, and an unrecognised one is refused for the same reason an
+# unrecognised word is. The keyword form declines to match a number that opens a Gleason pair,
+# so "Gleason 3+4" is read as the pair it is rather than leaving a stray "+4" behind.
+_GRADING_FORMS = re.compile(
+    r"\b\d{1,2}\s*\(\s*\d\s*\+\s*\d\s*\)"
+    r"|\(\s*\d\s*\+\s*\d\s*\)"
+    r"|\b\d\s*\+\s*\d\b"
+    r"|\b(?:gleason|isup|score|grade|groupe)\b\s*:?\s*\d{1,2}(?!\s*\+)",
+    re.IGNORECASE,
+)
+
+# Punctuation that may sit against a word without changing what it says. A token made only of
+# these is refused rather than skipped: ":" and "-" standing alone are how a form records that
+# a question was asked and not answered.
+_STRIPPABLE = ",.:;()'’\"«»"
+
 
 def _states_plainly(text: str, terms: tuple[str, ...]) -> bool:
     """Whether `text` reads as a plain statement of one of `terms` and nothing else.
 
-    The whole field is checked, not a window around the match. Histology arrives as one short
-    field -- a handful of words -- so there is no long report to scope a window within, and
-    window sizing was itself one of the things that kept going wrong.
+    **Every token is accounted for -- words, numerals and symbols alike.** The whole field is
+    read, not a window around the match: histology arrives as one short field, so there is no
+    long report to scope a window within, and window sizing was itself one of the things that
+    kept going wrong. A token survives only by being recognised, never by being skipped.
     """
     if not any(term in text for term in terms):
         return False
     named = {word for term in terms for word in _WORDS.findall(term)}
-    return all(
-        word in named or word in _PLAIN_DESCRIPTION for word in _WORDS.findall(text)
-    )
+    for token in _GRADING_FORMS.sub(" ", text).split():
+        word = token.strip(_STRIPPABLE)
+        # Punctuation alone, or a token carrying a digit or symbol that grading did not claim.
+        if not word or not word.isalpha():
+            return False
+        if word not in named and word not in _PLAIN_DESCRIPTION:
+            return False
+    return True
 
 
 def classify_prostate_histology(value: str | None) -> Tristate:

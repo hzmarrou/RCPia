@@ -395,6 +395,40 @@ def test_no_denial_is_read_as_a_confirmation_however_it_is_phrased() -> None:
         assert classify_prostate_histology(denial) is Tristate.unknown, denial
 
 
+def test_a_denial_written_in_figures_is_refused_like_one_written_in_words() -> None:
+    """**A whole field means numerals and symbols too, and once it did not.**
+
+    The word scan skipped everything non-alphabetic, so a field could say nothing but the
+    diagnosis in words while denying it in figures: "0 %" of it, "0/10" cores, "-" for a
+    question left unanswered, "?" for one not settled. Every one read as a plain statement of
+    adenocarcinoma and produced a calculated score.
+    """
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    for figures in (
+        "Adénocarcinome : 0 %",
+        "Adénocarcinome 0%",
+        "Adénocarcinome : -",
+        "Adénocarcinome ?",
+        "Adénocarcinome 0/10",
+        "Carcinome neuroendocrine : 0 %",
+    ):
+        assert classify_prostate_histology(figures) is Tristate.unknown, figures
+
+
+def test_the_grading_a_diagnosis_legitimately_carries_still_confirms_it() -> None:
+    """Refusing every numeral would refuse the real reports too: a histology line carries its
+    Gleason pair or ISUP group, and those are parsed rather than merely tolerated."""
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    for graded in (
+        "Adénocarcinome acinaire, Gleason 3+4",
+        "Adénocarcinome acinaire, Gleason 7 (3+4)",
+        "Adénocarcinome, ISUP 2",
+    ):
+        assert classify_prostate_histology(graded) is Tristate.yes, graded
+
+
 @pytest.mark.parametrize(
     "histology",
     [
@@ -402,6 +436,10 @@ def test_no_denial_is_read_as_a_confirmation_however_it_is_phrased() -> None:
         "Adénocarcinome non objectivé.",
         "Recherche d'adénocarcinome : négative.",
         "Absence formelle de tout adénocarcinome.",
+        # Written in figures rather than words, and just as much a denial.
+        "Adénocarcinome : 0 %",
+        "Adénocarcinome 0/10",
+        "Adénocarcinome ?",
     ],
 )
 def test_no_denial_reaches_a_calculated_score(histology: str) -> None:
