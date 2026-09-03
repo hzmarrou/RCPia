@@ -130,6 +130,25 @@ _NON_ADENOCARCINOMA_HISTOLOGY = (
     "urothelial",
 )
 
+# A pathologist rules a histology *out* about as often as they name one present, and a
+# report saying "absence de composante neuroendocrine" or "pas de composante sarcomatoïde"
+# names the term while denying it applies. `as_tristate` already avoids a blanket
+# negation-word scan for exactly this reason -- ordinary prose contains negations unrelated
+# to the thing being asked about -- so this list stays narrow and is only ever checked
+# alongside the specific term it might be negating, in the same clause.
+_NEGATION_MARKERS = (
+    "absence de", "absence d'",
+    "pas de", "pas d'",
+    "sans ",
+    "aucun ", "aucune ",
+    "non retrouv",
+    "non identifi",
+    "non mis en évidence", "non mise en évidence",
+    "exclu",
+)
+
+_CLAUSE_SPLIT = re.compile(r"[.;\n]")
+
 
 def classify_prostate_histology(value: str | None) -> Tristate:
     """Adenocarcinoma, a named other histology, or genuinely unrecorded.
@@ -139,13 +158,28 @@ def classify_prostate_histology(value: str | None) -> Tristate:
     other than adenocarcinoma -- and the cost of guessing wrong here is a nomogram computing a
     number for a cancer it was never validated on, which is the one failure this whole gate
     exists to prevent.
+
+    **A named exclusion only counts where it is not itself negated.** Checked per clause
+    rather than by a global negation scan of the whole text: "adénocarcinome, sans
+    contingent neuroendocrine" is real adenocarcinoma reported alongside a ruled-out
+    possibility, and a report can rule out one histology in one sentence while confirming
+    another two sentences later. Splitting on clause boundaries keeps those cases separate
+    instead of letting a negation anywhere in a long report suppress an unrelated exclusion,
+    or a genuine exclusion elsewhere get read past because of a negation nowhere near it.
     """
     if not usable(value):
         return Tristate.unknown
     text = str(value).strip().lower().replace("e'", "é")
     if "adénocarcinome" in text or "adenocarcinome" in text or "adenocarcinoma" in text:
         return Tristate.yes
-    if any(token in text for token in _NON_ADENOCARCINOMA_HISTOLOGY):
+    for clause in _CLAUSE_SPLIT.split(text):
+        if not any(token in clause for token in _NON_ADENOCARCINOMA_HISTOLOGY):
+            continue
+        if any(marker in clause for marker in _NEGATION_MARKERS):
+            # Named and denied in the same breath: not a confirmed exclusion. Falls through
+            # to the next clause rather than returning early, since a different clause may
+            # still name a real one.
+            continue
         return Tristate.no
     return Tristate.unknown
 

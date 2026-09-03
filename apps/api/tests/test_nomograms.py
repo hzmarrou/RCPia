@@ -296,6 +296,53 @@ def test_classify_prostate_histology_matches_only_named_terms() -> None:
     assert classify_prostate_histology("RAS") is Tristate.unknown
 
 
+def test_a_negated_exclusion_stays_unknown_not_no() -> None:
+    """The finding this test exists for: a report naming a histology only to rule it out
+    was read the same as one confirming it. "Absence de composante neuroendocrine" and
+    "adénocarcinome" are opposite findings and were both routed to the same conclusion.
+
+    Unknown, not `no`, because ruling out *this* histology does not by itself confirm
+    adenocarcinoma -- the report may simply not say. Treating a ruled-out exclusion as
+    confirmed adenocarcinoma would be a different, equally unsafe guess in the other
+    direction.
+    """
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    assert classify_prostate_histology(
+        "Absence de composante neuroendocrine"
+    ) is Tristate.unknown
+    assert classify_prostate_histology(
+        "Pas de composante sarcomatoïde"
+    ) is Tristate.unknown
+    assert classify_prostate_histology(
+        "Composante neuroendocrine non retrouvée"
+    ) is Tristate.unknown
+    assert classify_prostate_histology(
+        "Sans contingent urothélial"
+    ) is Tristate.unknown
+
+
+def test_adenocarcinoma_confirmed_alongside_a_ruled_out_histology_is_still_yes() -> None:
+    """A real pathology report shape: the tumour is named, and a differential is excluded
+    in the same sentence. The exclusion must not shadow the positive finding."""
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    assert classify_prostate_histology(
+        "Adénocarcinome acinaire, sans contingent neuroendocrine"
+    ) is Tristate.yes
+
+
+def test_a_real_exclusion_in_a_later_clause_still_returns_no() -> None:
+    """Negation is checked per clause, not by scanning the whole report for any negation
+    word: a ruled-out histology in one sentence must not suppress a genuine exclusion
+    named in another."""
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    assert classify_prostate_histology(
+        "Absence de composante sarcomatoïde. Carcinome épidermoïde confirmé."
+    ) is Tristate.no
+
+
 def test_a_missing_stage_names_itself() -> None:
     """"Cannot compute" tells an RCP nothing; naming the field tells them what to write."""
     result = briganti.evaluate(
