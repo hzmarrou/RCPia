@@ -26,6 +26,7 @@ import io
 
 from docx import Document as _new_document
 from docx.document import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, RGBColor
 
 from rcpia.pps.render import (
@@ -87,6 +88,31 @@ def _banner(doc: Document, text: str, *, color: RGBColor = WARNING_COLOR) -> Non
     run = paragraph.add_run(text)
     run.bold = True
     run.font.color.rgb = color
+
+
+PROVISIONAL_FOOTER = "DOCUMENT PROVISOIRE — NON VALIDÉ RCP"
+
+
+def _provisional_footer(doc: Document) -> None:
+    """The provisional status on every page, not only on the first one.
+
+    The banner at the top of the document is the strongest signal a reader gets, and it
+    protects exactly one page. A Word file is printed, forwarded, split across a table and
+    photographed a page at a time; every one of those produces a page carrying clinical
+    content with nothing on it to say the content was never validated. A footer is the one
+    place Word repeats text without being asked.
+
+    Both files carry it. The probatoire is no more validated than the fiche, and its pages
+    detach the same way -- more easily, since it is the longer document.
+    """
+    footer = doc.sections[0].footer
+    footer.is_linked_to_previous = False
+    paragraph = footer.paragraphs[0]
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.add_run(PROVISIONAL_FOOTER)
+    run.bold = True
+    run.font.size = Pt(8.5)
+    run.font.color.rgb = WARNING_COLOR
 
 
 def _kv_table(doc: Document, rows: list[tuple[str, str]]) -> None:
@@ -419,6 +445,7 @@ def _header_rows(document: PpsDocument) -> list[tuple[str, str]]:
 def render_fiche_docx(document: PpsDocument) -> Document:
     """Sections 1 to 6 and what is missing: the document the RCP reads and acts on."""
     doc = _document()
+    _provisional_footer(doc)
     doc.add_heading("FICHE RCP — PROPOSITION DE PRISE EN CHARGE (PPS)", level=0)
     _banner(doc, document.banner)
 
@@ -590,6 +617,7 @@ def render_probatoire_docx(document: PpsDocument) -> Document:
     shape, so the two can always be matched to each other.
     """
     doc = _document()
+    _provisional_footer(doc)
     doc.add_heading("DOSSIER PROBATOIRE — RÉFÉRENCES ET RAISONNEMENT", level=0)
     _muted(
         doc,

@@ -548,3 +548,19 @@ def test_a_reference_of_only_unsafe_characters_still_yields_a_usable_filename() 
     name = headers["Content-Disposition"].split('"')[1]
 
     assert name == "Fiche-RCP.docx"
+
+
+def test_every_page_of_both_files_carries_the_provisional_label() -> None:
+    """The top banner protects page 1. A Word file gets printed, forwarded, split and
+    photographed a page at a time, and a detached page of clinical content with nothing
+    saying it was never validated is the failure this closes. The footer is checked in the
+    section, which is what Word repeats on every page -- not in the body text, where it
+    would appear once."""
+    document = _minimal()
+
+    for render in (render_fiche_docx, render_probatoire_docx):
+        doc = WordDocument(io.BytesIO(to_bytes(render(document))))
+        footers = [
+            p.text for section in doc.sections for p in section.footer.paragraphs
+        ]
+        assert any("DOCUMENT PROVISOIRE — NON VALIDÉ RCP" in text for text in footers)
