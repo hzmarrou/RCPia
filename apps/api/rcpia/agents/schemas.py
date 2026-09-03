@@ -80,6 +80,10 @@ class SourceSnippet(Strict):
     source_document_id: str = Field(min_length=1, max_length=64)
     source_chunk_id: str | None = None
     page: int | None = None
+    # Set only when the excerpt was assembled from chunks landing on more than one page --
+    # a multi-paragraph imaging report, typically. `None` means the whole excerpt is on
+    # `page`, exactly as before this field existed.
+    page_end: int | None = None
     section: str | None = None
 
 

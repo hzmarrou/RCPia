@@ -412,6 +412,12 @@ def _to_rows(case: Case, fact: ResolvedFact, signature: str) -> list[ExtractedFa
             origin=FactOrigin.machine,
             source_document_id=reading.document_id,
             source_chunk_id=reading.chunk_id,
+            # Every chunk the excerpt was actually assembled from. `reading.chunk_ids` was
+            # already captured correctly at extraction time and simply never read past this
+            # point -- a multi-chunk imaging report kept the diagnostic paragraphs in its own
+            # `source_excerpt`, but a citation back to it could only ever point at
+            # `source_chunk_id`, the first contributing chunk.
+            source_chunk_ids=list(reading.chunk_ids) if reading.chunk_ids else None,
             source_excerpt=reading.excerpt,
             note=note,
             extraction_signature=signature,

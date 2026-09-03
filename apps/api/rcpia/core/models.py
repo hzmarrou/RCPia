@@ -34,7 +34,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -388,7 +388,19 @@ class ExtractedFact(TimestampMixin, Base):
     )
 
     source_document_id: Mapped[uuid.UUID | None] = mapped_column()
+    # The chunk a reviewer is sent to. Kept as the *first* contributing chunk -- never
+    # renamed or repurposed -- so the existing FK constraint below keeps enforcing that a
+    # machine fact always names one real, traceable location.
     source_chunk_id: Mapped[uuid.UUID | None] = mapped_column()
+    # **Every** chunk the excerpt was assembled from, in order, `source_chunk_id` included.
+    # An imaging report can run across a heading, several findings paragraphs and a
+    # conclusion; `source_excerpt` already quotes all of it, but until this column existed
+    # nothing recorded where the *rest* of it lived, so a citation pointed a reviewer at
+    # `source_chunk_id` alone -- often the acquisition-protocol paragraph the report opens
+    # with -- for a quotation whose diagnostic sentence sat several chunks later. No FK: an
+    # array element can't carry one in Postgres, so traceability for the append-only audit
+    # trail still rests on `source_chunk_id`, and this column is supplementary, not load-bearing.
+    source_chunk_ids: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
     source_excerpt: Mapped[str | None] = mapped_column(Text)
 
     supersedes_fact_id: Mapped[uuid.UUID | None] = mapped_column()

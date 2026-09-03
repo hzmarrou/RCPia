@@ -25,6 +25,7 @@ class LedgerReadingRead(BaseModel):
     source_excerpt: str | None = None
     source_document_id: str | None = None
     source_chunk_id: str | None = None
+    source_chunk_ids: list[str] = []
     fact_id: str | None = None
 
 
@@ -41,6 +42,7 @@ class LedgerEntryRead(BaseModel):
     source_excerpt: str | None = None
     source_document_id: str | None = None
     source_chunk_id: str | None = None
+    source_chunk_ids: list[str] = []
     fact_id: str | None = None
     corrected: bool = False
     # Several when the dossier contradicts itself; the disagreement is the information.

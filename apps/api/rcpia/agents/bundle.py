@@ -141,17 +141,27 @@ def entries_from_version(version: CaseLedgerVersion) -> list[LedgerEntry]:
         if not isinstance(raw, dict):  # pragma: no cover - snapshots are written by us
             continue
         values = {key: value for key, value in raw.items() if key in known}
-        values["readings"] = tuple(
-            LedgerReading(
-                **{
-                    key: value
-                    for key, value in reading.items()
-                    if key in LedgerReading.__dataclass_fields__
-                }
-            )
-            for reading in raw.get("readings", ())
-            if isinstance(reading, dict)
-        )
+        # JSON has no tuple: a snapshot round-trips `source_chunk_ids` as a list, and both
+        # dataclasses declare it a tuple. Left uncoerced, concatenating it against a tuple
+        # elsewhere (`bundle.py`'s own chunk-id gathering) fails with a plain `TypeError` --
+        # a stored version, not a freshly built one, is what actually exercises this path.
+        if "source_chunk_ids" in values:
+            values["source_chunk_ids"] = tuple(values["source_chunk_ids"] or ())
+        readings: list[LedgerReading] = []
+        for reading in raw.get("readings", ()):
+            if not isinstance(reading, dict):
+                continue
+            reading_values = {
+                key: value
+                for key, value in reading.items()
+                if key in LedgerReading.__dataclass_fields__
+            }
+            if "source_chunk_ids" in reading_values:
+                reading_values["source_chunk_ids"] = tuple(
+                    reading_values["source_chunk_ids"] or ()
+                )
+            readings.append(LedgerReading(**reading_values))
+        values["readings"] = tuple(readings)
         entries.append(LedgerEntry(**values))
 
     return entries
@@ -168,6 +178,36 @@ async def _chunk_metadata(
     return {chunk.id: chunk for chunk in rows.scalars().all()}
 
 
+def _page_span(
+    reading: LedgerReading, chunks: dict[uuid.UUID, DocumentChunk]
+) -> tuple[int | None, int | None]:
+    """The pages a reading's excerpt actually spans, from every chunk it was built from.
+
+    `source_chunk_id` alone names only the first contributing chunk, which for a multi-
+    paragraph imaging report can be the acquisition-protocol paragraph while the diagnostic
+    sentence the excerpt quotes sits several chunks -- and pages -- later. A citation built
+    from that one page would send a reviewer somewhere the sentence is not.
+
+    Returns `(page, None)` when every resolvable chunk lands on the same page -- today's
+    behaviour, unchanged -- and `(first_page, last_page)` only when the excerpt genuinely
+    spans more than one.
+    """
+    ids = dict.fromkeys(
+        cid for cid in (reading.source_chunk_id, *reading.source_chunk_ids) if cid
+    )
+    resolved_pages: set[int] = set()
+    for cid in ids:
+        chunk = chunks.get(uuid.UUID(cid))
+        if chunk is not None and chunk.page is not None:
+            resolved_pages.add(chunk.page)
+    pages = sorted(resolved_pages)
+    if not pages:
+        return None, None
+    if len(pages) == 1:
+        return pages[0], None
+    return pages[0], pages[-1]
+
+
 def _readings_of(entry: LedgerEntry) -> tuple[LedgerReading, ...]:
     """Every reading behind a field, including the single implicit one."""
     if entry.readings:
@@ -180,6 +220,7 @@ def _readings_of(entry: LedgerEntry) -> tuple[LedgerReading, ...]:
             source_excerpt=entry.source_excerpt,
             source_document_id=entry.source_document_id,
             source_chunk_id=entry.source_chunk_id,
+            source_chunk_ids=entry.source_chunk_ids,
             fact_id=entry.fact_id,
         ),
     )
@@ -233,11 +274,15 @@ async def build_bundle(
             reranker=reranker,
         )
 
+    # Every chunk any reading was assembled from, not only the one it is filed under. A
+    # multi-chunk imaging report needs all of them resolved, or the snippet below can only
+    # ever locate its excerpt on the first contributing chunk's page.
     chunk_ids = {
-        uuid.UUID(reading.source_chunk_id)
+        uuid.UUID(chunk_id)
         for entry in entries
         for reading in _readings_of(entry)
-        if reading.source_chunk_id
+        for chunk_id in (reading.source_chunk_id, *reading.source_chunk_ids)
+        if chunk_id
     }
     chunks = await _chunk_metadata(session, chunk_ids)
 
@@ -275,13 +320,15 @@ async def build_bundle(
                     if reading.source_chunk_id
                     else None
                 )
+                page, page_end = _page_span(reading, chunks)
                 snippets.append(
                     SourceSnippet(
                         id=snippet_id,
                         text=key[0],
                         source_document_id=reading.source_document_id,
                         source_chunk_id=reading.source_chunk_id,
-                        page=chunk.page if chunk else None,
+                        page=page,
+                        page_end=page_end,
                         section=chunk.section if chunk else None,
                     )
                 )

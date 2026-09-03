@@ -60,6 +60,10 @@ class LedgerReading:
     source_excerpt: str | None = None
     source_document_id: str | None = None
     source_chunk_id: str | None = None
+    # Every chunk `source_excerpt` was assembled from, `source_chunk_id` included. A
+    # multi-paragraph imaging report spans several; naming only one meant a citation could
+    # send a reviewer to a page that does not hold the sentence being quoted.
+    source_chunk_ids: tuple[str, ...] = ()
     fact_id: str | None = None
 
 
@@ -77,6 +81,7 @@ class LedgerEntry:
     source_excerpt: str | None = None
     source_document_id: str | None = None
     source_chunk_id: str | None = None
+    source_chunk_ids: tuple[str, ...] = ()
     fact_id: str | None = None
     corrected: bool = False
     # Populated when the dossier says more than one thing: every reading with its own
@@ -239,6 +244,7 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
                     str(fact.source_document_id) if fact.source_document_id else None
                 ),
                 source_chunk_id=str(fact.source_chunk_id) if fact.source_chunk_id else None,
+                source_chunk_ids=tuple(str(cid) for cid in (fact.source_chunk_ids or ())),
                 fact_id=str(fact.id),
                 corrected=fact.origin is FactOrigin.human,
                 readings=tuple(
@@ -250,6 +256,9 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
                         ),
                         source_chunk_id=(
                             str(row.source_chunk_id) if row.source_chunk_id else None
+                        ),
+                        source_chunk_ids=tuple(
+                            str(cid) for cid in (row.source_chunk_ids or ())
                         ),
                         fact_id=str(row.id),
                     )

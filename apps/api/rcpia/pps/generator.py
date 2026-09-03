@@ -594,6 +594,7 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
                 # reader where the quotation came from.
                 source_document_id=snippet.get("source_document_id") or snippet.get("source"),
                 page=snippet.get("page"),
+                page_end=snippet.get("page_end"),
             )
         )
     return entries

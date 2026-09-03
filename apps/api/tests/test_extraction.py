@@ -744,6 +744,134 @@ async def test_a_value_continuing_into_the_next_chunk_cites_the_chunk_holding_it
         assert cardiac.source_excerpt in cited.text, "the excerpt is in the cited chunk"
 
 
+async def test_every_contributing_chunk_survives_into_the_stored_fact(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Finding 5 from the PR review, as a regression test.
+
+    `extract_from_text` already captured every chunk a report was assembled from --
+    `test_every_contributing_chunk_is_recorded` in `test_extraction_reports.py` covers that.
+    What it fed into was never read past extraction: `_to_rows` stored only the first
+    chunk, so a citation to a conclusion written several chunks -- and pages -- later
+    pointed a reviewer at the report's opening paragraph instead.
+    """
+    case_id, organization_id = await seed_parsed_case(
+        session_factory,
+        text="TDM TAP :\nTechnique : Examen fait sans et avec injection de produit de contraste.",
+    )
+
+    async with session_factory() as session:
+        document = await session.scalar(
+            sa.select(UploadedDocument).where(UploadedDocument.case_id == case_id)
+        )
+        assert document is not None
+        # The heading (seeded on page 1) carries only the acquisition protocol; the
+        # conclusion, on page 2, is what a clinician actually needs to read.
+        session.add_all(
+            [
+                DocumentChunk(
+                    document_id=document.id, parse_run=0, ordinal=1,
+                    text="A l'étage abdomino-pelvien : masse rénale suspecte de 4cm.",
+                    page=1, block_type=BlockType.paragraph,
+                ),
+                DocumentChunk(
+                    document_id=document.id, parse_run=0, ordinal=2,
+                    text="**CONCLUSION**",
+                    page=2, block_type=BlockType.paragraph,
+                ),
+                DocumentChunk(
+                    document_id=document.id, parse_run=0, ordinal=3,
+                    text="Masse rénale suspecte de 4cm, à corréler à l'IRM.",
+                    page=2, block_type=BlockType.paragraph,
+                ),
+            ]
+        )
+        await session.commit()
+
+    await run_extraction(session_factory, case_id, organization_id)
+
+    async with session_factory() as session:
+        facts = {
+            fact.fact_type: fact for fact in await latest_machine_facts(session, case_id=case_id)
+        }
+        ct_tap = facts["ct_tap"]
+        assert "CONCLUSION" in (ct_tap.value or "")
+
+        # The defect: only the first contributing chunk was ever persisted.
+        assert ct_tap.source_chunk_ids is not None
+        assert len(ct_tap.source_chunk_ids) == 4
+        assert ct_tap.source_chunk_id in ct_tap.source_chunk_ids
+
+        pages = set()
+        for chunk_id in ct_tap.source_chunk_ids:
+            chunk = await session.get(DocumentChunk, chunk_id)
+            assert chunk is not None
+            pages.add(chunk.page)
+        assert pages == {1, 2}, "the persisted chunks must reach the page holding the diagnosis"
+
+
+async def test_a_multi_page_report_cites_an_honest_page_range_in_the_bundle(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The consumer-facing half of finding 5: the citation an agent is actually handed.
+
+    Before this fix, `page_end` did not exist and `page` came from `source_chunk_id` alone
+    -- the heading's own page, which for this dossier shape is only the acquisition
+    protocol. A reviewer sent to that page would not find the sentence being quoted.
+    """
+    from rcpia.agents.bundle import build_bundle
+    from rcpia.cases.ledger import record_version
+
+    case_id, organization_id = await seed_parsed_case(
+        session_factory,
+        text="TDM TAP :\nTechnique : Examen fait sans et avec injection de produit de contraste.",
+    )
+
+    async with session_factory() as session:
+        document = await session.scalar(
+            sa.select(UploadedDocument).where(UploadedDocument.case_id == case_id)
+        )
+        assert document is not None
+        session.add_all(
+            [
+                DocumentChunk(
+                    document_id=document.id, parse_run=0, ordinal=1,
+                    text="A l'étage abdomino-pelvien : masse rénale suspecte de 4cm.",
+                    page=1, block_type=BlockType.paragraph,
+                ),
+                DocumentChunk(
+                    document_id=document.id, parse_run=0, ordinal=2,
+                    text="**CONCLUSION**",
+                    page=3, block_type=BlockType.paragraph,
+                ),
+                DocumentChunk(
+                    document_id=document.id, parse_run=0, ordinal=3,
+                    text="Masse rénale suspecte de 4cm, à corréler à l'IRM.",
+                    page=3, block_type=BlockType.paragraph,
+                ),
+            ]
+        )
+        await session.commit()
+
+    await run_extraction(session_factory, case_id, organization_id)
+
+    async with session_factory() as session:
+        case = await session.get(Case, case_id)
+        assert case is not None
+        version = await record_version(session, case=case, change_reason="test")
+        await session.commit()
+
+        built = await build_bundle(
+            session, case=case, agent_role="urology_oncology", version=version
+        )
+
+        snippet = next(
+            s for s in built.bundle.inputs.source_snippets if "CONCLUSION" in s.text
+        )
+        assert snippet.page == 1, "the excerpt still starts where the report itself opens"
+        assert snippet.page_end == 3, "and must say it reaches the page the diagnosis is on"
+
+
 def test_every_field_key_is_unique_and_indexed() -> None:
     keys = [field.key for field in FIELDS_BY_KEY.values()]
 

@@ -164,6 +164,10 @@ class EvidenceEntry(Strict):
     supports: str | None = None
     source_document_id: str | None = None
     page: int | None = None
+    # Set only when the quotation spans more than one page -- a multi-paragraph imaging
+    # report, typically -- so the register can say "p. 3-5" rather than implying the whole
+    # excerpt sits on page 3.
+    page_end: int | None = None
 
 
 class NomogramFigure(Strict):
