@@ -536,6 +536,68 @@ def test_a_fabricated_raised_by_is_refused() -> None:
         check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
 
 
+def test_silent_can_only_name_a_speciality_this_panel_actually_knows_about() -> None:
+    """The finding this test exists for: `silent` was checked against the global role
+    vocabulary, not against who this panel actually convened. A panel of two specialists
+    could report a third, uninvolved one as silent -- which reads as a real coverage gap
+    when that speciality was never asked in the first place."""
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            coverage_gaps=[
+                {
+                    "point": "Indication d'une radiotherapie adjuvante",
+                    "raised_by": [
+                        {"role": "urology_oncology", "quote": "Le DFG est trop bas"}
+                    ],
+                    # radiation_oncology is a real speciality in the system, and it is
+                    # nowhere in this panel -- not an opinion, not a declared miss.
+                    "silent": ["radiation_oncology"],
+                    "clinical_impact": "Non aborde par la radiotherapie.",
+                }
+            ],
+        )
+    )
+    with pytest.raises(UnattestedAgreement, match="radiation_oncology"):
+        check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
+
+
+def test_silent_may_name_a_speciality_the_panel_asked_for_and_got_nothing_from() -> None:
+    """Not every legitimate silence comes with an opinion to be silent *in*: a speciality
+    the panel convened but that produced no usable answer is still part of this panel, and
+    `missing_opinions` is how the bundle says so."""
+    bundle = TaskBundle(
+        goal="g",
+        audience="a",
+        inputs=BundleInputs(
+            case_id="case-1",
+            agent_role=SYNTHESIS_ROLE,
+            cancer_type="bladder",
+            ledger_version=1,
+            agent_opinions=[UROLOGY, MEDICAL],
+            missing_opinions=["radiation_oncology"],
+        ),
+        output_format=OutputFormat(schema_={}),
+        constraints=["Avis provisoire."],
+    )
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            coverage_gaps=[
+                {
+                    "point": "Indication d'une radiotherapie adjuvante",
+                    "raised_by": [
+                        {"role": "urology_oncology", "quote": "Le DFG est trop bas"}
+                    ],
+                    "silent": ["radiation_oncology"],
+                    "clinical_impact": "Aucun avis disponible de la radiotherapie.",
+                }
+            ],
+        )
+    )
+    check_synthesis(output, bundle)
+
+
 def test_a_french_label_is_normalised_rather_than_rejected() -> None:
     """A run that named the right speciality in the wrong vocabulary got the clinical judgement
     right. Eleven of fourteen syntheses used identifiers and three used labels."""

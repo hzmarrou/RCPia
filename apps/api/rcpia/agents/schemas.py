@@ -882,11 +882,27 @@ def check_synthesis(output: "SynthesisOutput", bundle: TaskBundle) -> None:
             divergence.agent_b.role, divergence.agent_b.quote, context="Une divergence"
         )
 
+    # Every speciality this panel actually knows about: one that answered, or one the panel
+    # asked for and got nothing usable from. `silent` is checked against this, not against
+    # the global role vocabulary `CoverageGap`'s own field validator uses -- a panel of two
+    # convened specialities can otherwise report a third, uninvolved one as "silent", which
+    # reads as a real gap in coverage when the speciality was never asked in the first place.
+    panel_roles = set(opinions) | {
+        normalise_role(role) for role in bundle.inputs.missing_opinions
+    }
+
     # `raised_by` is checkable the same way; `silent` asserts an absence, which no quotation
-    # from elsewhere in the opinion could ever prove, so it is not checked here.
+    # from elsewhere in the opinion could ever prove, so it is checked against panel
+    # membership instead of a quotation.
     for gap in output.coverage_gaps:
         for item in gap.raised_by:
             _require_attested(item.role, item.quote, context="Une lacune de couverture")
+        for role in gap.silent:
+            if role not in panel_roles:
+                raise UnattestedAgreement(
+                    f"Une lacune de couverture cite {role} comme silencieux, mais cette "
+                    "specialite ne fait pas partie de ce panel."
+                )
 
 
 # The ways a model marks "words omitted here" when it shortens a quotation.
