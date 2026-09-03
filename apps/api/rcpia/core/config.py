@@ -47,7 +47,13 @@ class Settings(BaseSettings):
     # spends one Pi run per speciality on every dossier that arrives -- including a test upload.
     # It is listed rather than derived from the wired agent folders, so adding a speciality to
     # the repository does not silently enlarge what every upload costs.
-    auto_panel_roles: str = "urology_oncology,medical_oncology,radiation_oncology"
+    # **Empty by default: a worker with no configuration must not analyse an unreviewed
+    # extraction.** The ledger page tells the clinician the specialists will only read the
+    # version they approve, and the button on that page is what convenes them. The template,
+    # Compose and `.env.example` were changed to match; leaving the application default
+    # populated meant any worker started without an explicit value silently went back to
+    # convening on the machine's first draft -- the promise broken again, one layer down.
+    auto_panel_roles: str = ""
 
     @property
     def auto_panel_role_list(self) -> list[str]:

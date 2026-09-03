@@ -35,6 +35,7 @@ from rcpia.agents.pi_adapter import (
 )
 from rcpia.agents.schemas import (
     AgentOutput,
+    CitationInWrongChannel,
     SynthesisOutput,
     TaskBundle,
     UnattestedAgreement,
@@ -72,6 +73,21 @@ def _terminal(message: str) -> JobOutcome:
 
 def _retryable(message: str) -> JobOutcome:
     return JobOutcome(status=JobStatus.failed, error_message=message, retryable=True)
+
+
+# Every way `check_citations` can refuse an output, named once.
+#
+# **A tuple rather than an inline `except`, because the inline form already failed.**
+# `CitationInWrongChannel` was added to `check_citations` and not to the handler, so it
+# escaped `run_agent`: the worker rolled back, failed the job generically, and lost the
+# `AgentRun` row and its transcript link -- exactly the record a reviewer needs when an agent
+# cites into the wrong channel. A test asserts this tuple covers every citation refusal
+# `schemas` defines, so the next one added cannot slip through the same gap.
+CITATION_FAILURES = (
+    CitationInWrongChannel,
+    UncitedEvidence,
+    UngroundedRecommendation,
+)
 
 
 async def run_agent(
@@ -311,7 +327,7 @@ def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
 
     try:
         check_citations(output, bundle)
-    except (UncitedEvidence, UngroundedRecommendation) as exc:
+    except CITATION_FAILURES as exc:
         raise PiOutputInvalid(str(exc)) from exc
 
     # A synthesis claims agreements between agents it read. Each claim must be quotable from

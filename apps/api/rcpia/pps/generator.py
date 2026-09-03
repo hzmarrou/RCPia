@@ -550,8 +550,14 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
     inputs = run.bundle.get("inputs", {}) or {}
     # Both collections, keyed together. The bundle validator already guarantees no id is
     # shared between them, so one lookup cannot resolve to the wrong kind of source.
+    # **Keyed by folded id, because acceptance folds too.** `check_citations` compares a
+    # cited id case-insensitively -- "an id is only miscased or fabricated" -- so an agent
+    # returning `EAU....1198` for bundle id `eau....1198` is accepted as grounded. Resolving
+    # case-sensitively here then found nothing and dropped the passage from the register: the
+    # recommendation kept its citation and the evidence behind it silently vanished. The two
+    # sides must agree on what counts as the same id.
     snippets = {
-        str(item.get("id")): item
+        str(item.get("id")).casefold(): item
         for key in ("source_snippets", "guideline_passages")
         for item in (inputs.get(key) or [])
         if isinstance(item, dict)
@@ -575,12 +581,12 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
 
     entries: list[EvidenceEntry] = []
     for identifier in dict.fromkeys(cited):
-        snippet = snippets.get(identifier)
+        snippet = snippets.get(identifier.casefold())
         if snippet is None:  # pragma: no cover - validation refuses uncited ids
             continue
         entries.append(
             EvidenceEntry(
-                id=identifier,
+                id=str(snippet.get("id") or identifier),
                 quote=str(snippet.get("text", "")),
                 supports=supports.get(identifier),
                 # A dossier excerpt carries a document id; a guideline passage carries the
