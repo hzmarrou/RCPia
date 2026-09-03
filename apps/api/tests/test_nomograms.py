@@ -343,6 +343,67 @@ def test_a_real_exclusion_in_a_later_clause_still_returns_no() -> None:
     ) is Tristate.no
 
 
+def test_a_denied_adenocarcinoma_is_not_read_as_confirmed() -> None:
+    """Re-review finding: the first negation fix only checked the exclusion list. A denied
+    adenocarcinoma finding named exactly the term this classifier looks for and was read as
+    confirming it -- the more dangerous direction to get wrong, since it is what feeds a
+    nomogram a number for a cancer the report explicitly says the patient does not have.
+
+    Verified end to end at the time this was found: `Briganti.evaluate` and `mskcc.evaluate`
+    both returned `CALCULATED` for a record built from this exact sentence.
+    """
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    result = classify_prostate_histology("Absence d'adénocarcinome prostatique.")
+
+    assert result is not Tristate.yes
+    assert result is Tristate.unknown
+
+
+def test_a_comma_joined_denial_does_not_suppress_an_unrelated_confirmation() -> None:
+    """Re-review finding: a clause was split only on sentence terminators, so a negation for
+    one finding, comma-joined to a confirmed and unrelated second finding in what reads as
+    one sentence, suppressed the second finding along with the first."""
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    result = classify_prostate_histology(
+        "Pas d'emboles vasculaires, carcinome neuroendocrine confirmé"
+    )
+
+    assert result is Tristate.no
+
+
+def test_the_two_findings_do_not_bleed_into_each_other_either_direction() -> None:
+    """The comma split cuts both ways: a confirmed finding, comma-joined to an unrelated
+    denial, must not itself be suppressed."""
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    result = classify_prostate_histology(
+        "Adénocarcinome acinaire confirmé, pas d'emboles vasculaires"
+    )
+
+    assert result is Tristate.yes
+
+
+def test_a_dossier_denying_adenocarcinoma_does_not_reach_calculated() -> None:
+    """The end-to-end reproduction from the re-review, run against both calculators: a
+    dossier whose pathology report reads `record_from_facts` into a denied-adenocarcinoma
+    histology, with otherwise complete inputs, must not receive a computed score from
+    either. Before this fix both did."""
+    record = record_from_facts(
+        {
+            "histology": "Absence d'adénocarcinome prostatique.",
+            "age": "70", "psa_total": "7.53", "gleason": "7 (3+4)", "ct_dre": "T2a",
+            "cores_positive": "5", "cores_total": "21",
+            "hormone_therapy": "Non", "radiation_therapy": "Non",
+        }
+    )
+    assert record.is_prostate_adenocarcinoma is Tristate.unknown
+
+    assert briganti.evaluate(record).status is not Status.calculated
+    assert mskcc.evaluate(record).status is not Status.calculated
+
+
 def test_a_missing_stage_names_itself() -> None:
     """"Cannot compute" tells an RCP nothing; naming the field tells them what to write."""
     result = briganti.evaluate(

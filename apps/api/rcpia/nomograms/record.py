@@ -130,12 +130,19 @@ _NON_ADENOCARCINOMA_HISTOLOGY = (
     "urothelial",
 )
 
+_ADENOCARCINOMA_TERMS = ("adénocarcinome", "adenocarcinome", "adenocarcinoma")
+
 # A pathologist rules a histology *out* about as often as they name one present, and a
 # report saying "absence de composante neuroendocrine" or "pas de composante sarcomatoïde"
 # names the term while denying it applies. `as_tristate` already avoids a blanket
 # negation-word scan for exactly this reason -- ordinary prose contains negations unrelated
 # to the thing being asked about -- so this list stays narrow and is only ever checked
-# alongside the specific term it might be negating, in the same clause.
+# alongside the specific term it might be negating, within the same clause.
+#
+# **The same negation applies to a positive adenocarcinoma finding, and it was missed the
+# first time this was fixed.** "Absence d'adénocarcinome" names the term this classifier
+# looks for and denies it in the same breath; checking negation only on the exclusion list
+# let a denied adenocarcinoma finding through as a confirmed one.
 _NEGATION_MARKERS = (
     "absence de", "absence d'",
     "pas de", "pas d'",
@@ -147,7 +154,21 @@ _NEGATION_MARKERS = (
     "exclu",
 )
 
-_CLAUSE_SPLIT = re.compile(r"[.;\n]")
+# A comma joins two findings as often as it joins two words of one: "pas d'emboles
+# vasculaires, carcinome neuroendocrine confirmé" denies one thing and confirms another in
+# what reads as a single sentence. Splitting only on `.;\n` left both halves in one clause. A
+# negation for the first finding then suppressed the confirmed second one it had nothing to
+# do with -- the same conflation the sentence-level split was meant to avoid, one level up.
+_CLAUSE_SPLIT = re.compile(r"[.;,\n]")
+
+
+def _confirmed_in_some_clause(text: str, terms: tuple[str, ...]) -> bool:
+    """Whether any clause names one of `terms` without also negating it, in that clause."""
+    return any(
+        any(term in clause for term in terms)
+        and not any(marker in clause for marker in _NEGATION_MARKERS)
+        for clause in _CLAUSE_SPLIT.split(text)
+    )
 
 
 def classify_prostate_histology(value: str | None) -> Tristate:
@@ -159,27 +180,19 @@ def classify_prostate_histology(value: str | None) -> Tristate:
     number for a cancer it was never validated on, which is the one failure this whole gate
     exists to prevent.
 
-    **A named exclusion only counts where it is not itself negated.** Checked per clause
-    rather than by a global negation scan of the whole text: "adénocarcinome, sans
-    contingent neuroendocrine" is real adenocarcinoma reported alongside a ruled-out
-    possibility, and a report can rule out one histology in one sentence while confirming
-    another two sentences later. Splitting on clause boundaries keeps those cases separate
-    instead of letting a negation anywhere in a long report suppress an unrelated exclusion,
-    or a genuine exclusion elsewhere get read past because of a negation nowhere near it.
+    **Both directions are checked for negation, the same way, in the same clause.** A term
+    only counts -- confirming adenocarcinoma or excluding it -- in a clause that names it and
+    does not also deny it. The two checks have to be symmetric: checking negation for the
+    exclusion list alone left "absence d'adénocarcinome" read as confirmed adenocarcinoma,
+    which is the opposite of what the sentence says and the more dangerous direction to get
+    wrong, since it feeds a nomogram a number for a cancer it denies having.
     """
     if not usable(value):
         return Tristate.unknown
     text = str(value).strip().lower().replace("e'", "é")
-    if "adénocarcinome" in text or "adenocarcinome" in text or "adenocarcinoma" in text:
+    if _confirmed_in_some_clause(text, _ADENOCARCINOMA_TERMS):
         return Tristate.yes
-    for clause in _CLAUSE_SPLIT.split(text):
-        if not any(token in clause for token in _NON_ADENOCARCINOMA_HISTOLOGY):
-            continue
-        if any(marker in clause for marker in _NEGATION_MARKERS):
-            # Named and denied in the same breath: not a confirmed exclusion. Falls through
-            # to the next clause rather than returning early, since a different clause may
-            # still name a real one.
-            continue
+    if _confirmed_in_some_clause(text, _NON_ADENOCARCINOMA_HISTOLOGY):
         return Tristate.no
     return Tristate.unknown
 
