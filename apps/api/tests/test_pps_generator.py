@@ -1530,6 +1530,9 @@ PROSTATE_FACTS = {
     "cores_total": "21",
     "hormone_therapy": "Non",
     "radiation_therapy": "Non",
+    # Without this, both nomograms now correctly refuse to compute (finding 3): histology is
+    # an eligibility question, and an unrecorded one is `NOT_POSSIBLE`, not `CALCULATED`.
+    "histology": "Adénocarcinome acinaire",
 }
 
 

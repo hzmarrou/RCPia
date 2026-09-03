@@ -203,6 +203,10 @@ def eligibility(record: ClinicalRecord) -> tuple[Reason, ...]:
         reasons.append(Reason.model_eligibility_not_met)
     if record.radical_prostatectomy_performed is Tristate.yes:
         reasons.append(Reason.post_treatment_context)
+    if record.is_prostate_adenocarcinoma is Tristate.no:
+        # Validated on adenocarcinoma. A confirmed other histology is not a gap the RCP can
+        # close by ordering another test -- no amount of clinical data makes this model apply.
+        reasons.append(Reason.not_prostate_adenocarcinoma)
     return tuple(reasons)
 
 
@@ -246,11 +250,19 @@ def evaluate(record: ClinicalRecord) -> NomogramResult:
         )
 
     # Unknown is not "no". Checked after the inputs so the refusal names everything at once.
-    if record.hormone_therapy.is_unknown or record.radiation_therapy.is_unknown:
+    # Histology joins the same check as hormone and radiation therapy: all three are
+    # eligibility questions the published form asks explicitly, and a dossier silent on any
+    # of them cannot be shown eligible.
+    if (
+        record.hormone_therapy.is_unknown
+        or record.radiation_therapy.is_unknown
+        or record.is_prostate_adenocarcinoma.is_unknown
+    ):
         unconfirmed = tuple(
             name for name, value in (
                 ("hormone_therapy", record.hormone_therapy),
                 ("radiation_therapy", record.radiation_therapy),
+                ("is_prostate_adenocarcinoma", record.is_prostate_adenocarcinoma),
             ) if value.is_unknown
         )
         return not_possible(

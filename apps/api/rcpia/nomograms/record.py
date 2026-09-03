@@ -109,6 +109,46 @@ def as_tristate(value: str | None, *, positive: tuple[str, ...] = ()) -> Tristat
 NODE_POSITIVE = ("n1", "n2", "n3")
 METASTATIC = ("m1",)
 
+# Histologies of the prostate that are not adenocarcinoma. Named rather than matched by
+# negation: `as_tristate`'s "non/no/aucun/absence" scan would false-positive on ordinary
+# pathology prose ("pas de composante sarcomatoïde") and is not used here for that reason.
+# Every published model these coefficients back was validated on adenocarcinoma; a report
+# naming one of these instead is a different disease for the model's purposes, not a variant
+# of the one it was fitted on.
+_NON_ADENOCARCINOMA_HISTOLOGY = (
+    "neuroendocrine",
+    "petites cellules",
+    "small cell",
+    "épidermoïde",
+    "epidermoide",
+    "squamous",
+    "sarcome",
+    "sarcomatoïde",
+    "sarcomatoide",
+    "sarcomatous",
+    "urothélial",
+    "urothelial",
+)
+
+
+def classify_prostate_histology(value: str | None) -> Tristate:
+    """Adenocarcinoma, a named other histology, or genuinely unrecorded.
+
+    **Unmatched text stays `unknown`, never `no`.** A pathology report using vocabulary this
+    list does not recognise is a gap in the classifier, not evidence the tumour is something
+    other than adenocarcinoma -- and the cost of guessing wrong here is a nomogram computing a
+    number for a cancer it was never validated on, which is the one failure this whole gate
+    exists to prevent.
+    """
+    if not usable(value):
+        return Tristate.unknown
+    text = str(value).strip().lower().replace("e'", "é")
+    if "adénocarcinome" in text or "adenocarcinome" in text or "adenocarcinoma" in text:
+        return Tristate.yes
+    if any(token in text for token in _NON_ADENOCARCINOMA_HISTOLOGY):
+        return Tristate.no
+    return Tristate.unknown
+
 
 @dataclass(frozen=True)
 class ClinicalRecord:
@@ -227,14 +267,7 @@ def record_from_facts(facts: dict[str, str]) -> ClinicalRecord:
     gleason = as_gleason(facts.get("gleason"))
     positive = as_number(facts.get("cores_positive"))
     total = as_number(facts.get("cores_total"))
-    histology = facts.get("histology")
-    prostate = (
-        Tristate.yes
-        if usable(histology) and "adénocarcinome" in str(histology).lower().replace("e'", "é")
-        else Tristate.yes
-        if usable(histology) and "adenocarcinome" in str(histology).lower()
-        else Tristate.unknown
-    )
+    prostate = classify_prostate_histology(facts.get("histology"))
     return ClinicalRecord(
         age_years=as_number(facts.get("age")),
         psa_ng_ml=as_number(facts.get("psa_total")),

@@ -16,7 +16,15 @@ from rcpia.nomograms.contract import Reason, Status
 from rcpia.nomograms.record import ClinicalRecord, Tristate, record_from_facts
 from rcpia.nomograms.service import evaluate_all
 
-ELIGIBLE = {"hormone_therapy": Tristate.no, "radiation_therapy": Tristate.no}
+# Shorthand for "nothing here should block a calculation": confirmed no prior therapy, and
+# confirmed adenocarcinoma. Every reference-vector and arithmetic test below uses this, so
+# the histology gate added for finding 3 does not turn every one of them into a fixture for
+# that gate instead of for what it actually tests.
+ELIGIBLE = {
+    "hormone_therapy": Tristate.no,
+    "radiation_therapy": Tristate.no,
+    "is_prostate_adenocarcinoma": Tristate.yes,
+}
 
 # Entered on the MSKCC calculator; outputs recorded from the results page.
 CASE_A = ClinicalRecord(
@@ -99,6 +107,7 @@ def test_unknown_prior_therapy_blocks_rather_than_assuming_none() -> None:
     silent = ClinicalRecord(
         age_years=70, psa_ng_ml=7.53, gleason_primary=3, gleason_secondary=4,
         clinical_t_stage_dre="T2a", systematic_positive_cores=5, systematic_total_cores=21,
+        is_prostate_adenocarcinoma=Tristate.yes,
     )
     result = mskcc.evaluate(silent)
 
@@ -140,7 +149,7 @@ def test_the_two_gleason_sevens_do_not_give_the_same_risk() -> None:
         ClinicalRecord(
             psa_ng_ml=7.53, gleason_primary=4, gleason_secondary=3,
             clinical_t_stage_dre="T2a", systematic_positive_cores=5,
-            systematic_total_cores=21,
+            systematic_total_cores=21, is_prostate_adenocarcinoma=Tristate.yes,
         )
     )
     three_four = briganti.evaluate(CASE_A)
@@ -188,6 +197,105 @@ def test_documented_nodal_disease_is_not_applicable_rather_than_missing() -> Non
     assert Reason.known_nodal_metastasis in result.reason_codes
 
 
+# --------------------------------------------------------------------------------------
+# Histology: confirmed adenocarcinoma to calculate, unknown to ask, confirmed other to refuse
+# --------------------------------------------------------------------------------------
+#
+# Finding 3 from the PR review: neither calculator inspected histology at all, so a prostate
+# case with confirmed neuroendocrine or small-cell disease and otherwise complete numeric
+# inputs received `CALCULATED` -- a number from a model validated only on adenocarcinoma.
+# `applicability`/`eligibility` already distinguish "outside the model's population"
+# (`NOT_APPLICABLE`) from "an input is missing" (`NOT_POSSIBLE`); histology needed to be
+# routed into that same distinction rather than being ignored.
+
+
+def test_a_named_other_histology_is_not_applicable_for_briganti() -> None:
+    """Confirmed non-adenocarcinoma is not a data gap: no measurement makes this model fit a
+    tumour it was never validated on."""
+    other_histology = ClinicalRecord(
+        psa_ng_ml=7.53, gleason_primary=3, gleason_secondary=4, clinical_t_stage_dre="T2a",
+        systematic_positive_cores=5, systematic_total_cores=21,
+        is_prostate_adenocarcinoma=Tristate.no,
+    )
+    result = briganti.evaluate(other_histology)
+
+    assert result.status is Status.not_applicable
+    assert Reason.not_prostate_adenocarcinoma in result.reason_codes
+
+
+def test_unknown_histology_is_not_possible_for_briganti_not_calculated() -> None:
+    """The defect, as a regression test: complete numeric inputs and unrecorded histology used
+    to reach `CALCULATED`. Unknown must ask, not compute."""
+    unrecorded_histology = ClinicalRecord(
+        psa_ng_ml=7.53, gleason_primary=3, gleason_secondary=4, clinical_t_stage_dre="T2a",
+        systematic_positive_cores=5, systematic_total_cores=21,
+    )
+    result = briganti.evaluate(unrecorded_histology)
+
+    assert result.status is Status.not_possible
+    assert Reason.eligibility_unconfirmed in result.reason_codes
+    assert "is_prostate_adenocarcinoma" in result.missing_fields
+
+
+def test_confirmed_adenocarcinoma_still_calculates_for_briganti() -> None:
+    """The gate does not turn eligible patients away: this is `CASE_A` in all but histology."""
+    confirmed = ClinicalRecord(
+        psa_ng_ml=7.53, gleason_primary=3, gleason_secondary=4, clinical_t_stage_dre="T2a",
+        systematic_positive_cores=5, systematic_total_cores=21,
+        is_prostate_adenocarcinoma=Tristate.yes,
+    )
+    result = briganti.evaluate(confirmed)
+
+    assert result.status is Status.calculated
+
+
+def test_a_named_other_histology_is_not_applicable_for_mskcc() -> None:
+    other_histology = ClinicalRecord(
+        age_years=70, psa_ng_ml=7.53, gleason_primary=3, gleason_secondary=4,
+        clinical_t_stage_dre="T2a", systematic_positive_cores=5, systematic_total_cores=21,
+        hormone_therapy=Tristate.no, radiation_therapy=Tristate.no,
+        is_prostate_adenocarcinoma=Tristate.no,
+    )
+    result = mskcc.evaluate(other_histology)
+
+    assert result.status is Status.not_applicable
+    assert Reason.not_prostate_adenocarcinoma in result.reason_codes
+
+
+def test_unknown_histology_is_not_possible_for_mskcc_not_calculated() -> None:
+    unrecorded_histology = ClinicalRecord(
+        age_years=70, psa_ng_ml=7.53, gleason_primary=3, gleason_secondary=4,
+        clinical_t_stage_dre="T2a", systematic_positive_cores=5, systematic_total_cores=21,
+        hormone_therapy=Tristate.no, radiation_therapy=Tristate.no,
+    )
+    result = mskcc.evaluate(unrecorded_histology)
+
+    assert result.status is Status.not_possible
+    assert Reason.eligibility_unconfirmed in result.reason_codes
+    assert "is_prostate_adenocarcinoma" in result.missing_fields
+
+
+def test_classify_prostate_histology_matches_only_named_terms() -> None:
+    """Unmatched text must stay `unknown`, never fall through to `no`.
+
+    A classifier that guessed `no` for anything it did not recognise would report a real
+    adenocarcinoma phrased unusually as an inapplicable histology -- the opposite failure,
+    and just as unsafe as the one this gate exists to catch.
+    """
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    assert classify_prostate_histology("Adénocarcinome acinaire, Gleason 3+4") is Tristate.yes
+    assert classify_prostate_histology("adenocarcinome") is Tristate.yes
+    assert classify_prostate_histology("Carcinome neuroendocrine à petites cellules") is (
+        Tristate.no
+    )
+    assert classify_prostate_histology("Carcinome épidermoïde") is Tristate.no
+    assert classify_prostate_histology("Sarcome prostatique") is Tristate.no
+    assert classify_prostate_histology("Compte-rendu en cours de relecture") is Tristate.unknown
+    assert classify_prostate_histology(None) is Tristate.unknown
+    assert classify_prostate_histology("RAS") is Tristate.unknown
+
+
 def test_a_missing_stage_names_itself() -> None:
     """"Cannot compute" tells an RCP nothing; naming the field tells them what to write."""
     result = briganti.evaluate(
@@ -207,6 +315,7 @@ def test_a_stage_outside_the_model_is_inapplicable() -> None:
         ClinicalRecord(
             psa_ng_ml=7.53, gleason_primary=3, gleason_secondary=4,
             clinical_t_stage_dre="T4", systematic_positive_cores=5, systematic_total_cores=21,
+            is_prostate_adenocarcinoma=Tristate.yes,
         )
     )
 

@@ -71,6 +71,11 @@ def applicability(record: ClinicalRecord) -> tuple[Reason, ...]:
     if record.radical_prostatectomy_performed is Tristate.yes:
         # A preoperative model has nothing to say after the operation.
         reasons.append(Reason.post_treatment_context)
+    if record.is_prostate_adenocarcinoma is Tristate.no:
+        # Briganti was validated on adenocarcinoma. A confirmed other histology -- small-cell,
+        # neuroendocrine, sarcomatoid -- is not a data gap the RCP can fill by ordering another
+        # test: no amount of PSA, stage or Gleason data makes this model apply to this tumour.
+        reasons.append(Reason.not_prostate_adenocarcinoma)
     return tuple(reasons)
 
 
@@ -154,6 +159,19 @@ def _briganti_2012(record: ClinicalRecord) -> NomogramResult:
             model_id="briganti_2012",
             display_name=DISPLAY["2012"],
             missing=tuple(missing),
+            provenance=PROVENANCE_2012,
+        )
+
+    # Unknown is not "no". Checked after the numeric inputs, so a dossier missing both a
+    # measurement and a pathology report is told about the measurement first -- the same
+    # ordering `mskcc.py` uses for its own unconfirmed eligibility questions.
+    if record.is_prostate_adenocarcinoma.is_unknown:
+        return not_possible(
+            model_family=FAMILY,
+            model_id="briganti_2012",
+            display_name=DISPLAY["2012"],
+            missing=("is_prostate_adenocarcinoma",),
+            reasons=(Reason.eligibility_unconfirmed,),
             provenance=PROVENANCE_2012,
         )
 
