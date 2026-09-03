@@ -13,7 +13,9 @@ versioned package a clinician actually takes away; that one is stored, because a
 point it has been reviewed and the reviewed artifact is the record.
 """
 
+import re
 import uuid
+from urllib.parse import quote
 
 from fastapi import HTTPException, Response, status
 
@@ -31,6 +33,52 @@ router = protected_router(
 
 MARKDOWN = "text/markdown; charset=utf-8"
 WORD = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+# Anything outside this set is replaced in the ASCII fallback filename. Deliberately a
+# whitelist: a blacklist of the characters known to break a header today is a list that
+# stops being complete the moment a new one matters.
+_UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _attachment(stem: str, reference: str, suffix: str) -> dict[str, str]:
+    """A `Content-Disposition` header that a case reference cannot break out of.
+
+    `reference` is supplied by whoever created the case -- a free `String(100)` column, not
+    a generated identifier -- so it reaches this function as untrusted input, and it used to
+    be interpolated into the header directly. Three ways that failed, all reproduced against
+    the real `Response` before this fix:
+
+    * `AZ-";foo="bar` closed the quoted string early and appended parameters of the
+      caller's choosing to the header.
+    * `AZ-01
+
+X-Evil: yes` survived into the raw header bytes as a CR/LF sequence --
+      response splitting, bounded only by whatever the server in front happens to reject.
+    * `AZ-患者` raised `UnicodeEncodeError` while constructing the response, because HTTP
+      header values are latin-1: a legitimate non-Latin reference turned every download of
+      that case into a 500.
+
+    So the header is built to RFC 6266 rather than by interpolation: a sanitised ASCII
+    `filename` that every client understands, and `filename*=UTF-8''…` carrying the real
+    reference percent-encoded, which is what a modern client actually uses. Percent-encoding
+    is what makes the second form safe -- CR, LF and quotes leave `quote()` as `%0D`, `%0A`
+    and `%22`, and cannot reconstitute themselves into header syntax.
+    """
+    raw = f"{stem}-{reference}{suffix}"
+
+    # Sanitise the reference alone, then compose. Running the substitution over the whole
+    # assembled name instead leaves the debris of a stripped reference stranded between the
+    # stem and the extension -- a reference of `////` produced `Fiche-RCP--.docx`. `stem`
+    # and `suffix` are our own constants and need no sanitising.
+    safe_reference = _UNSAFE_IN_FILENAME.sub("-", reference).strip("-.")[:80]
+    ascii_name = f"{stem}-{safe_reference}{suffix}" if safe_reference else f"{stem}{suffix}"
+
+    return {
+        "Content-Disposition": (
+            f'attachment; filename="{ascii_name}"; '
+            f"filename*=UTF-8''{quote(raw, safe='')}"
+        )
+    }
 
 
 @router.get("", response_model=PpsDocument)
@@ -52,11 +100,7 @@ async def download_pps(
     return Response(
         content=body,
         media_type=MARKDOWN,
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="PPS-provisoire-{document.case_reference}.md"'
-            )
-        },
+        headers=_attachment("PPS-provisoire", document.case_reference, ".md"),
     )
 
 
@@ -77,11 +121,7 @@ async def download_pps_docx(
     return Response(
         content=body,
         media_type=WORD,
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="Fiche-RCP-{document.case_reference}.docx"'
-            )
-        },
+        headers=_attachment("Fiche-RCP", document.case_reference, ".docx"),
     )
 
 
@@ -100,11 +140,7 @@ async def download_pps_probatoire_docx(
     return Response(
         content=body,
         media_type=WORD,
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="Dossier-probatoire-{document.case_reference}.docx"'
-            )
-        },
+        headers=_attachment("Dossier-probatoire", document.case_reference, ".docx"),
     )
 
 

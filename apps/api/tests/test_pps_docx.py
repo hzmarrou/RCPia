@@ -493,3 +493,58 @@ def test_an_appendix_with_no_recorded_version_is_not_reported_as_diverging() -> 
     fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
 
     assert "versions différentes des données" not in fiche_text
+
+
+# --------------------------------------------------------------------- filename encoding
+# `case_reference` is caller-supplied free text on a `String(100)` column, so it reaches the
+# download headers as untrusted input. These pin the encoding contract, not the rendering.
+
+
+def test_a_case_reference_cannot_break_out_of_the_content_disposition_header() -> None:
+    """**Review blocker 3.** Each of these was reproduced against the real `Response`
+    before the fix: a quote closed the filename parameter early and appended parameters of
+    the caller's choosing, a CR/LF pair survived into the raw header bytes, and a non-Latin
+    reference raised `UnicodeEncodeError` while constructing the response."""
+    from fastapi import Response
+
+    from rcpia.pps.routes import _attachment
+
+    for reference in ('AZ-";foo="bar', "AZ-01\r\nX-Evil: yes", "AZ-患者", "../../etc/passwd"):
+        headers = _attachment("Fiche-RCP", reference, ".docx")
+        value = headers["Content-Disposition"]
+
+        # Constructing the response is itself part of the assertion: this is where a
+        # non-latin-1 reference used to raise.
+        response = Response(content=b"x", media_type="text/plain", headers=headers)
+        raw = dict(response.raw_headers)[b"content-disposition"]
+
+        assert b"\r" not in raw and b"\n" not in raw
+        # Exactly two quotes: the pair around the ASCII filename, and no more.
+        # A third would mean the reference closed the parameter and opened its own.
+        assert value.count('"') == 2
+        # `X-Evil` surviving as literal filename text is harmless -- the injection was
+        # the CR/LF that would have made it a header, which the assertion above covers.
+        assert response.headers.get("x-evil") is None
+        assert "/" not in value.split('"')[1]
+
+
+def test_the_real_reference_survives_percent_encoded_for_clients_that_can_read_it() -> None:
+    """The ASCII fallback is lossy on purpose; `filename*` is where the true name lives, so
+    a clinician downloading a case with a non-Latin reference still gets a named file."""
+    headers = _attachment_ref("AZ-患者")
+
+    assert "filename*=UTF-8''" in headers["Content-Disposition"]
+    assert "%E6%82%A3" in headers["Content-Disposition"]
+
+
+def _attachment_ref(reference: str) -> dict[str, str]:
+    from rcpia.pps.routes import _attachment
+
+    return _attachment("Fiche-RCP", reference, ".docx")
+
+
+def test_a_reference_of_only_unsafe_characters_still_yields_a_usable_filename() -> None:
+    headers = _attachment_ref("////")
+    name = headers["Content-Disposition"].split('"')[1]
+
+    assert name == "Fiche-RCP.docx"
