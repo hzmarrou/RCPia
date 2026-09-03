@@ -435,3 +435,61 @@ def test_no_withholding_notice_appears_when_every_specialist_recommended() -> No
     fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
 
     assert "Avis suspendus" not in fiche_text
+
+
+def test_a_panel_reasoning_on_two_data_versions_says_so_in_the_fiche() -> None:
+    """**Review blocker 2.** `latest_runs` picks the newest success per role without
+    requiring the roles to share a ledger version, so a panel can mix opinions formed on
+    different data. The document carries the lead's version, and the fiche presented the
+    whole panel under that one number."""
+    document = _minimal(
+        ledger_version=7,
+        appendices=[
+            RationaleAppendix(
+                agent_role="urology_oncology", rationale="R.", ledger_version=7
+            ),
+            RationaleAppendix(
+                agent_role="radiation_oncology", rationale="R.", ledger_version=4
+            ),
+        ],
+    )
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "versions différentes des données" in fiche_text
+    assert "version 4" in fiche_text
+    # The speciality that diverged is named; the one that agreed is not accused.
+    assert "Radiothérapie" in fiche_text
+
+
+def test_a_panel_on_one_data_version_carries_no_divergence_warning() -> None:
+    document = _minimal(
+        ledger_version=7,
+        appendices=[
+            RationaleAppendix(
+                agent_role="urology_oncology", rationale="R.", ledger_version=7
+            ),
+            RationaleAppendix(
+                agent_role="radiation_oncology", rationale="R.", ledger_version=7
+            ),
+        ],
+    )
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "versions différentes des données" not in fiche_text
+
+
+def test_an_appendix_with_no_recorded_version_is_not_reported_as_diverging() -> None:
+    """`ledger_version` is optional on an appendix. Absent is *not recorded*, not
+    *different* -- reporting it as a divergence would invent a conflict from a gap."""
+    document = _minimal(
+        ledger_version=7,
+        appendices=[
+            RationaleAppendix(agent_role="urology_oncology", rationale="R.")
+        ],
+    )
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "versions différentes des données" not in fiche_text

@@ -254,6 +254,50 @@ def _panel(doc: Document, document: PpsDocument) -> None:
     doc.add_paragraph()
 
 
+def _version_divergence(doc: Document, document: PpsDocument) -> None:
+    """Specialists who reasoned on a different version of the data than the fiche claims.
+
+    `generator.latest_runs` takes the newest successful run per role and does not require
+    the roles to agree on a ledger version, so a panel can be assembled from opinions formed
+    on different data -- one specialist reading a corrected T-stage the other never saw. The
+    document is then labelled with the lead agent's version, and the fiche presented the
+    whole panel as if it belonged to that one number.
+
+    The appendices record each agent's own version, and both the markdown output and the
+    probatoire print it. The fiche did not, so the one file a board reads was the one that
+    could not show the disagreement.
+
+    Surfaced rather than rejected: refusing to render a mixed-version panel would block the
+    fiche over a data-provenance defect the board is capable of weighing once it is told,
+    and withholding the whole document is the more dangerous failure. This follows the rule
+    already settled for the nomograms -- name what is wrong, never silently proceed, and
+    never block the fiche.
+    """
+    mismatched = [
+        appendix
+        for appendix in document.appendices
+        if appendix.ledger_version is not None
+        and appendix.ledger_version != document.ledger_version
+    ]
+    if not mismatched:
+        return
+
+    from rcpia.pps.generator import agent_label
+
+    _banner(
+        doc,
+        "Avis formés sur des versions différentes des données. Ce document est étiqueté "
+        f"version {document.ledger_version}, mais les spécialités suivantes ont raisonné "
+        "sur une autre version : "
+        + " ; ".join(
+            f"{agent_label(appendix.agent_role)} (version {appendix.ledger_version})"
+            for appendix in mismatched
+        )
+        + ". Leurs avis ne portent pas tous sur les mêmes données. Relancez l'analyse pour "
+        "obtenir un panel cohérent.",
+    )
+
+
 def _withheld_specialists(doc: Document, document: PpsDocument) -> None:
     """Which specialists refused to recommend, named in the fiche rather than only in the
     annexes.
@@ -386,6 +430,8 @@ def render_fiche_docx(document: PpsDocument) -> Document:
             f"courante est la {document.superseded_by}. Relancez l'analyse avant de "
             "vous appuyer sur ce document.",
         )
+
+    _version_divergence(doc, document)
 
     _kv_table(
         doc,
