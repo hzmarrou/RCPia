@@ -132,43 +132,52 @@ _NON_ADENOCARCINOMA_HISTOLOGY = (
 
 _ADENOCARCINOMA_TERMS = ("adénocarcinome", "adenocarcinome", "adenocarcinoma")
 
-# A pathologist rules a histology *out* about as often as they name one present, and a
-# report saying "absence de composante neuroendocrine" or "pas de composante sarcomatoïde"
-# names the term while denying it applies. `as_tristate` already avoids a blanket
-# negation-word scan for exactly this reason -- ordinary prose contains negations unrelated
-# to the thing being asked about -- so this list stays narrow and is only ever checked
-# alongside the specific term it might be negating, within the same clause.
+# **A punctuation boundary is the wrong tool here, and two rounds of this fix tried it in two
+# different shapes before giving up on it.** A comma joins two independent findings about as
+# often as it sets off a postposed negation of the same one: "pas d'emboles vasculaires,
+# carcinome neuroendocrine confirmé" is two findings, and "adénocarcinome, non retrouvé" is
+# one finding denied after a pause. No fixed split point tells those apart, because the
+# comma looks identical in both. What actually differs is grammatical, not orthographic:
+# a marker that precedes what it negates ("absence de", "sans") and one that follows it
+# ("non retrouvé", "exclu") each act on a term found in a short, *directional* window next to
+# that specific occurrence -- not on the whole sentence, and not on whichever side of a
+# clause boundary the parser happened to draw.
 #
-# **The same negation applies to a positive adenocarcinoma finding, and it was missed the
-# first time this was fixed.** "Absence d'adénocarcinome" names the term this classifier
-# looks for and denies it in the same breath; checking negation only on the exclusion list
-# let a denied adenocarcinoma finding through as a confirmed one.
-_NEGATION_MARKERS = (
-    "absence de", "absence d'",
-    "pas de", "pas d'",
-    "sans ",
-    "aucun ", "aucune ",
-    "non retrouv",
-    "non identifi",
-    "non mis en évidence", "non mise en évidence",
-    "exclu",
+# `as_tristate` avoids a blanket negation-word scan for the same underlying reason: ordinary
+# prose contains negations unrelated to the thing being asked about. Anchoring each marker to
+# the one side of the term it can grammatically modify, within a window short enough to
+# exclude an intervening, unrelated finding, is the narrower substitute that reasoning calls
+# for once a global scan and a clause-wide scan have both failed.
+_PRE_NEGATION = ("absence de", "absence d'", "pas de", "pas d'", "sans ", "aucun ", "aucune ")
+_POST_NEGATION = (
+    "non retrouv", "non identifi", "non mis en évidence", "non mise en évidence", "exclu"
 )
 
-# A comma joins two findings as often as it joins two words of one: "pas d'emboles
-# vasculaires, carcinome neuroendocrine confirmé" denies one thing and confirms another in
-# what reads as a single sentence. Splitting only on `.;\n` left both halves in one clause. A
-# negation for the first finding then suppressed the confirmed second one it had nothing to
-# do with -- the same conflation the sentence-level split was meant to avoid, one level up.
-_CLAUSE_SPLIT = re.compile(r"[.;,\n]")
+# Wide enough to reach past one qualifying noun ("absence de COMPOSANTE neuroendocrine" is 11
+# characters of "composante "), narrow enough that an unrelated finding earlier in the same
+# comma-joined sentence ("pas d'emboles vasculaires, carcinome NEUROENDOCRINE", 31 characters
+# from marker to term) falls outside it.
+_PRE_WINDOW = 25
+_POST_WINDOW = 20
 
 
-def _confirmed_in_some_clause(text: str, terms: tuple[str, ...]) -> bool:
-    """Whether any clause names one of `terms` without also negating it, in that clause."""
-    return any(
-        any(term in clause for term in terms)
-        and not any(marker in clause for marker in _NEGATION_MARKERS)
-        for clause in _CLAUSE_SPLIT.split(text)
-    )
+def _term_confirmed(text: str, term: str) -> bool:
+    """Whether `term` occurs in `text` at least once without a negation adjacent to that
+    specific occurrence -- checked per occurrence, so one negated mention does not suppress
+    a second, genuine one elsewhere in the same report."""
+    for match in re.finditer(re.escape(term), text):
+        before = text[max(0, match.start() - _PRE_WINDOW) : match.start()]
+        after = text[match.end() : match.end() + _POST_WINDOW]
+        if any(marker in before for marker in _PRE_NEGATION):
+            continue
+        if any(marker in after for marker in _POST_NEGATION):
+            continue
+        return True
+    return False
+
+
+def _confirmed(text: str, terms: tuple[str, ...]) -> bool:
+    return any(_term_confirmed(text, term) for term in terms)
 
 
 def classify_prostate_histology(value: str | None) -> Tristate:
@@ -180,19 +189,18 @@ def classify_prostate_histology(value: str | None) -> Tristate:
     number for a cancer it was never validated on, which is the one failure this whole gate
     exists to prevent.
 
-    **Both directions are checked for negation, the same way, in the same clause.** A term
-    only counts -- confirming adenocarcinoma or excluding it -- in a clause that names it and
-    does not also deny it. The two checks have to be symmetric: checking negation for the
-    exclusion list alone left "absence d'adénocarcinome" read as confirmed adenocarcinoma,
-    which is the opposite of what the sentence says and the more dangerous direction to get
-    wrong, since it feeds a nomogram a number for a cancer it denies having.
+    **Both directions are checked for negation, by the same mechanism.** A term only counts
+    -- confirming adenocarcinoma or excluding it -- where it is not itself negated. The two
+    checks have to be symmetric: checking negation for the exclusion list alone once let
+    "absence d'adénocarcinome" read as confirmed adenocarcinoma, the more dangerous direction
+    to get wrong, since it feeds a nomogram a number for a cancer the report denies.
     """
     if not usable(value):
         return Tristate.unknown
     text = str(value).strip().lower().replace("e'", "é")
-    if _confirmed_in_some_clause(text, _ADENOCARCINOMA_TERMS):
+    if _confirmed(text, _ADENOCARCINOMA_TERMS):
         return Tristate.yes
-    if _confirmed_in_some_clause(text, _NON_ADENOCARCINOMA_HISTOLOGY):
+    if _confirmed(text, _NON_ADENOCARCINOMA_HISTOLOGY):
         return Tristate.no
     return Tristate.unknown
 

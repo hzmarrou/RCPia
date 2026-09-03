@@ -404,6 +404,39 @@ def test_a_dossier_denying_adenocarcinoma_does_not_reach_calculated() -> None:
     assert mskcc.evaluate(record).status is not Status.calculated
 
 
+def test_a_postposed_denial_of_adenocarcinoma_does_not_reach_calculated() -> None:
+    """Fourth re-review finding, and the exact end-to-end regression it asked for.
+
+    Splitting on commas fixed the previous two counterexamples and reintroduced this one:
+    "adénocarcinome, non retrouvé" denies the same finding it names, after a pause, and the
+    comma between them does not make it a second, independent finding. Splitting on the
+    comma cut the term away from the negation describing it, the mirror image of the defect
+    the comma split was added to fix. Before this fix both calculators returned `CALCULATED`.
+    """
+    record = record_from_facts(
+        {
+            "histology": "Adénocarcinome, non retrouvé.",
+            "age": "70", "psa_total": "7.53", "gleason": "7 (3+4)", "ct_dre": "T2a",
+            "cores_positive": "5", "cores_total": "21",
+            "hormone_therapy": "Non", "radiation_therapy": "Non",
+        }
+    )
+    assert record.is_prostate_adenocarcinoma is Tristate.unknown
+
+    assert briganti.evaluate(record).status is not Status.calculated
+    assert mskcc.evaluate(record).status is not Status.calculated
+
+
+def test_a_postposed_denial_of_an_exclusion_stays_unknown_not_no() -> None:
+    """The same defect's mirror image on the exclusion side: "composante neuroendocrine,
+    non retrouvée" denies the exclusion term it names, and was read as confirming it."""
+    from rcpia.nomograms.record import classify_prostate_histology
+
+    result = classify_prostate_histology("Composante neuroendocrine, non retrouvée.")
+
+    assert result is Tristate.unknown
+
+
 def test_a_missing_stage_names_itself() -> None:
     """"Cannot compute" tells an RCP nothing; naming the field tells them what to write."""
     result = briganti.evaluate(
