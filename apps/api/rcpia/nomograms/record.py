@@ -132,52 +132,70 @@ _NON_ADENOCARCINOMA_HISTOLOGY = (
 
 _ADENOCARCINOMA_TERMS = ("adénocarcinome", "adenocarcinome", "adenocarcinoma")
 
-# **A punctuation boundary is the wrong tool here, and two rounds of this fix tried it in two
-# different shapes before giving up on it.** A comma joins two independent findings about as
-# often as it sets off a postposed negation of the same one: "pas d'emboles vasculaires,
-# carcinome neuroendocrine confirmé" is two findings, and "adénocarcinome, non retrouvé" is
-# one finding denied after a pause. No fixed split point tells those apart, because the
-# comma looks identical in both. What actually differs is grammatical, not orthographic:
-# a marker that precedes what it negates ("absence de", "sans") and one that follows it
-# ("non retrouvé", "exclu") each act on a term found in a short, *directional* window next to
-# that specific occurrence -- not on the whole sentence, and not on whichever side of a
-# clause boundary the parser happened to draw.
+# **There is no negation list here, and that is the point.** Four rounds of review found
+# four different ways to deny a diagnosis -- "absence de X", "X non retrouvé", "X absent",
+# "X non objectivé", "recherche de X : négative", "absence formelle de tout X" -- and each
+# fix caught the reported phrasings and missed the next ones. French builds negation from an
+# open set of constructions; a blacklist of them cannot be finished, and every gap in it
+# failed in the dangerous direction, reading a denial as a confirmation.
 #
-# `as_tristate` avoids a blanket negation-word scan for the same underlying reason: ordinary
-# prose contains negations unrelated to the thing being asked about. Anchoring each marker to
-# the one side of the term it can grammatically modify, within a window short enough to
-# exclude an intervening, unrelated finding, is the narrower substitute that reasoning calls
-# for once a global scan and a clause-wide scan have both failed.
-_PRE_NEGATION = ("absence de", "absence d'", "pas de", "pas d'", "sans ", "aucun ", "aucune ")
-_POST_NEGATION = (
-    "non retrouv", "non identifi", "non mis en évidence", "non mise en évidence", "exclu"
+# So the polarity is inverted. Rather than confirming a diagnosis whenever no *recognised*
+# denial is nearby, this confirms one only where the whole field reads as a plain statement
+# of that diagnosis and nothing else: every word in it is either the diagnosis itself or
+# ordinary descriptive vocabulary. Anything unrecognised -- a negation, a hedge, a search
+# result, a construction nobody anticipated -- leaves the field unconfirmed rather than
+# confirmed, because an unfamiliar word is evidence that something is being said that this
+# code does not understand.
+#
+# **The failure mode moves to the safe side, deliberately, and it is not free.** A real
+# positive report phrased in vocabulary missing from this set now reads as `unknown`, the
+# nomograms return `NOT_POSSIBLE` naming `is_prostate_adenocarcinoma`, and a clinician
+# confirms it in the ledger -- the same path every other unrecorded field already takes. That
+# costs a correction. The alternative cost, paid four times over already, is a calculated
+# risk score for a patient whose report denies the disease the model was fitted on.
+#
+# Grounded in the phrasings this project has actually seen, not invented: "Adénocarcinome
+# acinaire", "Adénocarcinome acinaire, Gleason 3+4", "Carcinome urothélial de haut grade",
+# "Carcinome neuroendocrine à petites cellules". Extending it is a deliberate act with a test,
+# not something to do reflexively when a dossier reads `unknown`.
+_PLAIN_DESCRIPTION = frozenset(
+    {
+        # Subtype and site.
+        "acinaire", "acinaires", "ductal", "ductale", "intracanalaire",
+        "prostatique", "prostatiques", "prostate", "vessie", "vesicale", "vésicale",
+        # The genus term the specific histologies hang off.
+        "carcinome", "carcinomes", "tumeur",
+        # Grading vocabulary.
+        "gleason", "isup", "score", "grade", "groupe", "haut", "bas",
+        "intermediaire", "intermédiaire",
+        "differencie", "différencié", "differenciee", "différenciée",
+        "moderement", "modérément", "bien", "peu",
+        # Parts of the multi-word histology names themselves.
+        "petites", "cellules", "composante", "contingent",
+        # Ordinary connective tissue of a French noun phrase.
+        "a", "à", "au", "aux", "de", "du", "d", "des", "la", "le", "les",
+        "et", "avec", "type", "sur", "en",
+        # An explicit affirmation is evidence *for*, never against.
+        "confirme", "confirmé", "confirmee", "confirmée",
+    }
 )
 
-# Wide enough to reach past one qualifying noun ("absence de COMPOSANTE neuroendocrine" is 11
-# characters of "composante "), narrow enough that an unrelated finding earlier in the same
-# comma-joined sentence ("pas d'emboles vasculaires, carcinome NEUROENDOCRINE", 31 characters
-# from marker to term) falls outside it.
-_PRE_WINDOW = 25
-_POST_WINDOW = 20
+_WORDS = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 
-def _term_confirmed(text: str, term: str) -> bool:
-    """Whether `term` occurs in `text` at least once without a negation adjacent to that
-    specific occurrence -- checked per occurrence, so one negated mention does not suppress
-    a second, genuine one elsewhere in the same report."""
-    for match in re.finditer(re.escape(term), text):
-        before = text[max(0, match.start() - _PRE_WINDOW) : match.start()]
-        after = text[match.end() : match.end() + _POST_WINDOW]
-        if any(marker in before for marker in _PRE_NEGATION):
-            continue
-        if any(marker in after for marker in _POST_NEGATION):
-            continue
-        return True
-    return False
+def _states_plainly(text: str, terms: tuple[str, ...]) -> bool:
+    """Whether `text` reads as a plain statement of one of `terms` and nothing else.
 
-
-def _confirmed(text: str, terms: tuple[str, ...]) -> bool:
-    return any(_term_confirmed(text, term) for term in terms)
+    The whole field is checked, not a window around the match. Histology arrives as one short
+    field -- a handful of words -- so there is no long report to scope a window within, and
+    window sizing was itself one of the things that kept going wrong.
+    """
+    if not any(term in text for term in terms):
+        return False
+    named = {word for term in terms for word in _WORDS.findall(term)}
+    return all(
+        word in named or word in _PLAIN_DESCRIPTION for word in _WORDS.findall(text)
+    )
 
 
 def classify_prostate_histology(value: str | None) -> Tristate:
@@ -189,18 +207,18 @@ def classify_prostate_histology(value: str | None) -> Tristate:
     number for a cancer it was never validated on, which is the one failure this whole gate
     exists to prevent.
 
-    **Both directions are checked for negation, by the same mechanism.** A term only counts
-    -- confirming adenocarcinoma or excluding it -- where it is not itself negated. The two
-    checks have to be symmetric: checking negation for the exclusion list alone once let
-    "absence d'adénocarcinome" read as confirmed adenocarcinoma, the more dangerous direction
-    to get wrong, since it feeds a nomogram a number for a cancer the report denies.
+    **A diagnosis is confirmed by positive evidence, never by the absence of a recognised
+    denial.** Both directions go through the same check, and both require the field to read
+    as a plain statement of the diagnosis. A denial does not need to be recognised as a
+    denial to be refused -- it only needs to contain a word that is not part of plainly
+    stating the finding, which every denial does.
     """
     if not usable(value):
         return Tristate.unknown
     text = str(value).strip().lower().replace("e'", "é")
-    if _confirmed(text, _ADENOCARCINOMA_TERMS):
+    if _states_plainly(text, _ADENOCARCINOMA_TERMS):
         return Tristate.yes
-    if _confirmed(text, _NON_ADENOCARCINOMA_HISTOLOGY):
+    if _states_plainly(text, _NON_ADENOCARCINOMA_HISTOLOGY):
         return Tristate.no
     return Tristate.unknown
 

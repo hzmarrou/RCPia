@@ -322,25 +322,29 @@ def test_a_negated_exclusion_stays_unknown_not_no() -> None:
     ) is Tristate.unknown
 
 
-def test_adenocarcinoma_confirmed_alongside_a_ruled_out_histology_is_still_yes() -> None:
-    """A real pathology report shape: the tumour is named, and a differential is excluded
-    in the same sentence. The exclusion must not shadow the positive finding."""
+def test_a_finding_reported_alongside_a_ruled_out_one_defers_to_the_clinician() -> None:
+    """**These four sentences used to be classified, and deliberately no longer are.**
+
+    Each names a finding and rules another one out in the same breath. Reading them
+    correctly meant deciding which negation attached to which term, and four rounds of
+    review showed that decision cannot be made reliably from punctuation or word windows --
+    every rule that got one shape right got the next one wrong, always by confirming
+    something a report denied.
+
+    So they now read as `unknown`: the nomograms return `NOT_POSSIBLE` naming
+    `is_prostate_adenocarcinoma`, and a clinician confirms the histology in the ledger. That
+    is a real cost -- a correction on a dossier a human reads at a glance -- accepted
+    because the alternative failure is a calculated risk score for a denied diagnosis.
+    """
     from rcpia.nomograms.record import classify_prostate_histology
 
-    assert classify_prostate_histology(
-        "Adénocarcinome acinaire, sans contingent neuroendocrine"
-    ) is Tristate.yes
-
-
-def test_a_real_exclusion_in_a_later_clause_still_returns_no() -> None:
-    """Negation is checked per clause, not by scanning the whole report for any negation
-    word: a ruled-out histology in one sentence must not suppress a genuine exclusion
-    named in another."""
-    from rcpia.nomograms.record import classify_prostate_histology
-
-    assert classify_prostate_histology(
-        "Absence de composante sarcomatoïde. Carcinome épidermoïde confirmé."
-    ) is Tristate.no
+    for mixed in (
+        "Adénocarcinome acinaire, sans contingent neuroendocrine",
+        "Absence de composante sarcomatoïde. Carcinome épidermoïde confirmé.",
+        "Pas d'emboles vasculaires, carcinome neuroendocrine confirmé",
+        "Adénocarcinome acinaire confirmé, pas d'emboles vasculaires",
+    ):
+        assert classify_prostate_histology(mixed) is Tristate.unknown, mixed
 
 
 def test_a_denied_adenocarcinoma_is_not_read_as_confirmed() -> None:
@@ -360,29 +364,65 @@ def test_a_denied_adenocarcinoma_is_not_read_as_confirmed() -> None:
     assert result is Tristate.unknown
 
 
-def test_a_comma_joined_denial_does_not_suppress_an_unrelated_confirmation() -> None:
-    """Re-review finding: a clause was split only on sentence terminators, so a negation for
-    one finding, comma-joined to a confirmed and unrelated second finding in what reads as
-    one sentence, suppressed the second finding along with the first."""
+def test_no_denial_is_read_as_a_confirmation_however_it_is_phrased() -> None:
+    """**The list this replaces could never have been finished.**
+
+    Five rounds of review produced nine distinct ways to deny a diagnosis, and each fix
+    caught the phrasings it was shown and missed the next ones. These are all of them,
+    including the four that survived a negation blacklist, a clause split on sentence
+    terminators, a clause split including commas, and directional proximity windows.
+
+    None of them is recognised as a denial by the current implementation. They are refused
+    because each contains a word that has no place in plainly stating a diagnosis -- which is
+    what every denial has in common, and what no list of denials can be relied on to enumerate.
+    """
     from rcpia.nomograms.record import classify_prostate_histology
 
-    result = classify_prostate_histology(
-        "Pas d'emboles vasculaires, carcinome neuroendocrine confirmé"
+    denials = (
+        "Absence de composante neuroendocrine",
+        "Pas de composante sarcomatoïde",
+        "Composante neuroendocrine non retrouvée",
+        "Sans contingent urothélial",
+        "Absence d'adénocarcinome prostatique.",
+        "Adénocarcinome, non retrouvé.",
+        "Composante neuroendocrine, non retrouvée.",
+        "Adénocarcinome absent.",
+        "Adénocarcinome non objectivé.",
+        "Recherche d'adénocarcinome : négative.",
+        "Absence formelle de tout adénocarcinome.",
     )
+    for denial in denials:
+        assert classify_prostate_histology(denial) is Tristate.unknown, denial
 
-    assert result is Tristate.no
 
+@pytest.mark.parametrize(
+    "histology",
+    [
+        "Adénocarcinome absent.",
+        "Adénocarcinome non objectivé.",
+        "Recherche d'adénocarcinome : négative.",
+        "Absence formelle de tout adénocarcinome.",
+    ],
+)
+def test_no_denial_reaches_a_calculated_score(histology: str) -> None:
+    """The end-to-end regressions for the fifth round, one per reported phrasing.
 
-def test_the_two_findings_do_not_bleed_into_each_other_either_direction() -> None:
-    """The comma split cuts both ways: a confirmed finding, comma-joined to an unrelated
-    denial, must not itself be suppressed."""
-    from rcpia.nomograms.record import classify_prostate_histology
-
-    result = classify_prostate_histology(
-        "Adénocarcinome acinaire confirmé, pas d'emboles vasculaires"
+    Each was verified to produce `CALCULATED` from both calculators before this fix: a
+    complete set of inputs and a pathology report denying the disease the models were
+    fitted on.
+    """
+    record = record_from_facts(
+        {
+            "histology": histology,
+            "age": "70", "psa_total": "7.53", "gleason": "7 (3+4)", "ct_dre": "T2a",
+            "cores_positive": "5", "cores_total": "21",
+            "hormone_therapy": "Non", "radiation_therapy": "Non",
+        }
     )
+    assert record.is_prostate_adenocarcinoma is Tristate.unknown
 
-    assert result is Tristate.yes
+    assert briganti.evaluate(record).status is not Status.calculated
+    assert mskcc.evaluate(record).status is not Status.calculated
 
 
 def test_a_dossier_denying_adenocarcinoma_does_not_reach_calculated() -> None:
