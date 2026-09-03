@@ -465,10 +465,20 @@ def _roles(values: list[str]) -> list[str]:
 
 
 class AgentPosition(Strict):
-    """One specialist's side of a disagreement, named rather than paraphrased."""
+    """One specialist's side of a disagreement, named rather than paraphrased.
+
+    **`quote` makes the attribution checkable, the same way `AgentSupport` does for a
+    convergence.** A divergence naming two specialities and their positions was, until this
+    field existed, unverifiable in exactly the way a convergence used to be: nothing stopped
+    a synthesis from putting words in a specialist's mouth to manufacture a disagreement, or
+    to make a real one sound more extreme than either side actually wrote. `check_synthesis`
+    requires the quotation to appear in that speciality's own opinion.
+    """
 
     role: str = Field(min_length=1, max_length=64)
     position: str = Field(min_length=1, max_length=MAX_TEXT)
+    # Long enough to be locatable. A three-word quotation matches half the document.
+    quote: str = Field(min_length=12, max_length=MAX_TEXT)
 
     @field_validator("role")
     @classmethod
@@ -605,17 +615,35 @@ class CoverageGap(Strict):
 
     `raised_by` and `silent` are separate lists rather than a pair, because the same gap can be
     raised by two specialities and unaddressed by three.
+
+    **`raised_by` carries a quotation per speciality; `silent` does not, and cannot.**
+    A speciality that raised a point can be quoted raising it — the same mechanism a
+    convergence uses. A speciality that said nothing has, by definition, no sentence to quote:
+    demanding one would not verify the silence, it would force a citation of something else
+    entirely and call it proof. `silent` stays a plain role list; `check_synthesis` only
+    confirms each name there is a real speciality that was actually convened, which
+    `named_specialities_exist` already guarantees.
     """
 
     point: str = Field(min_length=1, max_length=MAX_TEXT)
-    raised_by: list[str] = Field(min_length=1)
+    raised_by: list[AgentSupport] = Field(min_length=1)
     silent: list[str] = Field(min_length=1)
     clinical_impact: str = Field(default="", max_length=MAX_TEXT)
 
-    @field_validator("raised_by", "silent")
+    @field_validator("silent")
     @classmethod
     def named_specialities_exist(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(_roles(value)))
+
+    @field_validator("raised_by")
+    @classmethod
+    def raised_by_names_distinct_specialities(
+        cls, value: list[AgentSupport]
+    ) -> list[AgentSupport]:
+        seen: dict[str, AgentSupport] = {}
+        for item in value:
+            seen[item.role] = item
+        return list(seen.values())
 
 
 class SynthesisOutput(AgentOutput):
@@ -660,7 +688,7 @@ class SynthesisOutput(AgentOutput):
         two claims cannot both be true and the board would have no way to tell which to believe.
         """
         for gap in self.coverage_gaps:
-            overlap = set(gap.raised_by) & set(gap.silent)
+            overlap = {item.role for item in gap.raised_by} & set(gap.silent)
             if overlap:
                 raise ValueError(
                     "Une spécialité ne peut pas être à la fois à l'origine d'un point et "
@@ -824,18 +852,37 @@ def check_synthesis(output: "SynthesisOutput", bundle: TaskBundle) -> None:
         for opinion in bundle.inputs.agent_opinions
     }
 
+    def _require_attested(role: str, quote: str, *, context: str) -> None:
+        haystack = opinions.get(role)
+        if haystack is None:
+            raise UnattestedAgreement(f"{context} cite {role}, dont aucun avis n'a ete fourni.")
+        if not _attested(quote, haystack):
+            raise UnattestedAgreement(
+                f"La citation attribuee a {role} dans {context.lower()} ne figure pas dans "
+                f"son avis : {quote[:80]!r}"
+            )
+
     for convergence in output.convergences:
         for item in convergence.support:
-            haystack = opinions.get(item.role)
-            if haystack is None:
-                raise UnattestedAgreement(
-                    f"La convergence cite {item.role}, dont aucun avis n'a ete fourni."
-                )
-            if not _attested(item.quote, haystack):
-                raise UnattestedAgreement(
-                    f"La citation attribuee a {item.role} ne figure pas dans son avis : "
-                    f"{item.quote[:80]!r}"
-                )
+            _require_attested(item.role, item.quote, context="Une convergence")
+
+    # A divergence's two sides are the same kind of claim a convergence makes about a single
+    # speciality, doubled: each side is checkable the same way, or the disagreement itself
+    # could be invented -- either by putting words in a specialist's mouth, or by making a
+    # real disagreement sound sharper than either opinion actually states.
+    for divergence in output.divergences:
+        _require_attested(
+            divergence.agent_a.role, divergence.agent_a.quote, context="Une divergence"
+        )
+        _require_attested(
+            divergence.agent_b.role, divergence.agent_b.quote, context="Une divergence"
+        )
+
+    # `raised_by` is checkable the same way; `silent` asserts an absence, which no quotation
+    # from elsewhere in the opinion could ever prove, so it is not checked here.
+    for gap in output.coverage_gaps:
+        for item in gap.raised_by:
+            _require_attested(item.role, item.quote, context="Une lacune de couverture")
 
 
 # The ways a model marks "words omitted here" when it shortens a quotation.

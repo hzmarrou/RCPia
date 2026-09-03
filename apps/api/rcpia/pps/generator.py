@@ -657,7 +657,7 @@ def build_panel(
                 point=gap.point,
                 attribution=(
                     "Soulevé par "
-                    + ", ".join(agent_label(role) for role in gap.raised_by)
+                    + ", ".join(agent_label(item.role) for item in gap.raised_by)
                     + " — non abordé par "
                     + ", ".join(agent_label(role) for role in silent)
                 ),

@@ -1335,7 +1335,9 @@ def _synthesis(**overrides: object) -> SynthesisOutput:
         "coverage_gaps": [
             {
                 "point": "Le carboplatine ne remplace pas le cisplatine.",
-                "raised_by": ["medical_oncology"],
+                "raised_by": [
+                    {"role": "medical_oncology", "quote": "cisplatine non eligible"}
+                ],
                 "silent": ["urology_oncology"],
                 "clinical_impact": "Examiné par une seule spécialité.",
             }

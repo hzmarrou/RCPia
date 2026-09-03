@@ -114,13 +114,23 @@ Pour chaque point de désaccord :
 Une divergence n'est pas un problème à résoudre — c'est une information à transmettre
 à la RCP.
 
+**Chaque côté doit être appuyé par une citation de son propre avis**, exactement comme
+pour une convergence. Pour `agent_a` et pour `agent_b`, remplissez `quote` avec une
+phrase **recopiée de l'avis de cette spécialité** où elle prend la position décrite.
+La citation est vérifiée mécaniquement contre l'avis en question ; une divergence dont
+un côté ne peut pas être cité est refusée. Un désaccord entre deux positions que
+personne n'a réellement écrites n'est pas un désaccord, c'est une invention.
+
 ### 3 bis. Identifiez les lacunes de couverture
 
 Un point soulevé par une spécialité et **jamais abordé** par une autre n'est ni une
 convergence ni une divergence : c'est une **lacune de couverture** (`coverage_gaps`).
 
-- `raised_by` — les spécialités qui se sont prononcées.
-- `silent` — celles qui n'ont rien dit sur ce point.
+- `raised_by` — les spécialités qui se sont prononcées. Pour chacune, un objet avec son
+  rôle et une **citation recopiée de son propre avis** où elle soulève ce point — vérifiée
+  mécaniquement, comme pour une convergence.
+- `silent` — celles qui n'ont rien dit sur ce point. Une liste de rôles, sans citation :
+  le silence ne se recopie pas depuis un avis qui n'en parle pas.
 - `clinical_impact` — ce que la RCP risque de manquer si personne ne comble la lacune.
 
 C'est la catégorie à utiliser chaque fois que vous hésitez à inscrire une spécialité
@@ -188,8 +198,16 @@ Le schéma étendu pour la synthèse inclut :
   "divergences": [
     {
       "point": "Chimiothérapie néoadjuvante à base de cisplatine",
-      "agent_a": {"role": "urology_oncology", "position": "contre-indiquée (DFG 28)"},
-      "agent_b": {"role": "medical_oncology", "position": "discuter carboplatine si DFG confirmé 30-60"},
+      "agent_a": {
+        "role": "urology_oncology",
+        "position": "contre-indiquée (DFG 28)",
+        "quote": "phrase recopiée de l'avis urologique"
+      },
+      "agent_b": {
+        "role": "medical_oncology",
+        "position": "discuter carboplatine si DFG confirmé 30-60",
+        "quote": "phrase recopiée de l'avis d'oncologie"
+      },
       "clinical_impact": "Change le traitement néoadjuvant — cisplatine vs carboplatine vs pas de NAC",
       "resolution_required": true
     }
@@ -197,7 +215,9 @@ Le schéma étendu pour la synthèse inclut :
   "coverage_gaps": [
     {
       "point": "Remplacement du cisplatine par le carboplatine en néoadjuvant",
-      "raised_by": ["medical_oncology"],
+      "raised_by": [
+        {"role": "medical_oncology", "quote": "phrase recopiée de l'avis d'oncologie"}
+      ],
       "silent": ["urology_oncology"],
       "clinical_impact": "Le point n'a été examiné que par une spécialité ; à confirmer en RCP."
     }

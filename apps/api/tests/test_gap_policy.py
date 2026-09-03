@@ -351,10 +351,14 @@ def _synthesis(*gaps: dict) -> SynthesisOutput:
 def test_the_panel_prints_the_silence_that_matters_and_drops_the_one_that_does_not() -> None:
     carboplatin = "Le carboplatine ne doit pas remplacer le cisplatine en néoadjuvant."
     output = _synthesis(
-        {"point": carboplatin, "raised_by": [ONCOLOGY], "silent": [UROLOGY]},
+        {
+            "point": carboplatin,
+            "raised_by": [{"role": ONCOLOGY, "quote": "citation recopiee de son avis"}],
+            "silent": [UROLOGY],
+        },
         {
             "point": "Choix préférentiel d'une dérivation non continente de type Bricker.",
-            "raised_by": [UROLOGY],
+            "raised_by": [{"role": UROLOGY, "quote": "citation recopiee de son avis"}],
             "silent": [ONCOLOGY],
         },
     )
@@ -373,7 +377,7 @@ def test_a_gap_names_only_the_specialities_whose_silence_is_reportable() -> None
     output = _synthesis(
         {
             "point": "Choix préférentiel d'une dérivation non continente de type Bricker.",
-            "raised_by": ["radiology"],
+            "raised_by": [{"role": "radiology", "quote": "citation recopiee de son avis"}],
             "silent": [ONCOLOGY, "radiation_oncology"],
         }
     )

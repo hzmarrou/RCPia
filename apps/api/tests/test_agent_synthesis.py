@@ -14,6 +14,7 @@ from rcpia.agents.schemas import (
     SYNTHESIS_ROLE,
     AgentOpinion,
     AgentOutput,
+    AgentPosition,
     BundleInputs,
     Convergence,
     CoverageGap,
@@ -113,6 +114,7 @@ def test_a_divergence_has_no_field_for_the_right_answer() -> None:
         "clinical_impact",
         "resolution_required",
     }
+    assert set(AgentPosition.model_fields) == {"role", "position", "quote"}
 
 
 def test_a_synthesis_reporting_a_divergence_validates() -> None:
@@ -122,10 +124,15 @@ def test_a_synthesis_reporting_a_divergence_validates() -> None:
             divergences=[
                 {
                     "point": "Carboplatine en néoadjuvant",
-                    "agent_a": {"role": "urology_oncology", "position": "non évoqué"},
+                    "agent_a": {
+                        "role": "urology_oncology",
+                        "position": "non évoqué",
+                        "quote": "Le DFG est trop bas pour le cisplatine",
+                    },
                     "agent_b": {
                         "role": "medical_oncology",
                         "position": "exclu, aucun bénéfice de survie démontré",
+                        "quote": "Aucun benefice de survie demontre pour le carboplatine",
                     },
                     "clinical_impact": "Change le traitement néoadjuvant proposé.",
                     "resolution_required": True,
@@ -228,7 +235,9 @@ def test_a_coverage_gap_satisfies_the_structure_requirement() -> None:
             coverage_gaps=[
                 {
                     "point": "Remplacement du cisplatine par le carboplatine",
-                    "raised_by": ["medical_oncology"],
+                    "raised_by": [
+                        {"role": "medical_oncology", "quote": "citation recopiee de son avis"}
+                    ],
                     "silent": ["urology_oncology"],
                     "clinical_impact": "Examiné par une seule spécialité.",
                 }
@@ -248,7 +257,12 @@ def test_a_speciality_cannot_both_raise_a_point_and_be_silent_on_it() -> None:
                 coverage_gaps=[
                     {
                         "point": "Carboplatine",
-                        "raised_by": ["medical_oncology"],
+                        "raised_by": [
+                            {
+                                "role": "medical_oncology",
+                                "quote": "citation recopiee de son avis",
+                            }
+                        ],
                         "silent": ["medical_oncology", "urology_oncology"],
                     }
                 ],
@@ -258,7 +272,8 @@ def test_a_speciality_cannot_both_raise_a_point_and_be_silent_on_it() -> None:
 
 def test_a_gap_names_someone_on_both_sides() -> None:
     """A gap with nobody silent is not a gap, and one with nobody raising it is not a point."""
-    for raised, silent in ((["medical_oncology"], []), ([], ["urology_oncology"])):
+    raised_entry = [{"role": "medical_oncology", "quote": "citation recopiee de son avis"}]
+    for raised, silent in ((raised_entry, []), ([], ["urology_oncology"])):
         with pytest.raises(ValidationError):
             CoverageGap(point="Carboplatine", raised_by=raised, silent=silent)
 
@@ -384,6 +399,140 @@ def test_a_quotation_from_an_agent_that_never_ran_is_refused() -> None:
         )
     )
     with pytest.raises(UnattestedAgreement, match="aucun avis"):
+        check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
+
+
+# --- Divergence and coverage-gap attribution, checkable the same way ---------------------------
+#
+# A reviewer found that `check_synthesis` verified only `convergences`: a divergence could put
+# words in a specialist's mouth on either side, and a coverage gap could credit a speciality
+# with raising a point it never mentioned, and neither would be caught. Both are now checked by
+# the same mechanism as a convergence -- a quotation that must appear in that speciality's own
+# opinion -- and these tests are the regression coverage for that gap, not a description of a
+# design that was already there.
+
+
+def test_an_attested_divergence_passes_the_check() -> None:
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            divergences=[
+                {
+                    "point": "Cisplatine en neoadjuvant",
+                    "agent_a": {
+                        "role": "urology_oncology",
+                        "position": "non evoque",
+                        "quote": "Le DFG est trop bas pour le cisplatine",
+                    },
+                    "agent_b": {
+                        "role": "medical_oncology",
+                        "position": "exclu",
+                        "quote": "Pas de cisplatine",
+                    },
+                    "clinical_impact": "Change le traitement neoadjuvant propose.",
+                }
+            ],
+        )
+    )
+    check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
+
+
+def test_a_fabricated_divergence_side_is_refused() -> None:
+    """Putting words in a specialist's mouth to manufacture a disagreement, refused the same
+    way a fabricated agreement is."""
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            divergences=[
+                {
+                    "point": "Cisplatine en neoadjuvant",
+                    "agent_a": {
+                        "role": "urology_oncology",
+                        "position": "favorable a dose reduite",
+                        "quote": "une dose reduite de cisplatine est envisageable",
+                    },
+                    "agent_b": {
+                        "role": "medical_oncology",
+                        "position": "exclu",
+                        "quote": "Pas de cisplatine",
+                    },
+                    "clinical_impact": "Change le traitement neoadjuvant propose.",
+                }
+            ],
+        )
+    )
+    with pytest.raises(UnattestedAgreement, match="urology_oncology"):
+        check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
+
+
+def test_a_divergence_naming_an_agent_that_never_ran_is_refused() -> None:
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            divergences=[
+                {
+                    "point": "Radiotherapie a discuter",
+                    "agent_a": {
+                        "role": "urology_oncology",
+                        "position": "non evoque",
+                        "quote": "Le DFG est trop bas pour le cisplatine",
+                    },
+                    "agent_b": {
+                        "role": "radiation_oncology",
+                        "position": "favorable",
+                        "quote": "irradiation a discuter",
+                    },
+                    "clinical_impact": "Change la sequence therapeutique.",
+                }
+            ],
+        )
+    )
+    with pytest.raises(UnattestedAgreement, match="aucun avis"):
+        check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
+
+
+def test_an_attested_coverage_gap_passes_the_check() -> None:
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            coverage_gaps=[
+                {
+                    "point": "Remplacement du cisplatine par le carboplatine",
+                    "raised_by": [
+                        {"role": "medical_oncology", "quote": "le carboplatine ne le remplace"}
+                    ],
+                    "silent": ["urology_oncology"],
+                    "clinical_impact": "Examine par une seule specialite.",
+                }
+            ],
+        )
+    )
+    check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
+
+
+def test_a_fabricated_raised_by_is_refused() -> None:
+    """The finding this test exists for: a speciality credited with raising a point it never
+    mentioned. A gap is supposed to protect against attributing a *silent* speciality's
+    position; it must not itself attribute a false one to the speciality it names as vocal."""
+    output = SynthesisOutput.model_validate(
+        an_output(
+            SYNTHESIS_ROLE,
+            coverage_gaps=[
+                {
+                    "point": "Choix d'une derivation continente",
+                    "raised_by": [
+                        {
+                            "role": "urology_oncology",
+                            "quote": "une derivation continente est preferable",
+                        }
+                    ],
+                    "silent": ["medical_oncology"],
+                    "clinical_impact": "Non aborde par l'oncologie medicale.",
+                }
+            ],
+        )
+    )
+    with pytest.raises(UnattestedAgreement, match="urology_oncology"):
         check_synthesis(output, _bundle_with(UROLOGY, MEDICAL))
 
 
