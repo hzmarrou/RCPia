@@ -564,3 +564,30 @@ def test_every_page_of_both_files_carries_the_provisional_label() -> None:
             p.text for section in doc.sections for p in section.footer.paragraphs
         ]
         assert any("DOCUMENT PROVISOIRE — NON VALIDÉ RCP" in text for text in footers)
+
+
+def test_the_fiche_counts_its_sources_without_reprinting_the_register() -> None:
+    """A proposal resting on cited guideline passages and one resting on none looked
+    identical to a reader holding only the fiche. The count closes that without moving the
+    register out of the probatoire, so the split still holds."""
+    document = _minimal(
+        evidence=[
+            EvidenceEntry(id="afu.01", quote="EXTRAIT_PROBATOIRE_SEULEMENT", supports="X."),
+            EvidenceEntry(id="afu.02", quote="AUTRE_EXTRAIT_PROBATOIRE", supports="Y."),
+        ]
+    )
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Sources vérifiées : 2 référence(s)" in fiche_text
+    assert "EXTRAIT_PROBATOIRE_SEULEMENT" not in fiche_text
+
+
+def test_a_proposal_resting_on_no_sources_says_so_loudly() -> None:
+    document = _minimal(evidence=[])
+
+    fiche_text = _text(WordDocument(io.BytesIO(to_bytes(render_fiche_docx(document)))))
+
+    assert "Aucune source citée : ne pas utiliser cette proposition sans vérification" in (
+        fiche_text
+    )

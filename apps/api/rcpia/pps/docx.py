@@ -473,6 +473,20 @@ def render_fiche_docx(document: PpsDocument) -> Document:
         "figurent dans le dossier probatoire correspondant, identifié par le même "
         f"dossier et la même version des données (n° {document.ledger_version}).",
     )
+    # A count, not the register itself -- the split holds. Without it a proposal resting on
+    # twelve cited guideline passages and one resting on none look identical to a reader
+    # holding only the fiche, and the second is the one that needs checking.
+    if document.evidence:
+        _muted(
+            doc,
+            f"Sources vérifiées : {len(document.evidence)} référence(s), registre complet "
+            "dans le dossier probatoire.",
+        )
+    else:
+        _banner(
+            doc,
+            "⚠ Aucune source citée : ne pas utiliser cette proposition sans vérification.",
+        )
 
     # ------------------------------------------------------------------ 1
     _heading(doc, f"1 — {SECTION_TITLES[0]}")
