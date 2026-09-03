@@ -134,6 +134,7 @@ def check_calculators() -> Check:
     them, through the same call the bundle makes".
     """
     from rcpia.nomograms import evaluate_all
+    from rcpia.nomograms.record import Tristate
 
     # A prostate patient with every Briganti 2012 input present. If this yields no figure,
     # either the wiring is broken or the models stopped applying to the patients they are for.
@@ -148,7 +149,12 @@ def check_calculators() -> Check:
         "radiation_therapy": "Non",
     }
     try:
-        results = evaluate_all(facts, cancer_type="prostate")
+        # The check exercises the arithmetic, so it supplies the confirmation a
+        # clinician would give. Without it both models would correctly refuse, and the
+        # check would be asserting the eligibility gate rather than the calculators.
+        results = evaluate_all(
+            facts, cancer_type="prostate", adenocarcinoma_confirmed=Tristate.yes
+        )
     except Exception as exc:  # noqa: BLE001 - a smoke check reports, it does not raise
         return Check("calculators reachable", False, f"{type(exc).__name__}: {exc}")
 

@@ -263,6 +263,26 @@ FIELDS: tuple[FactField, ...] = (
     FactField(
         "histology", ("type histologique",), FactCategory.pathology, required_for=BOTH
     ),
+    # **The one question that authorises a nomogram, asked of a person.**
+    #
+    # Briganti and the MSKCC preoperative models were fitted on prostate adenocarcinoma, and
+    # for seven rounds of review the code decided whether a patient had one by reading the
+    # free-text histology field. Every version of that reading was defeated by a phrasing
+    # nobody had anticipated -- a denial, a hedge, a search result, a percentage of zero, a
+    # grade outside its own scale -- and each failure produced a confident risk score for a
+    # patient whose report denied the disease. Free text can suggest this answer; it cannot
+    # be trusted to authorise a calculator.
+    #
+    # Deliberately not `required_for` and not in `BLOCKING_FIELDS`: an unanswered question
+    # withholds the two nomograms and nothing else. The panel still convenes and the fiche is
+    # still produced, because a tumour board that cannot see a lymph-node probability can
+    # still discuss the case, while one handed a wrong one is worse off than one handed none.
+    FactField(
+        "prostate_adenocarcinoma_confirmed",
+        ("adénocarcinome prostatique confirmé histologiquement",),
+        FactCategory.pathology,
+        cancer_types=(PROSTATE,),
+    ),
     # Applicable to both — a prostatectomy specimen is staged — but only required for
     # bladder. None of the eight real prostate dossiers records a TNM at all: those cases
     # are characterised by Gleason, ISUP, PSA and PIRADS, and requiring a pTNM manufactured

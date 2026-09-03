@@ -262,7 +262,7 @@ def evaluate(record: ClinicalRecord) -> NomogramResult:
             name for name, value in (
                 ("hormone_therapy", record.hormone_therapy),
                 ("radiation_therapy", record.radiation_therapy),
-                ("is_prostate_adenocarcinoma", record.is_prostate_adenocarcinoma),
+                ("prostate_adenocarcinoma_confirmed", record.is_prostate_adenocarcinoma),
             ) if value.is_unknown
         )
         return not_possible(

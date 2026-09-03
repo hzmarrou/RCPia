@@ -234,7 +234,9 @@ def test_unknown_histology_is_not_possible_for_briganti_not_calculated() -> None
 
     assert result.status is Status.not_possible
     assert Reason.eligibility_unconfirmed in result.reason_codes
-    assert "is_prostate_adenocarcinoma" in result.missing_fields
+    # The field named is the one the clinician answers in the ledger, not the record
+    # attribute it lands in: a refusal has to tell the board what to go and do.
+    assert "prostate_adenocarcinoma_confirmed" in result.missing_fields
 
 
 def test_confirmed_adenocarcinoma_still_calculates_for_briganti() -> None:
@@ -272,7 +274,9 @@ def test_unknown_histology_is_not_possible_for_mskcc_not_calculated() -> None:
 
     assert result.status is Status.not_possible
     assert Reason.eligibility_unconfirmed in result.reason_codes
-    assert "is_prostate_adenocarcinoma" in result.missing_fields
+    # The field named is the one the clinician answers in the ledger, not the record
+    # attribute it lands in: a refusal has to tell the board what to go and do.
+    assert "prostate_adenocarcinoma_confirmed" in result.missing_fields
 
 
 def test_classify_prostate_histology_matches_only_named_terms() -> None:
@@ -680,10 +684,18 @@ def test_the_bundle_carries_the_calculators() -> None:
     from rcpia.agents import bundle as bundle_module
 
     source = inspect.getsource(bundle_module.build_bundle)
-    assert "evaluate_all(facts, cancer_type=" in source, (
+    assert "evaluate_all(" in source and "cancer_type=" in source, (
         "build_bundle must run the calculators over the ledger"
     )
     assert "nomograms=nomograms" in source, "and hand the readings to the agent"
+    # The eligibility answer has to travel with them, from the stored version the clinician
+    # approved. Reading it anywhere else would reintroduce the gap this field exists to close.
+    assert "adenocarcinoma_confirmed=" in source, (
+        "and pass the clinician's confirmation, not infer eligibility"
+    )
+    assert "adenocarcinoma_confirmation(entries)" in source, (
+        "read from the stored ledger entries, so the agent sees what the clinician approved"
+    )
 
 
 def test_the_agent_is_told_not_to_estimate_what_a_calculator_computed() -> None:

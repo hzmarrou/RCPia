@@ -507,6 +507,9 @@ INPUT_LABELS = {
     "positive_systematic_cores_percent": "carottes positives (%)",
     "hormone_therapy": "antécédent d'hormonothérapie",
     "radiation_therapy": "antécédent de radiothérapie",
+    "prostate_adenocarcinoma_confirmed": (
+        "confirmation d'un adénocarcinome prostatique par le clinicien"
+    ),
 }
 
 

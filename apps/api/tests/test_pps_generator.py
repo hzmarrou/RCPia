@@ -49,6 +49,7 @@ from rcpia.core.models import (
 from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.jobs.models import JobType
 from rcpia.main import app
+from rcpia.nomograms.record import Tristate
 from rcpia.pps import generator
 from rcpia.pps.generator import (
     AGENT_LABELS,
@@ -1542,7 +1543,13 @@ def test_a_computed_score_reaches_the_fiche_with_its_model_named() -> None:
     model asked for a probability produces a convincing one."""
     from rcpia.pps.generator import build_nomograms
 
-    figures = build_nomograms(dict(PROSTATE_FACTS), cancer_type="prostate")
+    figures = build_nomograms(
+        dict(PROSTATE_FACTS),
+        cancer_type="prostate",
+        # The clinician's answer to the eligibility question. Without it both calculators
+        # correctly refuse, and this test would assert the gate rather than the score.
+        adenocarcinoma_confirmed=Tristate.yes,
+    )
     briganti = next(f for f in figures if "Briganti" in f.display_name)
 
     assert briganti.estimates["lymph_node_invasion_percent"] == pytest.approx(3.06, abs=0.01)
@@ -1589,7 +1596,11 @@ def test_the_board_reads_french_not_schema_keys() -> None:
     from rcpia.pps.render import _nomograms
 
     class Document:
-        nomograms = build_nomograms(dict(PROSTATE_FACTS), cancer_type="prostate")
+        nomograms = build_nomograms(
+            dict(PROSTATE_FACTS),
+            cancer_type="prostate",
+            adenocarcinoma_confirmed=Tristate.yes,
+        )
 
     rendered = "\n".join(_nomograms(Document()))
 

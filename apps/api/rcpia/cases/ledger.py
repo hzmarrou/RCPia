@@ -101,6 +101,11 @@ def highlight_for(status: FactStatus) -> str:
 # letter of the matching label turns `ptnm` into `Ptnm` and `oms` into `Oms`, which reads
 # as a typo to the clinicians these labels are for.
 DISPLAY_OVERRIDES: dict[str, str] = {
+    # Asked as a question, because it is one, and because the clinician answering it is what
+    # authorises the two prostate nomograms to compute anything at all.
+    "prostate_adenocarcinoma_confirmed": (
+        "Adénocarcinome prostatique confirmé histologiquement ?"
+    ),
     "ptnm": "pTNM",
     "cis": "CIS",
     "who_status": "OMS",
@@ -192,9 +197,44 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
     readings = await current_readings(session, case_id=case.id)
     entries: list[LedgerEntry] = []
 
+    # **A confirmation answers a histology, and stops answering when that histology changes.**
+    # The clinician who confirmed adenocarcinoma did so having read a particular pathology
+    # line; if that line is later corrected, their answer was given about something else and
+    # cannot carry over. Resolved here, where both facts' timestamps are available, so the
+    # stored version -- the thing agents and the fiche read -- already holds the right answer
+    # rather than leaving every reader to work it out again.
+    histology_rows = readings.get("histology") or []
+    histology_recorded_at = histology_rows[0].created_at if histology_rows else None
+
     for spec in fields_for(case.cancer_type):
         rows = readings.get(spec.key) or []
         fact = rows[0] if rows else None
+
+        if (
+            fact is not None
+            and spec.key == ADENOCARCINOMA_CONFIRMATION
+            and histology_recorded_at is not None
+            and fact.created_at is not None
+            and histology_recorded_at > fact.created_at
+        ):
+            entries.append(
+                LedgerEntry(
+                    key=spec.key,
+                    label=display_label(spec.key),
+                    category=str(spec.category),
+                    value=None,
+                    status=str(FactStatus.missing),
+                    origin=str(FactOrigin.machine),
+                    highlight=RED,
+                    unit=spec.unit,
+                    note=(
+                        "Le type histologique a été modifié après cette confirmation : "
+                        "la question doit être posée à nouveau."
+                    ),
+                )
+            )
+            continue
+
         if fact is None:
             entries.append(
                 LedgerEntry(
@@ -268,6 +308,45 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
         )
 
     return entries
+
+
+ADENOCARCINOMA_CONFIRMATION = "prostate_adenocarcinoma_confirmed"
+
+# What the clinician's answer has to be, matched **whole** rather than as a substring.
+#
+# Substring matching is what this project has spent seven rounds of review paying for: an
+# early version of this list accepted "confirmé", which matches inside "à confirmer" -- an
+# answer meaning the opposite, authorising a calculator on a question still open. A yes/no
+# question has two answers, so they are compared exactly and everything else is no answer.
+_CONFIRMED = frozenset({"oui", "yes", "o"})
+_DENIED = frozenset({"non", "no", "n"})
+
+
+def adenocarcinoma_confirmation(entries: list[LedgerEntry]) -> str:
+    """The clinician's answer to the eligibility question: `"yes"`, `"no"` or `"unknown"`.
+
+    **Only a human's answer counts.** Extraction may fill this field in as a suggestion, and
+    a suggestion is exactly what seven rounds of review showed cannot be trusted to authorise
+    a calculator: the machine's reading of free text was defeated by a denial, a hedge, a
+    search result, a percentage of zero. So the origin is checked before the value is, and a
+    machine-origin answer -- however confident, however correct it may happen to be --
+    authorises nothing.
+
+    Returned as a string rather than a `Tristate` because the nomogram package owns that type
+    and the ledger should not have to import it to answer a question about its own contents.
+    """
+    for entry in entries:
+        if entry.key != ADENOCARCINOMA_CONFIRMATION:
+            continue
+        if entry.origin != str(FactOrigin.human):
+            return "unknown"
+        answer = (entry.value or "").strip().lower().strip(".!? ")
+        if answer in _CONFIRMED:
+            return "yes"
+        if answer in _DENIED:
+            return "no"
+        return "unknown"
+    return "unknown"
 
 
 def missing_keys(entries: list[LedgerEntry]) -> list[str]:

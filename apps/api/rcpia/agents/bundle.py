@@ -39,11 +39,18 @@ from rcpia.agents.schemas import (
 from rcpia.cases import completeness
 from rcpia.cases.completeness import BLOCKING_FIELDS
 from rcpia.cases.fact_schema import required_fields_for
-from rcpia.cases.ledger import AMBER, RED, LedgerEntry, LedgerReading
+from rcpia.cases.ledger import (
+    AMBER,
+    RED,
+    LedgerEntry,
+    LedgerReading,
+    adenocarcinoma_confirmation,
+)
 from rcpia.core.models import CancerType, Case, CaseLedgerVersion, DocumentChunk
 from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.rerank import Reranker
 from rcpia.nomograms import evaluate_all
+from rcpia.nomograms.record import Tristate
 
 MAX_SNIPPET_CHARACTERS = 4000
 
@@ -380,7 +387,14 @@ async def build_bundle(
     nomograms: list[NomogramReading] = []
     if agent_role != SYNTHESIS_ROLE:
         facts = {entry.key: entry.value for entry in entries if entry.value}
-        for result in evaluate_all(facts, cancer_type=str(case.cancer_type)):
+        # Read from the stored version's own entries, so the agent is handed the calculators'
+        # answers as they stood for the ledger the clinician approved -- not as they would be
+        # recomputed against whatever the case says now.
+        for result in evaluate_all(
+            facts,
+            cancer_type=str(case.cancer_type),
+            adenocarcinoma_confirmed=Tristate(adenocarcinoma_confirmation(entries)),
+        ):
             nomograms.append(
                 NomogramReading(
                     model_id=result.model_id,

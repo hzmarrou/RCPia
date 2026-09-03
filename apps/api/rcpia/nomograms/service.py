@@ -10,7 +10,7 @@ diameter", which is the sentence that tells an RCP what to obtain. A refusal is 
 
 from rcpia.nomograms import briganti, mskcc
 from rcpia.nomograms.contract import NomogramResult
-from rcpia.nomograms.record import ClinicalRecord, record_from_facts
+from rcpia.nomograms.record import ClinicalRecord, Tristate, record_from_facts
 
 # Prostate only. Briganti and the MSKCC prostate nomograms have nothing to say about a bladder
 # tumour, and running them would be the "never calculate Briganti for bladder cancer" rule
@@ -19,12 +19,20 @@ PROSTATE = "prostate"
 
 
 def evaluate_all(
-    facts: dict[str, str], *, cancer_type: str
+    facts: dict[str, str],
+    *,
+    cancer_type: str,
+    adenocarcinoma_confirmed: Tristate = Tristate.unknown,
 ) -> tuple[NomogramResult, ...]:
-    """Every implemented nomogram's answer for this patient, computed or explained."""
+    """Every implemented nomogram's answer for this patient, computed or explained.
+
+    `adenocarcinoma_confirmed` is the clinician's answer to the eligibility question, and it
+    defaults to `unknown`: a caller that has not asked has not been told, and both models
+    then report `NOT_POSSIBLE` naming the field rather than computing on an assumption.
+    """
     if cancer_type != PROSTATE:
         return ()
-    record = record_from_facts(facts)
+    record = record_from_facts(facts, adenocarcinoma_confirmed=adenocarcinoma_confirmed)
     return evaluate_record(record)
 
 

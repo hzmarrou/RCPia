@@ -28,9 +28,16 @@ from rcpia.agents.schemas import (
     output_model_for,
 )
 from rcpia.cases import completeness
-from rcpia.cases.ledger import AMBER, LedgerEntry, display_label, latest_version
+from rcpia.cases.ledger import (
+    AMBER,
+    LedgerEntry,
+    adenocarcinoma_confirmation,
+    display_label,
+    latest_version,
+)
 from rcpia.core.models import AgentRun, AgentRunStatus, Case, CaseLedgerVersion
 from rcpia.nomograms import evaluate_all
+from rcpia.nomograms.record import Tristate
 from rcpia.pps import gap_policy
 from rcpia.pps.schemas import (
     CareFramework,
@@ -347,7 +354,10 @@ def build_support(
 
 
 def build_nomograms(
-    values: dict[str, str | None], *, cancer_type: str
+    values: dict[str, str | None],
+    *,
+    cancer_type: str,
+    adenocarcinoma_confirmed: Tristate = Tristate.unknown,
 ) -> list[NomogramFigure]:
     """Run the validated calculators over the ledger this document was built from.
 
@@ -357,7 +367,9 @@ def build_nomograms(
     """
     facts = {key: value for key, value in values.items() if value}
     figures: list[NomogramFigure] = []
-    for result in evaluate_all(facts, cancer_type=cancer_type):
+    for result in evaluate_all(
+        facts, cancer_type=cancer_type, adenocarcinoma_confirmed=adenocarcinoma_confirmed
+    ):
         figures.append(
             NomogramFigure(
                 display_name=result.display_name,
@@ -811,7 +823,12 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
         # block and the renderer prints nothing.
         panel=build_panel(lead_output, roles, crashed),
         treatments=build_treatments(lead_output),
-        nomograms=build_nomograms(values, cancer_type=str(case.cancer_type)),
+        nomograms=build_nomograms(
+            values,
+            cancer_type=str(case.cancer_type),
+            # The clinician's own answer, read from the version they approved.
+            adenocarcinoma_confirmed=Tristate(adenocarcinoma_confirmation(entries)),
+        ),
         support=build_support(values, agent_roles=roles, contested=contested),
         social=build_social(values),
         framework=build_framework(

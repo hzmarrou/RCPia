@@ -170,7 +170,7 @@ def _briganti_2012(record: ClinicalRecord) -> NomogramResult:
             model_family=FAMILY,
             model_id="briganti_2012",
             display_name=DISPLAY["2012"],
-            missing=("is_prostate_adenocarcinoma",),
+            missing=("prostate_adenocarcinoma_confirmed",),
             reasons=(Reason.eligibility_unconfirmed,),
             provenance=PROVENANCE_2012,
         )

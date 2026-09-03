@@ -412,12 +412,23 @@ def _stage_flag(*values: str | None, tokens: tuple[str, ...]) -> Tristate:
     return Tristate.no if seen else Tristate.unknown
 
 
-def record_from_facts(facts: dict[str, str]) -> ClinicalRecord:
-    """Normalise a ledger reading. Keys are `fact_schema` field names."""
+def record_from_facts(
+    facts: dict[str, str], *, adenocarcinoma_confirmed: Tristate = Tristate.unknown
+) -> ClinicalRecord:
+    """Normalise a ledger reading. Keys are `fact_schema` field names.
+
+    **`adenocarcinoma_confirmed` comes from a person, and nothing here infers it.** It
+    defaults to `unknown`, so a caller that does not pass it gets a record that no prostate
+    nomogram will compute from -- which is the safe way for a new call site to be wrong.
+
+    The free-text histology is deliberately not consulted for this. Seven rounds of review
+    defeated seven readings of it, each failure producing a confident score for a patient
+    whose report denied the disease; `classify_prostate_histology` survives as a way to
+    *suggest* an answer to the clinician, never to stand in for one.
+    """
     gleason = as_gleason(facts.get("gleason"))
     positive = as_number(facts.get("cores_positive"))
     total = as_number(facts.get("cores_total"))
-    prostate = classify_prostate_histology(facts.get("histology"))
     return ClinicalRecord(
         age_years=as_number(facts.get("age")),
         psa_ng_ml=as_number(facts.get("psa_total")),
@@ -434,5 +445,5 @@ def record_from_facts(facts: dict[str, str]) -> ClinicalRecord:
         ),
         hormone_therapy=as_tristate(facts.get("hormone_therapy")),
         radiation_therapy=as_tristate(facts.get("radiation_therapy")),
-        is_prostate_adenocarcinoma=prostate,
+        is_prostate_adenocarcinoma=adenocarcinoma_confirmed,
     )
