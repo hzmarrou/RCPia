@@ -6,8 +6,10 @@ import { API_BASE_URL } from "@/lib/api";
 import {
   AGENT_LABELS,
   ANSWER_LABELS,
+  docxUrl,
   downloadUrl,
   fetchPps,
+  probatoireUrl,
   type EvidenceEntry,
   type MissingItem,
   type Referral,
@@ -145,8 +147,16 @@ export default async function PpsPage({
         {pps.ledger_version} · générateur {pps.generator_version} · avis{" "}
         {pps.agent_run_ids.join(", ") || "—"}
       </p>
-      <p>
-        <a href={downloadUrl(caseId)}>Télécharger au format Markdown</a>
+      {/* The fiche is what goes to the RCP; the probatoire and the markdown are for
+          whoever wants to check the reasoning behind it. */}
+      <p className="downloads">
+        <a href={docxUrl(caseId)}>Télécharger la fiche RCP (Word)</a>
+        <a className="muted" href={probatoireUrl(caseId)}>
+          Dossier probatoire (Word)
+        </a>
+        <a className="muted" href={downloadUrl(caseId)}>
+          Télécharger au format Markdown
+        </a>
       </p>
 
       <h2>1 — Synthèse et question posée</h2>

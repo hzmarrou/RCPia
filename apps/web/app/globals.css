@@ -162,6 +162,14 @@ blockquote {
   gap: 0.5rem;
 }
 
+/* The ways out of the fiche. Wider gap than .actions because these are text links, not
+   buttons, and they run together at half a rem. */
+.downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
 .warnings {
   margin: 0.35rem 0 0.75rem;
   color: var(--warn-fg);

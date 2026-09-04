@@ -148,6 +148,16 @@ export function downloadUrl(caseId: string): string {
   return `${API_BASE_URL}/cases/${caseId}/pps/markdown`;
 }
 
+export function docxUrl(caseId: string): string {
+  return `${API_BASE_URL}/cases/${caseId}/pps/docx`;
+}
+
+// The evidence register is a second file on purpose: the board reads the fiche, and the
+// reasoning behind it travels separately.
+export function probatoireUrl(caseId: string): string {
+  return `${API_BASE_URL}/cases/${caseId}/pps/docx/probatoire`;
+}
+
 export const ANSWER_LABELS: Record<Answer, string> = {
   oui: "Oui",
   non: "Non",
