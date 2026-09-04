@@ -122,6 +122,13 @@ async def list_activity(session: AsyncSession, *, case: Case) -> list[AnalysisJo
 
     Ordered by creation so a display keeps a stable row order while jobs come and go —
     ordering by `milestone_at` would make rows jump around as each one reported.
+
+    **And by id after it, because creation time alone is all ties here.** `created_at`
+    defaults to `now()`, which is PostgreSQL's *transaction* timestamp, and a panel
+    enqueues all of its roles in one transaction — so eight agent jobs carry one identical
+    timestamp. With every row tied, the order is whatever the plan yields, and each
+    milestone write rewrites the tuple and moves it: the rows would reshuffle between
+    polls, which is exactly what ordering by creation was meant to prevent.
     """
     result = await session.execute(
         sa.select(AnalysisJob)
@@ -130,7 +137,7 @@ async def list_activity(session: AsyncSession, *, case: Case) -> list[AnalysisJo
             AnalysisJob.organization_id == case.organization_id,
             AnalysisJob.status.in_(LIVE_JOB_STATUSES),
         )
-        .order_by(AnalysisJob.created_at)
+        .order_by(AnalysisJob.created_at, AnalysisJob.id)
     )
     return list(result.scalars().all())
 
