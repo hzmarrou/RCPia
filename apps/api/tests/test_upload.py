@@ -29,7 +29,7 @@ from rcpia.core.models import (
     User,
     UserRole,
 )
-from rcpia.jobs.models import JobType, RunStep
+from rcpia.jobs.models import AGENT_STEPS, JobType, RunStep
 from rcpia.main import app
 from rcpia.storage.base import checksum
 from rcpia.storage.factory import get_blob_store
@@ -715,3 +715,86 @@ async def test_another_organizations_activity_is_not_reachable(
     await sign_in(client, outsider)
 
     assert (await client.get(f"/cases/{case['id']}/activity")).status_code == 404
+
+
+async def test_the_activity_carries_the_scale_its_step_belongs_on(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A client must never hard-code the sequence: renaming a step or adding a fifth would
+    then drop every bar to "unknown" with nothing in the response to signal it."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory,
+        case["id"],
+        user,
+        payload={"agent_role": "pathology"},
+        milestone=RunStep.CHECKING,
+    )
+
+    [job] = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert job["steps"] == list(AGENT_STEPS)
+    assert job["milestone"] in job["steps"]
+
+
+async def test_work_that_reports_no_steps_offers_no_scale(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Parsing and extraction report nothing yet. An empty scale says so; borrowing the
+    agent scale would draw a four-step bar for work that has no steps."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory, case["id"], user, job_type=JobType.PARSE_DOSSIER, payload={}
+    )
+
+    [job] = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert job["steps"] == []
+
+
+async def test_jobs_queued_together_come_back_in_a_stable_order(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """**A panel enqueues every role in one transaction**, and `created_at` defaults to
+    `now()` -- PostgreSQL's transaction timestamp -- so all of those rows carry one
+    identical value. Ordering by it alone leaves the result entirely to the plan, and each
+    milestone write rewrites the tuple and moves it: the rows reshuffle between polls,
+    which is what ordering by creation was supposed to prevent.
+    """
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+
+    async with session_factory() as session:
+        for role in ("pathology", "radiology", "medical_oncology", "urology_oncology"):
+            session.add(
+                AnalysisJob(
+                    case_id=uuid.UUID(case["id"]),
+                    organization_id=user.organization_id,
+                    job_type=JobType.RUN_AGENT,
+                    payload={"agent_role": role},
+                    status=JobStatus.running,
+                )
+            )
+        await session.commit()
+
+    first = (await client.get(f"/cases/{case['id']}/activity")).json()
+    stamps = {job["created_at"] for job in first}
+    assert len(stamps) == 1, "the fixture must reproduce the tie this test is about"
+
+    # Move a row the way a milestone write does, then read again.
+    async with session_factory() as session:
+        await session.execute(
+            sa.update(AnalysisJob)
+            .where(AnalysisJob.id == uuid.UUID(first[-1]["id"]))
+            .values(milestone=RunStep.REASONING, milestone_at=datetime.now(UTC))
+        )
+        await session.commit()
+
+    second = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert [job["id"] for job in second] == [job["id"] for job in first]

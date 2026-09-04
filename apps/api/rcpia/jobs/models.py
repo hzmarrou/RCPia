@@ -19,6 +19,7 @@ __all__ = [
     "LIVE_JOB_STATUSES",
     "JobOutcome",
     "RunStep",
+    "STEPS_BY_JOB_TYPE",
     "retry_delay",
 ]
 
@@ -70,6 +71,12 @@ class RunStep:
 # In the order a run passes through them, so a display can place a step on a scale without
 # hard-coding the sequence. The list is the contract; the strings are what reaches the API.
 AGENT_STEPS = (RunStep.BUNDLE, RunStep.REASONING, RunStep.CHECKING, RunStep.RECORDING)
+
+# Which scale a job's milestone belongs on. Served with each job rather than left for a
+# client to hard-code, so renaming a step or adding a fifth moves the scale and the value
+# it is read against together. A job type absent here reports no steps, which is the honest
+# answer for parsing and extraction: they do not report milestones yet.
+STEPS_BY_JOB_TYPE: dict[str, tuple[str, ...]] = {JobType.RUN_AGENT: AGENT_STEPS}
 
 
 @dataclass(frozen=True)

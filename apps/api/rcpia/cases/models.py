@@ -76,5 +76,9 @@ class JobActivity(BaseModel):
     agent_role: str | None
     milestone: str | None
     milestone_at: datetime | None
+    # The scale `milestone` sits on, in order, for this kind of job. Sent with the job so a
+    # client never hard-codes the sequence: a renamed or added step moves the scale and the
+    # value together. Empty for work that reports no steps.
+    steps: list[str]
     started_at: datetime | None
     created_at: datetime

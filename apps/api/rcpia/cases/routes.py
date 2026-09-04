@@ -14,6 +14,7 @@ from rcpia.cases import service
 from rcpia.cases.models import CaseCreate, CaseDetail, CaseRead, DocumentRead, JobActivity
 from rcpia.cases.uploads import MAX_UPLOAD_BYTES, UploadRejected
 from rcpia.core.models import UserRole
+from rcpia.jobs.models import STEPS_BY_JOB_TYPE
 from rcpia.storage.base import BlobStore, StorageError, checksum
 from rcpia.storage.factory import get_blob_store
 
@@ -79,6 +80,7 @@ async def read_activity(
             agent_role=_text_or_none(job.payload.get("agent_role")),
             milestone=job.milestone,
             milestone_at=job.milestone_at,
+            steps=list(STEPS_BY_JOB_TYPE.get(job.job_type, ())),
             started_at=job.started_at,
             created_at=job.created_at,
         )
