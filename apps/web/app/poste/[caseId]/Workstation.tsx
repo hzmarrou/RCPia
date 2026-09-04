@@ -215,6 +215,11 @@ export default function Workstation({
               <h2>Données extraites du dossier</h2>
               <div className="poste-tablewrap">
                 <table>
+                  <colgroup>
+                    <col className="label" />
+                    <col />
+                    <col className="act" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>Donnée</th>
@@ -246,7 +251,7 @@ export default function Workstation({
                           {entry.value === null ? (
                             <span className="missing-value">Information manquante</span>
                           ) : (
-                            <span className="val">{entry.value}</span>
+                            <Value text={entry.value} />
                           )}
                           {entry.note ? <div className="src">{entry.note}</div> : null}
                         </td>
@@ -375,6 +380,33 @@ export default function Workstation({
         </button>
       ) : null}
     </div>
+  );
+}
+
+// Beyond this, a value is a narrative rather than a value.
+const LONG_VALUE = 200;
+
+/**
+ * A ledger value, folded when it is a wall of text.
+ *
+ * Several fields hold whole passages of the dossier — a cystoscopy description, a CT report.
+ * Printed in full they make single rows a thousand pixels tall and push the table wider than
+ * its pane, so the one row a clinician is looking for sits below a screenful of prose.
+ *
+ * Folded, not truncated: the text is all there, one click away, because this table is what
+ * someone checks the extraction against and a value they cannot read is a value they cannot
+ * check.
+ */
+function Value({ text }: { text: string }) {
+  if (text.length <= LONG_VALUE) return <span className="val">{text}</span>;
+  return (
+    <details className="poste-long">
+      <summary>
+        <span className="val">{text.slice(0, LONG_VALUE).trimEnd()}…</span>
+        <span className="more">tout afficher</span>
+      </summary>
+      <span className="val">{text}</span>
+    </details>
   );
 }
 

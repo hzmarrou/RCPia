@@ -294,7 +294,23 @@ main:has(> .poste) { max-width: none; padding: 0; }
 .poste-metrics .v.amber { color: var(--warn-fg); }
 
 .poste-tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
-.poste-tablewrap table { border-collapse: collapse; width: 100%; font-size: 13px; }
+/* Fixed layout, because the dossier decides the content and some of it is a whole CT report:
+   left to itself the table sizes to its longest line and pushes past its pane. */
+.poste-tablewrap table {
+  border-collapse: collapse; width: 100%; font-size: 13px; table-layout: fixed;
+}
+.poste-tablewrap col.label { width: 34%; }
+.poste-tablewrap col.act { width: 92px; }
+.poste-tablewrap td { overflow-wrap: anywhere; }
+
+/* A folded narrative. Closed it is two lines; open it is the whole passage. */
+.poste-long summary { cursor: pointer; list-style: none; }
+.poste-long summary::-webkit-details-marker { display: none; }
+.poste-long .more {
+  display: block; margin-top: 3px; font-size: 11.5px; color: var(--muted);
+  text-decoration: underline;
+}
+.poste-long[open] summary { display: none; }
 .poste-tablewrap td { padding: 8px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .poste-tablewrap tr:last-child td { border-bottom: 0; }
 .poste-tablewrap .val { font-family: ui-monospace, monospace; }
