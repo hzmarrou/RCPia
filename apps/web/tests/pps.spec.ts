@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { downloadUrl, fetchPps } from "../lib/pps";
+import { docxUrl, downloadUrl, fetchPps, probatoireUrl } from "../lib/pps";
 
 type FetchArgs = [input: string, init: RequestInit];
 
@@ -70,5 +70,16 @@ describe("fetchPps", () => {
 describe("downloadUrl", () => {
   it("points at the markdown endpoint for the case", () => {
     expect(downloadUrl("case-1")).toMatch(/\/cases\/case-1\/pps\/markdown$/);
+  });
+});
+
+describe("the Word downloads", () => {
+  it("hands the fiche and its evidence register two separate endpoints", () => {
+    expect(docxUrl("case-1")).toMatch(/\/cases\/case-1\/pps\/docx$/);
+    expect(probatoireUrl("case-1")).toMatch(/\/cases\/case-1\/pps\/docx\/probatoire$/);
+  });
+
+  it("never points the fiche at the probatoire", () => {
+    expect(docxUrl("case-1")).not.toBe(probatoireUrl("case-1"));
   });
 });
