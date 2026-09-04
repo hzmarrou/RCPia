@@ -109,6 +109,15 @@ export default async function CasePage({
         </ul>
       )}
 
+      {/* The workstation does everything below in one screen. Offered rather than imposed:
+          both routes read the same case, and which one people reach for is the thing being
+          judged. */}
+      <p>
+        <Link href={`/poste/${clinicalCase.id}`}>
+          Ouvrir le poste de travail
+        </Link>{" "}
+        <span className="badge">nouveau</span>
+      </p>
       <p>
         <Link href={`/cases/${clinicalCase.id}/ledger`}>
           Vérifier les données extraites
