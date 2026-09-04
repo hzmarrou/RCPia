@@ -203,3 +203,165 @@ button[disabled] {
   opacity: 0.6;
   cursor: progress;
 }
+
+/* ------------------------------------------------------------------ the workstation
+   Three panes: the case list stays put, the dossier is worked in the centre, and a
+   correction or the fiche opens on the right without leaving either. Widths are variables
+   so a splitter drag is a one-property write and the layout stays declarative. */
+:root {
+  --poste-rail: 262px;
+  --poste-side: 420px;
+}
+
+/* The workstation is the whole window, so it opts out of the centred column every other
+   page sits in. Without this the centre pane collapses to a couple of hundred pixels and
+   its content spills over the right pane. */
+main:has(> .poste) { max-width: none; padding: 0; }
+
+.poste {
+  display: grid;
+  grid-template-columns: var(--poste-rail) 7px minmax(0, 1fr) 7px var(--poste-side);
+  height: calc(100vh - 2rem);
+  min-height: 560px;
+}
+.poste.collapsed { grid-template-columns: var(--poste-rail) 7px minmax(0, 1fr) 0 0; }
+.poste.collapsed .poste-side,
+.poste.collapsed .poste-grip.right { display: none; }
+
+/* A hairline at rest, stronger under the pointer: furniture, not a feature. */
+.poste-grip { position: relative; cursor: col-resize; touch-action: none; }
+.poste-grip::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+  background: var(--border);
+}
+.poste-grip:hover::before { left: 2px; width: 3px; background: var(--fg); }
+.poste-grip:focus-visible { outline: 2px solid var(--fg); outline-offset: -1px; }
+
+.poste-rail {
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.poste-rail-label {
+  padding: 12px 14px 6px; font-size: 10.5px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted);
+}
+.poste-caselist { overflow-y: auto; flex: 1; padding: 0 8px 16px; min-height: 0; }
+.poste-caserow {
+  display: block; padding: 8px 10px; margin-bottom: 1px; border-radius: 6px;
+  text-decoration: none; color: inherit;
+}
+.poste-caserow:hover { background: rgba(127, 127, 127, .08); }
+.poste-caserow[aria-current="true"] { box-shadow: inset 0 0 0 1px var(--border); }
+.poste-caserow .ref { font-family: ui-monospace, monospace; font-size: 12.5px; font-weight: 500; }
+.poste-caserow .sub { display: block; font-size: 11.5px; color: var(--muted); }
+
+.poste-main { min-width: 0; overflow: auto; }
+.poste-head { padding: 4px 20px 0; }
+.poste-titleline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.poste-titleline h1 { font-size: 19px; margin: 0; font-family: ui-monospace, monospace; }
+
+/* The pipeline is state, not narration: where the case is, and what is left. */
+.poste-pipeline { display: flex; flex-wrap: wrap; gap: 0; margin: 14px 0 0; padding: 0; list-style: none; }
+.poste-pipeline li {
+  display: flex; align-items: center; gap: 7px; font-size: 12.5px;
+  padding: 6px 13px; border: 1px solid var(--border); border-right: 0; color: var(--muted);
+}
+.poste-pipeline li:first-child { border-radius: 6px 0 0 6px; }
+.poste-pipeline li:last-child { border-radius: 0 6px 6px 0; border-right: 1px solid var(--border); }
+.poste-pipeline .num {
+  width: 17px; height: 17px; border-radius: 50%; flex: none; display: grid;
+  place-items: center; font-size: 10.5px; font-weight: 600;
+  background: var(--border); color: var(--fg);
+}
+.poste-pipeline li.done { color: var(--fg); }
+.poste-pipeline li.now { color: var(--fg); font-weight: 600; }
+.poste-pipeline li.now .num { background: var(--fg); color: var(--bg); }
+
+.poste-section { padding: 18px 20px 0; }
+.poste-section h2 {
+  font-size: 12px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 10px; font-weight: 600;
+}
+.poste-metrics {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.poste-metrics > div { padding: 11px 14px; border-right: 1px solid var(--border); }
+.poste-metrics > div:last-child { border-right: 0; }
+.poste-metrics .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.poste-metrics .v { font-size: 20px; font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.poste-metrics .v.red { color: var(--danger-fg); }
+.poste-metrics .v.amber { color: var(--warn-fg); }
+
+.poste-tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+.poste-tablewrap table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.poste-tablewrap td { padding: 8px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.poste-tablewrap tr:last-child td { border-bottom: 0; }
+.poste-tablewrap .val { font-family: ui-monospace, monospace; }
+.poste-tablewrap .src { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.poste-fix {
+  padding: 3px 9px; font-size: 12px; white-space: nowrap;
+  background: transparent; color: inherit; border: 1px solid var(--border);
+}
+
+/* Progress. The scale comes from the API with each job, so nothing here hard-codes steps. */
+.poste-agents { border: 1px solid var(--border); border-radius: 8px; }
+.poste-agent {
+  display: grid; grid-template-columns: 12px 1fr; grid-template-areas: "pip who" ". bar";
+  gap: 5px 12px; align-items: center; padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.poste-agent:last-child { border-bottom: 0; }
+.poste-agent .pip { grid-area: pip; width: 12px; height: 12px; border-radius: 50%; background: var(--border); }
+.poste-agent .pip.run { background: var(--fg); animation: poste-pulse 1.4s ease-in-out infinite; }
+@keyframes poste-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .poste-agent .pip.run { animation: none; } }
+.poste-agent .who { grid-area: who; }
+.poste-agent .name { font-weight: 500; }
+.poste-agent .stage { font-size: 12px; color: var(--muted); }
+.poste-agent .track {
+  grid-area: bar; position: relative; height: 5px; border-radius: 3px;
+  background: var(--border); overflow: hidden;
+}
+.poste-agent .fill {
+  position: absolute; inset: 0 auto 0 0; background: var(--fg);
+  border-radius: 3px; transition: width .45s linear;
+}
+
+.poste-gate {
+  margin: 16px 20px 28px; padding: 13px 15px;
+  border: 1px solid var(--border); border-left: 3px solid var(--fg); border-radius: 8px;
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+}
+.poste-gate p { margin: 0; font-size: 12.5px; max-width: 52ch; }
+.poste-gate button { margin-left: auto; }
+
+.poste-side {
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+.poste-tabs { display: flex; gap: 4px; padding: 6px 6px 0; border-bottom: 1px solid var(--border); }
+.poste-tabs button {
+  background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent;
+  padding: 7px 11px 8px; margin-bottom: -1px; font-size: 12.5px; align-self: auto;
+}
+.poste-tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); font-weight: 600; }
+.poste-close { margin-left: auto; font-size: 17px; }
+.poste-sidebody { overflow-y: auto; padding: 14px; flex: 1; min-height: 0; }
+.poste-field { font-size: 15px; font-weight: 600; }
+/* The pane is a form in a narrow column: labels sit above their field, not beside it. */
+.poste-sidebody label { display: block; margin: 12px 0 4px; font-size: 12px; color: var(--muted); }
+.poste-sidebody input[type="text"],
+.poste-sidebody textarea { width: 100%; }
+.poste-sidebody blockquote { margin-top: 12px; }
+.poste-downloads { display: flex; flex-wrap: wrap; gap: 1rem; }
+.poste-reopen { position: fixed; right: 14px; bottom: 14px; }
+
+@media (max-width: 1080px) {
+  .poste, .poste.collapsed { grid-template-columns: 1fr; height: auto; }
+  .poste-grip { display: none; }
+  .poste-rail { border-right: 0; border-bottom: 1px solid var(--border); }
+  .poste-caselist { max-height: 200px; }
+  .poste-side { border-left: 0; border-top: 1px solid var(--border); }
+  .poste.collapsed .poste-side { display: flex; }
+}
