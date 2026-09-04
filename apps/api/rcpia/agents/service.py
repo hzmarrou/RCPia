@@ -57,7 +57,8 @@ from rcpia.core.models import (
 )
 from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.rerank import Reranker
-from rcpia.jobs.models import JobOutcome
+from rcpia.jobs.milestones import MilestoneWriter, no_milestones
+from rcpia.jobs.models import JobOutcome, RunStep
 from rcpia.storage.base import BlobStore, StorageError
 from rcpia.storage.keys import pi_session_key
 
@@ -98,6 +99,7 @@ async def run_agent(
     blobs: BlobStore,
     embedder: Embedder | None = None,
     reranker: Reranker | None = None,
+    milestones: MilestoneWriter = no_milestones,
 ) -> JobOutcome | None:
     """Run the agent named in the job payload. Returns None on success.
 
@@ -145,6 +147,11 @@ async def run_agent(
             "l'extraction doit avoir été exécutée avant l'analyse."
         )
 
+    # Four steps are reported from here on. Each is written before the work it names, in
+    # its own transaction, so a display shows what the run is doing rather than what it
+    # last finished. `no_milestones` by default: nothing here depends on being watched.
+    await milestones(RunStep.BUNDLE)
+
     try:
         built = await build_bundle(
             session,
@@ -167,6 +174,7 @@ async def run_agent(
         return JobOutcome(status=JobStatus.waiting_for_user, error_message=blocking)
 
     run_id = uuid.uuid4()
+    await milestones(RunStep.REASONING)
     try:
         result = await adapter.run(
             bundle=built.bundle,
@@ -204,6 +212,8 @@ async def run_agent(
         )
         return _retryable(str(exc))
 
+    await milestones(RunStep.CHECKING)
+
     # The transcript is archived whether the answer turns out to be usable or not: a
     # rejected answer is exactly the case where someone will want to read what was said.
     archived = await _archive_session(
@@ -230,6 +240,8 @@ async def run_agent(
         # A model that answered badly once may answer correctly next time, so this is
         # worth retrying — but only within the job's own attempt budget.
         return _retryable(str(exc))
+
+    await milestones(RunStep.RECORDING)
 
     run = AgentRun(
         id=run_id,

@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rcpia.core.models import AnalysisJob, CancerType, Case, JobStatus, Organization
 from rcpia.jobs import service
-from rcpia.jobs.models import JobOutcome, JobType, retry_delay
+from rcpia.jobs.milestones import MilestoneReporter
+from rcpia.jobs.models import AGENT_STEPS, JobOutcome, JobType, RunStep, retry_delay
 from rcpia.jobs.worker import Worker
 
 
@@ -788,3 +789,99 @@ async def test_run_forever_stops_when_asked(
 @pytest.mark.parametrize("status", [JobStatus.completed, JobStatus.cancelled, JobStatus.failed])
 def test_terminal_statuses_are_declared(status: JobStatus) -> None:
     assert status in service.TERMINAL_STATUSES
+
+
+# --------------------------------------------------------------------------------------
+# Reporting progress
+# --------------------------------------------------------------------------------------
+
+
+async def test_a_milestone_is_visible_while_the_job_is_still_running(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """**The property the whole design turns on.**
+
+    A handler holds one transaction open for its entire run, so a milestone written on the
+    handler's session would only become visible when the job ended -- at which point it is
+    a claim about work that is already over. The reporter uses its own session, and this
+    reads the row from a third connection while the handler is still working.
+    """
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+
+    seen: list[str | None] = []
+
+    async def slow_handler(session: AsyncSession, job: AnalysisJob) -> None:
+        assert job.claim_token is not None
+        report = MilestoneReporter(session_factory, job.id, job.claim_token)
+        for step in (RunStep.BUNDLE, RunStep.REASONING):
+            await report(step)
+            async with session_factory() as observer:
+                current = await observer.get(AnalysisJob, job_id)
+                assert current is not None
+                seen.append(current.milestone)
+
+    worker = Worker(session_factory, name="test-worker")
+    worker.register(JobType.PARSE_DOSSIER, slow_handler)
+
+    await worker.run_once()
+
+    assert seen == [RunStep.BUNDLE, RunStep.REASONING]
+    finished = await read_job(session_factory, job_id)
+    assert finished.status is JobStatus.completed
+    assert finished.milestone_at is not None
+
+
+async def test_a_stale_worker_cannot_report_progress_on_a_reclaimed_job(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Fenced like every other write. A worker that lost its lease reporting `bundle` over
+    the run that replaced it would show the newer run going backwards."""
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+
+    stale = await claim(session_factory, "worker-a")
+    assert stale is not None and stale.claim_token is not None
+    await expire_lease(session_factory, job_id)
+    fresh = await claim(session_factory, "worker-b")
+    assert fresh is not None and fresh.claim_token is not None
+
+    async with session_factory() as session:
+        await service.record_milestone(session, job_id, fresh.claim_token, RunStep.REASONING)
+        await session.commit()
+
+    async with session_factory() as session:
+        with pytest.raises(service.JobTransitionError):
+            await service.record_milestone(session, job_id, stale.claim_token, RunStep.BUNDLE)
+
+    assert (await read_job(session_factory, job_id)).milestone == RunStep.REASONING
+
+
+async def test_a_lost_claim_costs_the_progress_report_and_nothing_else(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The reporter swallows what the service refuses.
+
+    Progress is cosmetic and an opinion is not: a run that can no longer report where it
+    is must still finish, archive its transcript and store its answer.
+    """
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+
+    job = await claim(session_factory, "worker-a")
+    assert job is not None
+    await expire_lease(session_factory, job_id)
+    assert await claim(session_factory, "worker-b") is not None
+
+    assert job.claim_token is not None
+    report = MilestoneReporter(session_factory, job_id, job.claim_token)
+
+    await report(RunStep.BUNDLE)  # must not raise
+
+    assert (await read_job(session_factory, job_id)).milestone is None
+
+
+async def test_every_agent_step_is_short_enough_for_the_column() -> None:
+    """The steps reach the database as text in a bounded column, and they are constants:
+    a step too long to store would fail at the one moment nobody is watching."""
+    assert all(len(step) <= 50 for step in AGENT_STEPS)

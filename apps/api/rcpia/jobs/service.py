@@ -219,6 +219,30 @@ async def extend_lease(
     )
 
 
+async def record_milestone(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    claim_token: uuid.UUID,
+    step: str,
+) -> None:
+    """Record which step a running job is on, for a progress display to read.
+
+    Fenced like every other transition: a worker whose lease expired cannot rewrite the
+    progress of the run that replaced it, which would show the newer run going backwards.
+
+    This never changes `status`. A milestone is a claim about the present, and the only
+    thing that decides whether an opinion exists is the outcome the handler returns.
+    """
+    await _transition(
+        session,
+        job_id,
+        claim_token,
+        from_statuses=(JobStatus.running,),
+        values={"milestone": step, "milestone_at": DB_CLOCK},
+        action="record a milestone on",
+    )
+
+
 async def complete(session: AsyncSession, job_id: uuid.UUID, claim_token: uuid.UUID) -> None:
     """Mark a job finished. The last error message is kept as attempt history."""
     await _transition(

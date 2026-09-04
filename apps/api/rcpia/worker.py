@@ -25,6 +25,7 @@ from rcpia.core.db import get_session_factory
 from rcpia.core.models import AnalysisJob, Case, JobStatus
 from rcpia.evidence.embedding import EmbeddingError, build_embedder
 from rcpia.evidence.rerank import build_reranker
+from rcpia.jobs.milestones import MilestoneReporter, MilestoneWriter, no_milestones
 from rcpia.jobs.models import JobOutcome, JobType
 from rcpia.jobs.service import enqueue
 from rcpia.jobs.worker import Worker
@@ -95,8 +96,11 @@ def build_worker() -> Worker:
         for panel_id in await panel.reconcile(session):
             logger.info("panel %s reconciled; synthesis queued", panel_id)
 
+    # Bound once and shared with the milestone reporters below, which need a session of
+    # their own: they write while a handler still holds its transaction open.
+    session_factory = get_session_factory()
     worker = Worker(
-        get_session_factory(),
+        session_factory,
         job_types=_worker_job_types(),
         housekeeping=reconcile_panels,
     )
@@ -146,9 +150,16 @@ def build_worker() -> Worker:
         return outcome
 
     async def handle_agent(session, job: AnalysisJob) -> JobOutcome | None:
+        # The claim token travels on the row the worker handed us, so the reporter is
+        # fenced like every other write against this job: a worker that lost its lease
+        # cannot report progress over the run that replaced it.
+        milestones: MilestoneWriter = no_milestones
+        if job.claim_token is not None:
+            milestones = MilestoneReporter(session_factory, job.id, job.claim_token)
+
         outcome = await run_agent(
             session, job, adapter=adapter, blobs=blobs,
-            embedder=embedder, reranker=reranker,
+            embedder=embedder, reranker=reranker, milestones=milestones,
         )
 
         # A specialist that has just settled may have been the last one a panel was waiting
