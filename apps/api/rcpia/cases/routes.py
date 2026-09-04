@@ -9,11 +9,13 @@ from typing import Annotated
 
 from fastapi import Depends, File, HTTPException, Response, UploadFile, status
 
+from rcpia.agents.schemas import SYNTHESIS_ROLE
 from rcpia.auth.dependencies import CurrentUser, SessionDep, protected_router
 from rcpia.cases import service
 from rcpia.cases.models import CaseCreate, CaseDetail, CaseRead, DocumentRead, JobActivity
 from rcpia.cases.uploads import MAX_UPLOAD_BYTES, UploadRejected
 from rcpia.core.models import UserRole
+from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.jobs.models import STEPS_BY_JOB_TYPE
 from rcpia.storage.base import BlobStore, StorageError, checksum
 from rcpia.storage.factory import get_blob_store
@@ -77,7 +79,8 @@ async def read_activity(
             job_type=job.job_type,
             status=job.status,
             # One named key, never the payload: it also carries the clinical question.
-            agent_role=_text_or_none(job.payload.get("agent_role")),
+            # And only a role RCPia itself defines — see `_known_role`.
+            agent_role=_known_role(job.payload.get("agent_role")),
             milestone=job.milestone,
             milestone_at=job.milestone_at,
             steps=list(STEPS_BY_JOB_TYPE.get(job.job_type, ())),
@@ -163,9 +166,22 @@ async def download_document(
     )
 
 
-def _text_or_none(value: object) -> str | None:
-    """A payload is JSON a caller once supplied, so a key is not a promise of a string."""
-    return value if isinstance(value, str) else None
+# The only roles this endpoint will echo. `rcp_synthesis` is not an `AGENT_ROLES` member
+# but is dispatched as an ordinary agent job, and dropping it would leave the synthesis row
+# anonymous exactly when the board is waiting on it.
+REPORTABLE_ROLES = AGENT_ROLES | {SYNTHESIS_ROLE}
+
+
+def _known_role(value: object) -> str | None:
+    """The role, but only if RCPia defines it.
+
+    A payload is JSON a caller once supplied, so a key is neither a promise of a string nor
+    of a role that exists. `start_analysis` constrains a single-agent request to a
+    filesystem-safe name rather than to this set, so `patient_mohamed_elamrani` reaches the
+    payload and is refused later by the worker — after sitting in a queue this endpoint
+    polls several times a minute. Anything unrecognised is reported as no role at all.
+    """
+    return value if isinstance(value, str) and value in REPORTABLE_ROLES else None
 
 
 async def _load_case(session: SessionDep, user: CurrentUser, case_id: uuid.UUID):

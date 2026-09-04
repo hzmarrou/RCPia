@@ -16,6 +16,7 @@ import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from rcpia.agents.schemas import SYNTHESIS_ROLE
 from rcpia.auth import security, throttle
 from rcpia.core.db import get_session
 from rcpia.core.models import (
@@ -701,6 +702,49 @@ async def test_a_payload_without_a_usable_role_reports_no_role(
     listed = (await client.get(f"/cases/{case['id']}/activity")).json()
 
     assert [job["agent_role"] for job in listed] == [None, None]
+
+
+async def test_only_a_role_rcpia_defines_is_echoed_back(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """**A role name is caller-supplied text until something checks it.**
+
+    `start_analysis` constrains a single-agent request to a filesystem-safe name, not to a
+    known speciality, so free text a person typed reaches the job payload and is only
+    refused later by the worker -- after sitting in a queue this endpoint polls several
+    times a minute. A name is exactly the kind of thing someone types into the wrong box.
+    """
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory,
+        case["id"],
+        user,
+        payload={"agent_role": "patient_mohamed_elamrani"},
+    )
+
+    response = await client.get(f"/cases/{case['id']}/activity")
+
+    [job] = response.json()
+    assert job["agent_role"] is None
+    assert "elamrani" not in response.text.lower()
+
+
+async def test_the_synthesis_row_keeps_its_name(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`rcp_synthesis` is not an `AGENT_ROLES` member but is dispatched as an ordinary
+    agent job. Filtering it out would leave the synthesis anonymous in the feed exactly
+    when the board is waiting on it."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(session_factory, case["id"], user, payload={"agent_role": SYNTHESIS_ROLE})
+
+    [job] = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert job["agent_role"] == SYNTHESIS_ROLE
 
 
 async def test_another_organizations_activity_is_not_reachable(
