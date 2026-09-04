@@ -18,6 +18,14 @@ export function middleware(request: NextRequest) {
   return NextResponse.redirect(login);
 }
 
+/**
+ * Every private area, and adding one here is part of adding the route.
+ *
+ * A page left out of this list still refuses to show anything — the API holds the data and
+ * answers 401 — but the refusal surfaces as "404, this page could not be found" rather than
+ * a redirect to the login form, so a signed-out clinician is told the case does not exist.
+ * `/poste` shipped that way for exactly one commit.
+ */
 export const config = {
-  matcher: ["/dashboard/:path*", "/cases/:path*"],
+  matcher: ["/dashboard/:path*", "/cases/:path*", "/poste/:path*"],
 };
