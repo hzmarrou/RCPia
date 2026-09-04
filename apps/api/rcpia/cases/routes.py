@@ -9,11 +9,14 @@ from typing import Annotated
 
 from fastapi import Depends, File, HTTPException, Response, UploadFile, status
 
+from rcpia.agents.schemas import SYNTHESIS_ROLE
 from rcpia.auth.dependencies import CurrentUser, SessionDep, protected_router
 from rcpia.cases import service
-from rcpia.cases.models import CaseCreate, CaseDetail, CaseRead, DocumentRead
+from rcpia.cases.models import CaseCreate, CaseDetail, CaseRead, DocumentRead, JobActivity
 from rcpia.cases.uploads import MAX_UPLOAD_BYTES, UploadRejected
 from rcpia.core.models import UserRole
+from rcpia.corpus.vocabulary import AGENT_ROLES
+from rcpia.jobs.models import STEPS_BY_JOB_TYPE
 from rcpia.storage.base import BlobStore, StorageError, checksum
 from rcpia.storage.factory import get_blob_store
 
@@ -56,6 +59,36 @@ async def read_case(case_id: uuid.UUID, session: SessionDep, user: CurrentUser) 
         **CaseRead.model_validate(case).model_dump(),
         documents=[DocumentRead.model_validate(document) for document in documents],
     )
+
+
+@router.get("/{case_id}/activity", response_model=list[JobActivity])
+async def read_activity(
+    case_id: uuid.UUID, session: SessionDep, user: CurrentUser
+) -> list[JobActivity]:
+    """What is still running on this case, and which step each piece is on.
+
+    A separate route rather than a field on `CaseDetail`: this is what a progress display
+    polls, several times a minute, and it has no use for the document list it would drag
+    along each time.
+    """
+    case = await _load_case(session, user, case_id)
+    jobs = await service.list_activity(session, case=case)
+    return [
+        JobActivity(
+            id=job.id,
+            job_type=job.job_type,
+            status=job.status,
+            # One named key, never the payload: it also carries the clinical question.
+            # And only a role RCPia itself defines — see `_known_role`.
+            agent_role=_known_role(job.payload.get("agent_role")),
+            milestone=job.milestone,
+            milestone_at=job.milestone_at,
+            steps=list(STEPS_BY_JOB_TYPE.get(job.job_type, ())),
+            started_at=job.started_at,
+            created_at=job.created_at,
+        )
+        for job in jobs
+    ]
 
 
 @router.post(
@@ -131,6 +164,24 @@ async def download_document(
             "Cache-Control": "no-store",
         },
     )
+
+
+# The only roles this endpoint will echo. `rcp_synthesis` is not an `AGENT_ROLES` member
+# but is dispatched as an ordinary agent job, and dropping it would leave the synthesis row
+# anonymous exactly when the board is waiting on it.
+REPORTABLE_ROLES = AGENT_ROLES | {SYNTHESIS_ROLE}
+
+
+def _known_role(value: object) -> str | None:
+    """The role, but only if RCPia defines it.
+
+    A payload is JSON a caller once supplied, so a key is neither a promise of a string nor
+    of a role that exists. `start_analysis` constrains a single-agent request to a
+    filesystem-safe name rather than to this set, so `patient_mohamed_elamrani` reaches the
+    payload and is refused later by the worker — after sitting in a queue this endpoint
+    polls several times a minute. Anything unrecognised is reported as no role at all.
+    """
+    return value if isinstance(value, str) and value in REPORTABLE_ROLES else None
 
 
 async def _load_case(session: SessionDep, user: CurrentUser, case_id: uuid.UUID):

@@ -691,6 +691,20 @@ class AnalysisJob(TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Which step the handler is on, and when it said so. Progress reporting, and nothing
+    # else depends on it: a job's outcome is `status`, and a milestone is only ever a
+    # claim about what is happening right now.
+    #
+    # It lives here rather than on `agent_runs` because a run is recorded once it has
+    # ended — see `AgentRun` — so there is no in-flight row to write to. The job is the
+    # only thing that exists while the work does.
+    #
+    # Written in its own transaction (see `jobs.milestones`), never in the handler's: the
+    # handler holds one transaction open for the whole run, so a milestone written inside
+    # it would become visible at the moment it stopped being true.
+    milestone: Mapped[str | None] = mapped_column(String(50))
+    milestone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     __table_args__ = (
         ForeignKeyConstraint(
             ["case_id", "organization_id"],

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.cases.uploads import detect_dossier_type
 from rcpia.core.models import (
+    AnalysisJob,
     AuditEvent,
     Case,
     CaseStatus,
@@ -25,7 +26,7 @@ from rcpia.core.models import (
     User,
 )
 from rcpia.jobs import service as jobs
-from rcpia.jobs.models import JobType
+from rcpia.jobs.models import LIVE_JOB_STATUSES, JobType
 from rcpia.storage import keys
 from rcpia.storage.base import BlobInfo, BlobStore, StorageError
 
@@ -109,6 +110,34 @@ async def list_documents(
         sa.select(UploadedDocument)
         .where(UploadedDocument.case_id == case.id)
         .order_by(UploadedDocument.created_at)
+    )
+    return list(result.scalars().all())
+
+
+async def list_activity(session: AsyncSession, *, case: Case) -> list[AnalysisJob]:
+    """The unfinished work on this case, oldest first.
+
+    Scoped by organization like every other read here: the composite condition is what
+    stops a case id from another organization returning that organization's queue.
+
+    Ordered by creation so a display keeps a stable row order while jobs come and go —
+    ordering by `milestone_at` would make rows jump around as each one reported.
+
+    **And by id after it, because creation time alone is all ties here.** `created_at`
+    defaults to `now()`, which is PostgreSQL's *transaction* timestamp, and a panel
+    enqueues all of its roles in one transaction — so eight agent jobs carry one identical
+    timestamp. With every row tied, the order is whatever the plan yields, and each
+    milestone write rewrites the tuple and moves it: the rows would reshuffle between
+    polls, which is exactly what ordering by creation was meant to prevent.
+    """
+    result = await session.execute(
+        sa.select(AnalysisJob)
+        .where(
+            AnalysisJob.case_id == case.id,
+            AnalysisJob.organization_id == case.organization_id,
+            AnalysisJob.status.in_(LIVE_JOB_STATUSES),
+        )
+        .order_by(AnalysisJob.created_at, AnalysisJob.id)
     )
     return list(result.scalars().all())
 

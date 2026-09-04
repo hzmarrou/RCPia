@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from rcpia.core.models import CancerType, CaseStatus, ParseStatus
+from rcpia.core.models import CancerType, CaseStatus, JobStatus, ParseStatus
 
 
 class CaseCreate(BaseModel):
@@ -50,3 +50,35 @@ class CaseRead(BaseModel):
 
 class CaseDetail(CaseRead):
     documents: list[DocumentRead] = []
+
+
+class JobActivity(BaseModel):
+    """One unfinished piece of work on a case, and the step it is on.
+
+    **What a progress display reads instead of guessing.** A bar driven by elapsed time has
+    to assume a duration, and an agent run has none worth assuming: the same speciality on
+    the same case takes forty seconds or four minutes depending on the provider's load.
+
+    `milestone` is null until the handler reports one — a queued job has not started, and a
+    handler that reports nothing never will. Null means "not known", never "at the start".
+
+    Only unfinished work appears here. What an agent *concluded* is an `AgentRun`, served by
+    `/cases/{id}/analysis`, and it stays readable long after the job that produced it is
+    gone; mixing the two would put a live claim and a permanent record in one list.
+    """
+
+    id: uuid.UUID
+    job_type: str
+    status: JobStatus
+    # Which speciality this run is for, so a panel of eight can be shown as eight rows.
+    # Read from the job payload, one named key at a time: the payload also carries the
+    # clinical question, which is dossier text and has no business in a progress poll.
+    agent_role: str | None
+    milestone: str | None
+    milestone_at: datetime | None
+    # The scale `milestone` sits on, in order, for this kind of job. Sent with the job so a
+    # client never hard-codes the sequence: a renamed or added step moves the scale and the
+    # value together. Empty for work that reports no steps.
+    steps: list[str]
+    started_at: datetime | None
+    created_at: datetime

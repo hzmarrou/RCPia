@@ -37,7 +37,7 @@ from rcpia.core.models import (
     CaseLedgerVersion,
     JobStatus,
 )
-from rcpia.jobs.models import JobType
+from rcpia.jobs.models import LIVE_JOB_STATUSES, JobType
 from rcpia.jobs.service import enqueue
 
 logger = logging.getLogger(__name__)
@@ -58,8 +58,6 @@ DEFAULT_MAX_EXTRACTION_AGE = timedelta(hours=1)
 # still coming.
 TERMINAL_JOB_STATUSES = (JobStatus.completed, JobStatus.failed, JobStatus.cancelled)
 
-# Statuses in which a job is still going to produce an answer.
-LIVE_JOB_STATUSES = (JobStatus.queued, JobStatus.running, JobStatus.waiting_for_user)
 
 
 class PanelConflict(Exception):

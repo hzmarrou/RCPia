@@ -8,6 +8,7 @@ case is reachable from another organization.
 import io
 import uuid
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from rcpia.agents.schemas import SYNTHESIS_ROLE
 from rcpia.auth import security, throttle
 from rcpia.core.db import get_session
 from rcpia.core.models import (
@@ -28,6 +30,7 @@ from rcpia.core.models import (
     User,
     UserRole,
 )
+from rcpia.jobs.models import AGENT_STEPS, JobType, RunStep
 from rcpia.main import app
 from rcpia.storage.base import checksum
 from rcpia.storage.factory import get_blob_store
@@ -555,3 +558,287 @@ async def test_downloading_an_unknown_document_is_not_found(
 
     response = await client.get(f"/cases/{case['id']}/documents/{uuid.uuid4()}/content")
     assert response.status_code == 404
+
+
+# --------------------------------------------------------------------------------------
+# Reporting what is still running
+# --------------------------------------------------------------------------------------
+
+
+async def add_job(
+    factory: async_sessionmaker[AsyncSession],
+    case_id: str,
+    user: User,
+    **overrides: object,
+) -> uuid.UUID:
+    async with factory() as session:
+        job = AnalysisJob(
+            case_id=uuid.UUID(case_id),
+            organization_id=user.organization_id,
+            job_type=overrides.pop("job_type", JobType.RUN_AGENT),  # type: ignore[arg-type]
+            payload=overrides.pop("payload", {}),  # type: ignore[arg-type]
+            status=overrides.pop("status", JobStatus.running),  # type: ignore[arg-type]
+            **overrides,  # type: ignore[arg-type]
+        )
+        session.add(job)
+        await session.commit()
+        return job.id
+
+
+async def test_the_activity_of_a_case_names_the_step_each_run_is_on(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory,
+        case["id"],
+        user,
+        payload={"agent_role": "medical_oncology"},
+        milestone=RunStep.REASONING,
+        milestone_at=datetime.now(UTC),
+    )
+
+    response = await client.get(f"/cases/{case['id']}/activity")
+
+    assert response.status_code == 200
+    [job] = response.json()
+    assert job["job_type"] == JobType.RUN_AGENT
+    assert job["agent_role"] == "medical_oncology"
+    assert job["milestone"] == RunStep.REASONING
+    assert job["milestone_at"] is not None
+
+
+async def test_a_run_that_has_not_reported_yet_says_so_rather_than_starting_the_bar(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Null is "not known", never "at the first step". A queued job has not begun, and a
+    display that renders an unreported job as `bundle` invents the same progress the
+    milestones exist to replace."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory,
+        case["id"],
+        user,
+        payload={"agent_role": "pathology"},
+        status=JobStatus.queued,
+    )
+
+    [job] = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert job["milestone"] is None and job["milestone_at"] is None
+
+
+async def test_finished_work_leaves_the_activity_list(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """What an agent concluded is an `AgentRun` and outlives its job. This endpoint is
+    only about what is still moving, so a completed job disappears from it."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory,
+        case["id"],
+        user,
+        payload={"agent_role": "radiology"},
+        status=JobStatus.completed,
+        milestone=RunStep.RECORDING,
+    )
+    await add_job(
+        session_factory, case["id"], user, payload={"agent_role": "urology_oncology"}
+    )
+
+    listed = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert [job["agent_role"] for job in listed] == ["urology_oncology"]
+
+
+async def test_the_clinical_question_does_not_travel_with_the_progress_report(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """**The payload is dossier-adjacent and this endpoint is polled constantly.**
+
+    A job payload carries the clinical question the agent was asked, which is written by
+    the uploader about a patient. Returning the payload wholesale would put it in every
+    progress poll, in browser caches and in any proxy log along the way — so the route
+    reads one named key and never the payload itself.
+    """
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory,
+        case["id"],
+        user,
+        payload={
+            "agent_role": "urology_oncology",
+            "clinical_question": "MOTIF_CONFIDENTIEL_DU_DOSSIER",
+        },
+    )
+
+    response = await client.get(f"/cases/{case['id']}/activity")
+
+    assert "MOTIF_CONFIDENTIEL_DU_DOSSIER" not in response.text
+    assert "payload" not in response.text
+
+
+async def test_a_payload_without_a_usable_role_reports_no_role(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Parsing and extraction jobs carry no role, and a payload is JSON someone supplied:
+    a present key is not a promise of a string."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory, case["id"], user, job_type=JobType.PARSE_DOSSIER, payload={}
+    )
+    await add_job(session_factory, case["id"], user, payload={"agent_role": 42})
+
+    listed = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert [job["agent_role"] for job in listed] == [None, None]
+
+
+async def test_only_a_role_rcpia_defines_is_echoed_back(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """**A role name is caller-supplied text until something checks it.**
+
+    `start_analysis` constrains a single-agent request to a filesystem-safe name, not to a
+    known speciality, so free text a person typed reaches the job payload and is only
+    refused later by the worker -- after sitting in a queue this endpoint polls several
+    times a minute. A name is exactly the kind of thing someone types into the wrong box.
+    """
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory,
+        case["id"],
+        user,
+        payload={"agent_role": "patient_mohamed_elamrani"},
+    )
+
+    response = await client.get(f"/cases/{case['id']}/activity")
+
+    [job] = response.json()
+    assert job["agent_role"] is None
+    assert "elamrani" not in response.text.lower()
+
+
+async def test_the_synthesis_row_keeps_its_name(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`rcp_synthesis` is not an `AGENT_ROLES` member but is dispatched as an ordinary
+    agent job. Filtering it out would leave the synthesis anonymous in the feed exactly
+    when the board is waiting on it."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(session_factory, case["id"], user, payload={"agent_role": SYNTHESIS_ROLE})
+
+    [job] = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert job["agent_role"] == SYNTHESIS_ROLE
+
+
+async def test_another_organizations_activity_is_not_reachable(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(session_factory, case["id"], user, payload={"agent_role": "pathology"})
+
+    outsider = await make_user(session_factory)
+    await sign_in(client, outsider)
+
+    assert (await client.get(f"/cases/{case['id']}/activity")).status_code == 404
+
+
+async def test_the_activity_carries_the_scale_its_step_belongs_on(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A client must never hard-code the sequence: renaming a step or adding a fifth would
+    then drop every bar to "unknown" with nothing in the response to signal it."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory,
+        case["id"],
+        user,
+        payload={"agent_role": "pathology"},
+        milestone=RunStep.CHECKING,
+    )
+
+    [job] = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert job["steps"] == list(AGENT_STEPS)
+    assert job["milestone"] in job["steps"]
+
+
+async def test_work_that_reports_no_steps_offers_no_scale(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Parsing and extraction report nothing yet. An empty scale says so; borrowing the
+    agent scale would draw a four-step bar for work that has no steps."""
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+    await add_job(
+        session_factory, case["id"], user, job_type=JobType.PARSE_DOSSIER, payload={}
+    )
+
+    [job] = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert job["steps"] == []
+
+
+async def test_jobs_queued_together_come_back_in_a_stable_order(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """**A panel enqueues every role in one transaction**, and `created_at` defaults to
+    `now()` -- PostgreSQL's transaction timestamp -- so all of those rows carry one
+    identical value. Ordering by it alone leaves the result entirely to the plan, and each
+    milestone write rewrites the tuple and moves it: the rows reshuffle between polls,
+    which is what ordering by creation was supposed to prevent.
+    """
+    user = await make_user(session_factory)
+    await sign_in(client, user)
+    case = await create_case(client)
+
+    async with session_factory() as session:
+        for role in ("pathology", "radiology", "medical_oncology", "urology_oncology"):
+            session.add(
+                AnalysisJob(
+                    case_id=uuid.UUID(case["id"]),
+                    organization_id=user.organization_id,
+                    job_type=JobType.RUN_AGENT,
+                    payload={"agent_role": role},
+                    status=JobStatus.running,
+                )
+            )
+        await session.commit()
+
+    first = (await client.get(f"/cases/{case['id']}/activity")).json()
+    stamps = {job["created_at"] for job in first}
+    assert len(stamps) == 1, "the fixture must reproduce the tie this test is about"
+
+    # Move a row the way a milestone write does, then read again.
+    async with session_factory() as session:
+        await session.execute(
+            sa.update(AnalysisJob)
+            .where(AnalysisJob.id == uuid.UUID(first[-1]["id"]))
+            .values(milestone=RunStep.REASONING, milestone_at=datetime.now(UTC))
+        )
+        await session.commit()
+
+    second = (await client.get(f"/cases/{case['id']}/activity")).json()
+
+    assert [job["id"] for job in second] == [job["id"] for job in first]

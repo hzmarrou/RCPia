@@ -134,6 +134,10 @@ async def claim_next(
             lease_expires_at=DB_CLOCK + lease,
             started_at=sa.func.coalesce(AnalysisJob.started_at, DB_CLOCK),
             attempts=AnalysisJob.attempts + 1,
+            # A new attempt starts over. Carrying the previous one's step forward would
+            # show a run resuming at `reasoning` when it is about to rebuild its bundle.
+            milestone=None,
+            milestone_at=None,
         )
         .returning(AnalysisJob)
     )
@@ -219,6 +223,30 @@ async def extend_lease(
     )
 
 
+async def record_milestone(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    claim_token: uuid.UUID,
+    step: str,
+) -> None:
+    """Record which step a running job is on, for a progress display to read.
+
+    Fenced like every other transition: a worker whose lease expired cannot rewrite the
+    progress of the run that replaced it, which would show the newer run going backwards.
+
+    This never changes `status`. A milestone is a claim about the present, and the only
+    thing that decides whether an opinion exists is the outcome the handler returns.
+    """
+    await _transition(
+        session,
+        job_id,
+        claim_token,
+        from_statuses=(JobStatus.running,),
+        values={"milestone": step, "milestone_at": DB_CLOCK},
+        action="record a milestone on",
+    )
+
+
 async def complete(session: AsyncSession, job_id: uuid.UUID, claim_token: uuid.UUID) -> None:
     """Mark a job finished. The last error message is kept as attempt history."""
     await _transition(
@@ -249,6 +277,11 @@ async def wait_for_user(
         values={
             "status": JobStatus.waiting_for_user,
             "error_message": reason,
+            # Nothing is happening here until a person acts, and `waiting_for_user` is a
+            # live status: the last step reached would otherwise sit in the activity feed
+            # claiming to be in progress for as long as the job stays parked.
+            "milestone": None,
+            "milestone_at": None,
             "claim_token": None,
             "claimed_by": None,
             "lease_expires_at": None,
@@ -290,6 +323,11 @@ async def fail(
             "status": JobStatus.queued,
             "error_message": error,
             "available_at": DB_CLOCK + retry_delay(job.attempts),
+            # Waiting out a backoff, not working. The step it died on stays on a terminal
+            # failure -- "it failed while reasoning" is history worth keeping -- but a job
+            # that is coming back must not report a step it is no longer on.
+            "milestone": None,
+            "milestone_at": None,
         }
 
     await _transition(

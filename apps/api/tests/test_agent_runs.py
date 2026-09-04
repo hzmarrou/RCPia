@@ -48,7 +48,8 @@ from rcpia.core.models import (
     User,
     UserRole,
 )
-from rcpia.jobs.models import JobType
+from rcpia.jobs.milestones import MilestoneWriter, no_milestones
+from rcpia.jobs.models import AGENT_STEPS, JobType, RunStep
 from rcpia.main import app
 from rcpia.storage.base import StorageError
 from rcpia.storage.keys import pi_session_key
@@ -220,12 +221,15 @@ async def execute(
     blobs: LocalBlobStore,
     monkeypatch: pytest.MonkeyPatch,
     mode: str = "ok",
+    milestones: MilestoneWriter = no_milestones,
 ):
     monkeypatch.setenv("RCPIA_FAKE_PI_MODE", mode)
     async with factory() as session:
         job = await session.get(AnalysisJob, job_id)
         assert job is not None
-        outcome = await run_agent(session, job, adapter=adapter, blobs=blobs)
+        outcome = await run_agent(
+            session, job, adapter=adapter, blobs=blobs, milestones=milestones
+        )
         await session.commit()
         return outcome
 
@@ -273,6 +277,23 @@ def test_the_deployed_worker_gives_its_agents_a_retriever(monkeypatch: pytest.Mo
     assert "embedder=embedder" in source and "reranker=reranker" in source, (
         "and hand it to the agent handler"
     )
+
+
+def test_the_deployed_worker_gives_its_agents_a_milestone_reporter() -> None:
+    """Same failure mode as the retriever above, one floor down.
+
+    `run_agent` reports progress to whatever it is handed and defaults to reporting
+    nowhere, so a worker that forgets to pass a reporter runs correctly and silently: every
+    job stays at `milestone = NULL`, and a progress display has nothing to read while
+    looking like it is wired.
+    """
+    import inspect
+
+    from rcpia import worker as worker_module
+
+    source = inspect.getsource(worker_module.build_worker)
+    assert "MilestoneReporter(" in source, "the worker must build a reporter for the job"
+    assert "milestones=milestones" in source, "and hand it to the agent handler"
 
 
 def test_every_wired_agent_folder_has_what_the_adapter_requires() -> None:
@@ -491,6 +512,59 @@ async def test_a_successful_run_is_stored_with_its_input_and_its_transcript(
 
     archived = await blobs.get_bytes(pi_session_key(case.id, "urology_oncology", run.id))
     assert b'"role": "assistant"' in archived
+
+
+async def test_a_run_reports_each_step_before_it_takes_it(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point of the milestones: a display reads what the run is doing now.
+
+    Order is the property, not the count. A step written after its work finished would let
+    the display show `reasoning` while the answer is already stored.
+    """
+    user, case = await seed_case(session_factory)
+    job_id = await agent_job(session_factory, case)
+    reported: list[str] = []
+
+    async def record(step: str) -> None:
+        reported.append(step)
+
+    assert (
+        await execute(session_factory, job_id, adapter, blobs, monkeypatch, milestones=record)
+        is None
+    )
+
+    assert reported == list(AGENT_STEPS)
+
+
+async def test_a_run_that_never_reached_the_model_does_not_claim_to_have_reasoned(
+    session_factory: async_sessionmaker[AsyncSession],
+    adapter: PiAdapter,
+    blobs: LocalBlobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed run stops reporting where it stopped working.
+
+    `crash` fails inside the model call, so the run announced `reasoning` and got no
+    answer. Reporting `checking` or `recording` afterwards would describe work that never
+    happened, on a job that is about to be retried.
+    """
+    user, case = await seed_case(session_factory)
+    job_id = await agent_job(session_factory, case)
+    reported: list[str] = []
+
+    async def record(step: str) -> None:
+        reported.append(step)
+
+    outcome = await execute(
+        session_factory, job_id, adapter, blobs, monkeypatch, mode="crash", milestones=record
+    )
+
+    assert outcome is not None and outcome.status is JobStatus.failed
+    assert reported == [RunStep.BUNDLE, RunStep.REASONING]
 
 
 async def test_the_run_is_visible_in_the_audit_trail(
