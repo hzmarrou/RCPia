@@ -53,17 +53,27 @@ class MilestoneReporter:
         self.claim_token = claim_token
 
     async def __call__(self, step: str) -> None:
-        async with self.session_factory() as session:
-            try:
-                await service.record_milestone(session, self.job_id, self.claim_token, step)
-                await session.commit()
-            except service.JobTransitionError:
-                # The lease expired and another worker owns this job; its progress is the
-                # one a reader should see. This run is finishing work nobody is waiting for.
-                await session.rollback()
-                logger.warning(
-                    "could not record milestone %r on job %s: claim lost", step, self.job_id
-                )
-            except Exception:  # noqa: BLE001 - a progress write must never fail a run
-                await session.rollback()
-                logger.exception("could not record milestone %r on job %s", step, self.job_id)
+        # Everything is inside the guard, opening the session and closing it included. A
+        # database that goes away mid-run -- a failover, or a nightly shutdown landing on a
+        # long panel -- fails here first, and an exception escaping would reach the
+        # worker's catch-all, fail the job and burn an attempt. A cosmetic write would then
+        # have cost a multi-minute agent run.
+        try:
+            async with self.session_factory() as session:
+                try:
+                    await service.record_milestone(
+                        session, self.job_id, self.claim_token, step
+                    )
+                    await session.commit()
+                except service.JobTransitionError:
+                    # The lease expired and another worker owns this job; its progress is
+                    # the one a reader should see. This run is finishing work nobody is
+                    # waiting for.
+                    logger.warning(
+                        "could not record milestone %r on job %s: claim lost", step, self.job_id
+                    )
+                    raise
+        except Exception:  # noqa: BLE001 - a progress write must never fail a run
+            # Rolling back is what the session's own exit does; on an invalidated
+            # connection it raises again, which is why nothing here is allowed out.
+            logger.debug("milestone %r not recorded on job %s", step, self.job_id, exc_info=True)
