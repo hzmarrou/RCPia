@@ -86,11 +86,16 @@ peers. **That was wrong.** Timing `build_bundle` directly on one case gives urol
 medical oncology 7.3s and this agent 7.4s; back to back on one worker it finishes 9 seconds —
 11% — behind urology.
 
-The timeout remains unexplained. Both slow events happened while three worker containers were
-being stopped and restarted around them, which points at contention or throttling on the shared
-Azure OpenAI resource rather than at the role — a hypothesis, not a finding. A run that exceeds
-`AGENT_TIMEOUT_SECONDS` is requeued and spends its budget again, and in a panel the synthesis
-waits for it.
+The timeout was not contention. Its own record says
+`silent_for=0s stdout=287028B timeout_layer=process`: the run was emitting output right up to
+the moment it was killed, so it was working rather than waiting on the provider. It simply took
+more than seven times as long as the same agent's successful runs, on one case, and did not
+recur. An earlier version of this document guessed at throttling on the shared Azure resource;
+that guess is wrong and `silent_for=0s` is what rules it out.
+
+Why it ran long is unknown. Nothing was rebuilt to find out: it has happened once, and a run
+that exceeds `AGENT_TIMEOUT_SECONDS` is requeued and spends its budget again, which matters in a
+panel because the synthesis waits for it. Worth revisiting only if it recurs.
 
 ## When it is time to deploy
 
