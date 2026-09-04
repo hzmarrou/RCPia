@@ -1,54 +1,100 @@
-# Onco-gériatrie — wiring status
+# Onco-gériatrie — deployment status
 
-**Wired, dormant, and not convened by anything.** `agents/geriatric_frailty/` exists and the
-agent runs, but no panel includes it: `AUTO_PANEL_ROLES` is empty in `core/config.py`,
-`docker-compose.yml`, `.env.example` and `container-apps.bicep`. It reaches a case only if
-someone asks for it by name through the analysis API, which accepts it because
-`geriatric_frailty` has always been in `AGENT_ROLES`.
+**Deliberately not deployed.** `agents/geriatric_frailty/` does not exist, and that absence is
+the control: the Pi adapter needs an agent folder, so a request naming this role enqueues a job
+that fails rather than producing an opinion. The design document below is written and the agent
+has been run and measured, but nothing in the running system can reach it.
 
-`brain.md` is a byte-for-byte copy of `agent-geriatric-frailty-brain-v1.md`. Keep it that way:
-the design document is the source, the agent folder is the deployment.
+Two things have to happen before the runtime folder is added.
 
-## Why it was wired
+1. **Clinical review of the brain**, and one contradiction in particular (see below).
+2. **An explanation for a 600-second timeout** observed in one of four runs.
 
-Measured 4 September 2026 over 319 valid runs. Generalist agents spend about a third of their
-fourteen guideline slots on geriatric and health-status passages, and cite them at **19%**
-against **56%** for everything else — roughly 3.7 slots per run that never reach the opinion.
+## Why the folder is the control, and not a setting
 
-Handed to this agent instead, the same class of passage lands differently: 14 of 14 slots
-on-topic, 5 cited. The passages were not useless; they were going to the wrong reader.
+An earlier version of this document called the agent "dormant" on the strength of
+`AUTO_PANEL_ROLES` being empty. That was wrong, and a reviewer caught it.
 
-**This does not reclaim the generalists' slots.** `query/builder.py` builds each agent's query
-from the case and that agent's own role — never from panel composition — so adding a
-speciality changes nothing about what medical oncology retrieves. That remains open, and the
-options on it (a larger budget, or a diversity cap in reranking) are retrieval policy.
+`AUTO_PANEL_ROLES` governs only whether a panel is convened **automatically** after extraction.
+It does not restrict what the analysis and panel APIs accept, and `geriatric_frailty` has always
+been a member of `AGENT_ROLES`, so a clinician could request this speciality by name. A
+successful run is then eligible for synthesis and for PPS generation like any other — meaning an
+unreviewed agent's opinion could reach a fiche.
 
-## What was measured, including the part that went wrong
+The only thing that was ever stopping it was the missing folder. So the folder stays missing.
 
-Four runs on REGEN5 cases:
+The same is true of `radiology`, `pathology` and `safety_reviewer`: each has a directory
+containing `.pi/.gitkeep` and nothing else. They are not wired, they cannot run, and the fiche
+is right to list them among the absent specialities.
+
+## The contradiction to resolve
+
+Both lines are in `agent-geriatric-frailty-brain-v1.md`:
+
+- *G8 > 14 : patient "fit" — peut recevoir un traitement standard. Pas d'EGA nécessaire sauf si
+  un domaine spécifique est préoccupant.*
+- *Un score isolé ne suffit pas. Le G8 est un outil de dépistage, pas un diagnostic.*
+
+One declines to conclude from a screening score alone; the other concludes "fit, standard
+treatment" from exactly that. It may be defensible — "G8 > 14, no further assessment" is the
+SIOG and EAU screening position, and the second rule's specific clause concerns G8 ≤ 14 — but
+whether the escape hatch carries that weight is a clinical judgement. It belongs to whoever
+authored the document, not to this repository.
+
+## Why the agent is wanted
+
+Measured 4 September 2026 over 319 valid runs. Runs before 31 August went out with no brain and
+no guideline passages, so they are not evidence about anything and are excluded.
+
+| role | passages | geriatric | geriatric cited | everything else cited |
+|---|---|---|---|---|
+| medical_oncology | 14.0 | 4.6 (33%) | **19%** | 56% |
+| urology_oncology | 14.0 | 4.3 (31%) | 19% | 57% |
+| radiation_oncology | 13.8 | 2.5 (18%) | 28% | 38% |
+
+Generalist agents spend about a third of their fourteen guideline slots on geriatric and
+health-status passages, and cite them at a third the rate of everything else — roughly 3.7 slots
+per run that never reach the opinion. Handed to an agent whose subject they are, the same class
+of passage landed 14 of 14 on-topic with 5 cited. They were not useless; they were going to the
+wrong reader.
+
+Two corrections to the note that prompted this work. The effect is **not**
+medical-oncology-specific: urology sits at 31% against medical oncology's 33%. And a first pass
+of this measurement matched `SIOG` inside
+`EAU - EANM - ESTRO - ESUR - ISUP - SIOG Guidelines on Prostate Cancer` and reported the main
+prostate guideline as the largest geriatric attractor, 132 times, before the classifier was
+corrected to strip society-authorship runs.
+
+**None of this reclaims the generalists' slots.** `query/builder.py` builds each agent's query
+from the case and that agent's own role, never from panel composition, so adding a speciality
+changes nothing about what medical oncology retrieves. That problem is still open, and the
+options on it — a larger passage budget, or a diversity cap in reranking — are retrieval policy.
+
+## What the runs measured, including the conclusion that was wrong
+
+Four runs on REGEN5 cases, with a temporary agent folder that has since been removed:
 
 | run | bundle | reasoning | total | outcome |
 |---|---|---|---|---|
 | REGEN5-12 | 144s | 83s | 227s | succeeded |
 | REGEN5-09 | — | — | >600s | **timed out**, requeued |
 | REGEN5-08 | 10s | 82s | 94s | succeeded |
-| REGEN5-08 (urology, same worker, back to back) | 10s | 73s | 85s | succeeded |
+| REGEN5-08, urology, same worker back to back | 10s | 73s | 85s | succeeded |
 
-The 144-second bundle and the timeout led to a first conclusion that this agent's retrieval was
-twenty times slower than its peers. **That was wrong.** Timing `build_bundle` directly on one
-case gives urology 8.2s, medical oncology 7.3s and this agent 7.4s, and the back-to-back pair
-above puts it 9 seconds — 11% — behind urology end to end.
+The first two led to a conclusion that this agent's retrieval was twenty times slower than its
+peers. **That was wrong.** Timing `build_bundle` directly on one case gives urology 8.2s,
+medical oncology 7.3s and this agent 7.4s; back to back on one worker it finishes 9 seconds —
+11% — behind urology.
 
-Both slow events happened while three worker containers were being stopped and restarted around
-them. The likely cause is contention or throttling on the shared Azure OpenAI resource, not the
-role. It is not proven, and one unexplained 600-second timeout is the reason this stays dormant.
+The timeout remains unexplained. Both slow events happened while three worker containers were
+being stopped and restarted around them, which points at contention or throttling on the shared
+Azure OpenAI resource rather than at the role — a hypothesis, not a finding. A run that exceeds
+`AGENT_TIMEOUT_SECONDS` is requeued and spends its budget again, and in a panel the synthesis
+waits for it.
 
-## Before enabling it anywhere
+## When it is time to deploy
 
-- Establish what the timeout was. A run that exceeds `AGENT_TIMEOUT_SECONDS` is requeued and
-  spends the budget again; in a panel the synthesis waits for it.
-- The brain is `v1` and unreviewed, like every passage in the corpus. This agent's opinions
-  would reach a fiche.
-- `radiology`, `pathology` and `safety_reviewer` are empty stubs in `agents/` — a folder with
-  `.pi/.gitkeep` and nothing else. They are not wired, and the fiche is right to list them as
-  absent.
+Copy the design document to `agents/geriatric_frailty/brain.md` byte for byte — the document is
+the source, the folder is the deployment — and add the two boilerplate files every wired agent
+carries: `.pi/APPEND_SYSTEM.md` (one line, "read brain.md first") and `.pi/settings.json`
+(provider and model). Verify with `diff` rather than by trusting the copy.
