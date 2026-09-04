@@ -11,7 +11,7 @@ from fastapi import Depends, File, HTTPException, Response, UploadFile, status
 
 from rcpia.auth.dependencies import CurrentUser, SessionDep, protected_router
 from rcpia.cases import service
-from rcpia.cases.models import CaseCreate, CaseDetail, CaseRead, DocumentRead
+from rcpia.cases.models import CaseCreate, CaseDetail, CaseRead, DocumentRead, JobActivity
 from rcpia.cases.uploads import MAX_UPLOAD_BYTES, UploadRejected
 from rcpia.core.models import UserRole
 from rcpia.storage.base import BlobStore, StorageError, checksum
@@ -56,6 +56,34 @@ async def read_case(case_id: uuid.UUID, session: SessionDep, user: CurrentUser) 
         **CaseRead.model_validate(case).model_dump(),
         documents=[DocumentRead.model_validate(document) for document in documents],
     )
+
+
+@router.get("/{case_id}/activity", response_model=list[JobActivity])
+async def read_activity(
+    case_id: uuid.UUID, session: SessionDep, user: CurrentUser
+) -> list[JobActivity]:
+    """What is still running on this case, and which step each piece is on.
+
+    A separate route rather than a field on `CaseDetail`: this is what a progress display
+    polls, several times a minute, and it has no use for the document list it would drag
+    along each time.
+    """
+    case = await _load_case(session, user, case_id)
+    jobs = await service.list_activity(session, case=case)
+    return [
+        JobActivity(
+            id=job.id,
+            job_type=job.job_type,
+            status=job.status,
+            # One named key, never the payload: it also carries the clinical question.
+            agent_role=_text_or_none(job.payload.get("agent_role")),
+            milestone=job.milestone,
+            milestone_at=job.milestone_at,
+            started_at=job.started_at,
+            created_at=job.created_at,
+        )
+        for job in jobs
+    ]
 
 
 @router.post(
@@ -131,6 +159,11 @@ async def download_document(
             "Cache-Control": "no-store",
         },
     )
+
+
+def _text_or_none(value: object) -> str | None:
+    """A payload is JSON a caller once supplied, so a key is not a promise of a string."""
+    return value if isinstance(value, str) else None
 
 
 async def _load_case(session: SessionDep, user: CurrentUser, case_id: uuid.UUID):

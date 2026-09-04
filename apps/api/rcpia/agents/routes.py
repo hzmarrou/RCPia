@@ -24,15 +24,13 @@ from rcpia.cases import service as case_service
 from rcpia.core.models import AgentRun, AnalysisJob, AuditEvent, JobStatus, UserRole
 from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.jobs import service as job_service
-from rcpia.jobs.models import JobType
+from rcpia.jobs.models import LIVE_JOB_STATUSES, JobType
 from rcpia.jobs.service import enqueue
 
 router = protected_router(
     UserRole.admin, UserRole.uploader, prefix="/cases/{case_id}/analysis", tags=["analysis"]
 )
 
-# Statuses in which a job is still going to produce an answer.
-LIVE_JOB_STATUSES = (JobStatus.queued, JobStatus.running, JobStatus.waiting_for_user)
 
 
 class AnalysisRequest(BaseModel):

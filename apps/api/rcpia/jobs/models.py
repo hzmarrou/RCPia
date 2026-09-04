@@ -16,6 +16,7 @@ __all__ = [
     "JobType",
     "DEFAULT_LEASE",
     "DEFAULT_MAX_ATTEMPTS",
+    "LIVE_JOB_STATUSES",
     "JobOutcome",
     "RunStep",
     "retry_delay",
@@ -25,6 +26,10 @@ __all__ = [
 # Pi agent runs are capped at 10 minutes, so the lease has to outlast that.
 DEFAULT_LEASE = timedelta(minutes=15)
 DEFAULT_MAX_ATTEMPTS = 3
+
+# A job that has not settled: still queued, running, or parked waiting for a person.
+# `waiting_for_user` belongs here — the work is not over, it is blocked on someone.
+LIVE_JOB_STATUSES = (JobStatus.queued, JobStatus.running, JobStatus.waiting_for_user)
 
 
 class JobType:
