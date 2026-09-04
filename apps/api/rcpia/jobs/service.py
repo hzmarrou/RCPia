@@ -134,6 +134,10 @@ async def claim_next(
             lease_expires_at=DB_CLOCK + lease,
             started_at=sa.func.coalesce(AnalysisJob.started_at, DB_CLOCK),
             attempts=AnalysisJob.attempts + 1,
+            # A new attempt starts over. Carrying the previous one's step forward would
+            # show a run resuming at `reasoning` when it is about to rebuild its bundle.
+            milestone=None,
+            milestone_at=None,
         )
         .returning(AnalysisJob)
     )
@@ -273,6 +277,11 @@ async def wait_for_user(
         values={
             "status": JobStatus.waiting_for_user,
             "error_message": reason,
+            # Nothing is happening here until a person acts, and `waiting_for_user` is a
+            # live status: the last step reached would otherwise sit in the activity feed
+            # claiming to be in progress for as long as the job stays parked.
+            "milestone": None,
+            "milestone_at": None,
             "claim_token": None,
             "claimed_by": None,
             "lease_expires_at": None,
@@ -314,6 +323,11 @@ async def fail(
             "status": JobStatus.queued,
             "error_message": error,
             "available_at": DB_CLOCK + retry_delay(job.attempts),
+            # Waiting out a backoff, not working. The step it died on stays on a terminal
+            # failure -- "it failed while reasoning" is history worth keeping -- but a job
+            # that is coming back must not report a step it is no longer on.
+            "milestone": None,
+            "milestone_at": None,
         }
 
     await _transition(

@@ -885,3 +885,108 @@ async def test_every_agent_step_is_short_enough_for_the_column() -> None:
     """The steps reach the database as text in a bounded column, and they are constants:
     a step too long to store would fail at the one moment nobody is watching."""
     assert all(len(step) <= 50 for step in AGENT_STEPS)
+
+
+async def test_a_requeued_job_does_not_keep_reporting_the_step_it_died_on(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """It is waiting out a backoff, not reasoning.
+
+    The run reported `reasoning`, then the model call failed with attempts left. The job
+    goes back to `queued`, which is a live status, so a stale step would sit in the
+    activity feed describing work that stopped minutes ago and will restart at `bundle`.
+    """
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+
+    job = await claim(session_factory, "w")
+    assert job is not None and job.claim_token is not None
+    async with session_factory() as session:
+        await service.record_milestone(session, job_id, job.claim_token, RunStep.REASONING)
+        await service.fail(session, job_id, job.claim_token, error="the model went away")
+        await session.commit()
+
+    requeued = await read_job(session_factory, job_id)
+    assert requeued.status is JobStatus.queued
+    assert requeued.milestone is None and requeued.milestone_at is None
+
+
+async def test_a_job_parked_for_a_person_stops_reporting_a_step(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The worst of the three, because it is not transient: `waiting_for_user` is live and
+    a parked job stays parked until someone acts, so the stale step would claim to be in
+    progress for as long as that takes."""
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+
+    job = await claim(session_factory, "w")
+    assert job is not None and job.claim_token is not None
+    async with session_factory() as session:
+        await service.record_milestone(session, job_id, job.claim_token, RunStep.BUNDLE)
+        await service.wait_for_user(session, job_id, job.claim_token, reason="il manque le cTNM")
+        await session.commit()
+
+    parked = await read_job(session_factory, job_id)
+    assert parked.status is JobStatus.waiting_for_user
+    assert parked.milestone is None and parked.milestone_at is None
+
+
+async def test_a_new_attempt_starts_with_no_step_reported(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A reclaimed job is starting over, not resuming."""
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+
+    first = await claim(session_factory, "worker-a")
+    assert first is not None and first.claim_token is not None
+    async with session_factory() as session:
+        await service.record_milestone(session, job_id, first.claim_token, RunStep.CHECKING)
+        await session.commit()
+    await expire_lease(session_factory, job_id)
+
+    second = await claim(session_factory, "worker-b")
+
+    assert second is not None
+    assert second.milestone is None and second.milestone_at is None
+
+
+async def test_a_failed_job_keeps_the_step_it_failed_on(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The other side of the rule. A terminal failure leaves the activity feed entirely,
+    so the step it died on is history rather than a claim about the present -- and "it
+    failed while reasoning" is the first thing anyone debugging it wants."""
+    case_id, organization_id = await make_case(session_factory)
+    job_id = await enqueue_job(session_factory, case_id, organization_id)
+
+    job = await claim(session_factory, "w")
+    assert job is not None and job.claim_token is not None
+    async with session_factory() as session:
+        await service.record_milestone(session, job_id, job.claim_token, RunStep.REASONING)
+        await service.fail(
+            session, job_id, job.claim_token, error="no API key", terminal=True
+        )
+        await session.commit()
+
+    failed = await read_job(session_factory, job_id)
+    assert failed.status is JobStatus.failed
+    assert failed.milestone == RunStep.REASONING
+
+
+async def test_a_database_that_goes_away_costs_the_report_and_not_the_run(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Opening the session is outside the reporter's control and can fail on its own -- a
+    failover, or the nightly shutdown landing on a long panel. An exception escaping here
+    would reach the worker's catch-all, fail the job and burn an attempt, so a cosmetic
+    write would have cost a multi-minute agent run.
+    """
+
+    def broken_factory() -> AsyncSession:
+        raise RuntimeError("the database went away")
+
+    report = MilestoneReporter(broken_factory, uuid.uuid4(), uuid.uuid4())  # type: ignore[arg-type]
+
+    await report(RunStep.BUNDLE)  # must not raise
