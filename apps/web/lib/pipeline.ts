@@ -22,15 +22,25 @@ export const PIPELINE = [
   "Fiche RCP",
 ];
 
+/**
+ * @param live  the jobs the last *successful* poll returned
+ * @param known whether that poll is current. False after contact with the server is lost:
+ *   the jobs on screen are then a remembered picture, and a remembered picture cannot say
+ *   "an analysis is running now" — those jobs may have finished minutes ago. Everything the
+ *   case record alone establishes still stands; only the claims that rested on live work
+ *   fall back to unknown.
+ */
 export function pipelineOf(
   clinicalCase: CaseDetail,
   ledger: Ledger | null,
   live: JobActivity[],
+  known = true,
 ): StageState[] {
   const uploaded = clinicalCase.documents.length > 0;
   const extracted = ledger !== null && ledger.version !== null;
   const analysing =
-    live.some((job) => job.job_type === "run_agent") || clinicalCase.status === "analyzing";
+    known &&
+    (live.some((job) => job.job_type === "run_agent") || clinicalCase.status === "analyzing");
   const finished = clinicalCase.status === "completed";
 
   // Only once the dossier is ready for analysis does "has it run?" become a question this

@@ -82,7 +82,15 @@ export default function Workstation({
   const [reachable, setReachable] = useState(true);
   // Bumped by "Réessayer": restarts the poll loop at once instead of waiting out the backoff.
   const [attempt, setAttempt] = useState(0);
+  // Whether work has been seen running on this case, kept outside the polling effect so a
+  // retry or a phase change cannot forget it.
+  const sawWork = useRef(false);
   const valueInput = useRef<HTMLInputElement>(null);
+
+  // A different dossier is a different question; nothing observed about the last one carries.
+  useEffect(() => {
+    sawWork.current = false;
+  }, [clinicalCase.id]);
 
   // A server refresh brings a newer ledger than anything held here, so local state steps
   // aside for it.
@@ -100,7 +108,6 @@ export default function Workstation({
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let polls = 0;
-    let sawWork = false;
     let failures = 0;
 
     async function tick() {
@@ -123,7 +130,7 @@ export default function Workstation({
       failures = 0;
       setReachable(true);
       setLive(snapshot.jobs);
-      if (snapshot.jobs.length > 0) sawWork = true;
+      if (snapshot.jobs.length > 0) sawWork.current = true;
 
       // Work seen and then gone is a panel that finished — and only a *successful* poll may
       // conclude that. The case and ledger changed while this page held the versions it was
@@ -131,8 +138,12 @@ export default function Workstation({
       // analysis never ran.
       //
       // Guarded by `sawWork`: an empty answer on the first poll means nothing was running,
-      // not that something ended.
-      if (sawWork && snapshot.jobs.length === 0) {
+      // not that something ended. It is a ref rather than a local so that it survives the
+      // effect being torn down and rebuilt — by a retry, or by the launch phase changing.
+      // Reset per run, a panel that finished while the server was unreachable could never be
+      // recognised as finished afterwards, and the button stayed disabled for good.
+      if (sawWork.current && snapshot.jobs.length === 0) {
+        sawWork.current = false;
         setLaunch({ phase: "idle" });
         router.refresh();
         return;
@@ -208,7 +219,9 @@ export default function Workstation({
   }
 
   const rows = ledgerState?.entries ?? [];
-  const pipeline = pipelineOf(clinicalCase, ledgerState, live);
+  // `reachable` is passed on: while the server is silent the jobs held here are a remembered
+  // picture, and a remembered picture must not tell the header an analysis is running now.
+  const pipeline = pipelineOf(clinicalCase, ledgerState, live, reachable);
   // The sex is read from the ledger the clinician is looking at, so correcting it re-sorts
   // the table on the spot rather than after a reload.
   const sex = readSex(rows);
@@ -262,19 +275,33 @@ export default function Workstation({
                     {state === "done" ? "✓" : state === "unknown" ? "?" : index + 1}
                   </span>
                   {name}
-                  {state === "unknown" ? <span className="qual"> — non suivi</span> : null}
+                  {state === "unknown" ? (
+                    <span className="qual">
+                      {reachable ? " — non suivi" : " — état inconnu"}
+                    </span>
+                  ) : null}
                 </li>
               );
             })}
           </ol>
           {pipeline.includes("unknown") ? (
-            // Not a footnote about a bug: it is what this row can honestly say. The case
-            // record does not move when a panel finishes, so from a fresh page load an
-            // analysis that ran and one that never did look identical.
+            // Not a footnote about a bug: it is what this row can honestly say. Either the
+            // case record does not move when a panel finishes — so a run and no run look
+            // identical from a fresh load — or the server is silent and nothing on screen is
+            // current.
             <p className="poste-qualifier">
-              Le dossier ne conserve pas l&apos;état de l&apos;analyse une fois celle-ci
-              terminée : ces deux étapes ne sont suivies que pendant leur exécution. L&apos;
-              onglet « Fiche » indique si une proposition existe.
+              {reachable ? (
+                <>
+                  Le dossier ne conserve pas l&apos;état de l&apos;analyse une fois celle-ci
+                  terminée : ces deux étapes ne sont suivies que pendant leur exécution.
+                  L&apos;onglet « Fiche » indique si une proposition existe.
+                </>
+              ) : (
+                <>
+                  Le serveur ne répond pas : l&apos;état de ces étapes n&apos;est pas connu.
+                  Ce qui est affiché plus bas est le dernier état confirmé.
+                </>
+              )}
             </p>
           ) : null}
         </div>

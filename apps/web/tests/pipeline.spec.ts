@@ -78,3 +78,27 @@ describe("pipelineOf", () => {
     expect(stages[FICHE]).toBe("done");
   });
 });
+
+describe("pipelineOf when the server has gone quiet", () => {
+  it("stops claiming an analysis is running", () => {
+    // The jobs are a remembered picture once contact is lost. They may have finished minutes
+    // ago, so "en cours" in the header would be a claim about the present made from the past.
+    const stages = pipelineOf(medicalCase(), LEDGER, RUNNING, false);
+    expect(stages[ANALYSE]).toBe("unknown");
+    expect(stages[FICHE]).toBe("unknown");
+  });
+
+  it("does not walk the earlier stages back", () => {
+    // Uploading and extraction are established by the case record, not by the poll, so a
+    // silent server changes nothing about them.
+    const stages = pipelineOf(medicalCase(), LEDGER, RUNNING, false);
+    expect(stages[DEPOT]).toBe("done");
+    expect(stages[LECTURE]).toBe("done");
+    expect(stages[VERIF]).toBe("now");
+  });
+
+  it("still trusts a case the backend itself calls finished", () => {
+    const stages = pipelineOf(medicalCase({ status: "completed" }), LEDGER, [], false);
+    expect(stages[FICHE]).toBe("done");
+  });
+});
