@@ -21,22 +21,33 @@ export type JobActivity = {
 };
 
 /**
+ * The answer to one poll: what is running, or the fact that nobody could be asked.
+ *
+ * The distinction is the whole point of the type. An empty list used to stand for both "the
+ * queue is empty" and "the request failed", and the two mean opposite things: the first says
+ * the panel finished, the second says nothing at all. Conflated, one dropped request during
+ * an analysis reads as a completed panel — the bars vanish, the case is declared settled and
+ * the button offers to convene a second one while the first is still running.
+ */
+export type ActivitySnapshot = { ok: true; jobs: JobActivity[] } | { ok: false };
+
+/**
  * Poll the work in flight.
  *
- * Returns an empty list rather than throwing when the request fails. This drives a progress
- * display that sits beside the real page: a network blip should make the bars go quiet, not
- * replace the ledger a clinician is reading with an error.
+ * Never throws: this drives a progress display sitting beside the real page, and a network
+ * blip should not replace the ledger a clinician is reading with an error. It reports the
+ * failure instead, and the caller decides what to keep showing.
  */
-export async function fetchActivity(caseId: string): Promise<JobActivity[]> {
+export async function fetchActivity(caseId: string): Promise<ActivitySnapshot> {
   try {
     const response = await fetch(`${API_BASE_URL}/cases/${caseId}/activity`, {
       credentials: "include",
       cache: "no-store",
     });
-    if (!response.ok) return [];
-    return (await response.json()) as JobActivity[];
+    if (!response.ok) return { ok: false };
+    return { ok: true, jobs: (await response.json()) as JobActivity[] };
   } catch {
-    return [];
+    return { ok: false };
   }
 }
 

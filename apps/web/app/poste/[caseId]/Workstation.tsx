@@ -15,6 +15,7 @@ import {
 import type { CaseDetail, CaseSummary } from "@/lib/cases";
 import { correctField, convenePanel, type Ledger, type LedgerEntry } from "@/lib/ledger";
 import { groupEntries, readSex, tally } from "@/lib/ledgerView";
+import { PIPELINE, pipelineOf } from "@/lib/pipeline";
 import { AGENT_LABELS, docxUrl, downloadUrl, probatoireUrl } from "@/lib/pps";
 
 const CANCER_LABELS: Record<string, string> = { prostate: "Prostate", bladder: "Vessie" };
@@ -52,23 +53,6 @@ type LaunchState =
   | { phase: "running" }
   | { phase: "failed"; message: string };
 
-function stepOf(clinicalCase: CaseDetail, ledger: Ledger | null, live: JobActivity[]): number {
-  if (live.some((job) => job.job_type === "run_agent")) return 4;
-  if (clinicalCase.status === "completed") return 5;
-  if (clinicalCase.status === "analyzing") return 4;
-  if (ledger !== null && ledger.version !== null) return 3;
-  if (clinicalCase.documents.length > 0) return 2;
-  return 1;
-}
-
-const PIPELINE = [
-  "Dépôt",
-  "Lecture du document",
-  "Vérification par le clinicien",
-  "Analyse par les spécialistes",
-  "Fiche RCP",
-];
-
 export default function Workstation({
   clinicalCase,
   ledger,
@@ -93,6 +77,11 @@ export default function Workstation({
   // and a newly created one left it enabled until the API refused the click.
   const [ledgerState, setLedgerState] = useState<Ledger | null>(ledger);
   const [launch, setLaunch] = useState<LaunchState>({ phase: "idle" });
+  // Whether the last few polls reached the server. False means the state on screen is the
+  // last one confirmed, not the current one — a difference worth saying out loud.
+  const [reachable, setReachable] = useState(true);
+  // Bumped by "Réessayer": restarts the poll loop at once instead of waiting out the backoff.
+  const [attempt, setAttempt] = useState(0);
   const valueInput = useRef<HTMLInputElement>(null);
 
   // A server refresh brings a newer ledger than anything held here, so local state steps
@@ -112,21 +101,38 @@ export default function Workstation({
     let timer: ReturnType<typeof setTimeout> | undefined;
     let polls = 0;
     let sawWork = false;
+    let failures = 0;
 
     async function tick() {
-      const jobs = await fetchActivity(clinicalCase.id);
+      const snapshot = await fetchActivity(clinicalCase.id);
       if (cancelled) return;
-      setLive(jobs);
       polls += 1;
-      if (jobs.length > 0) sawWork = true;
 
-      // Work seen and then gone is a panel that finished. The case status, the fiche and the
-      // ledger all changed while this page held the versions it was rendered with, so ask
-      // the server for them rather than leaving a screen that says the analysis never ran.
+      // A failed poll says nothing about the queue, so it changes nothing on screen: the
+      // bars stay as they were, a running panel is still running, and nothing is declared
+      // finished. One dropped request used to read exactly like a completed panel.
+      if (!snapshot.ok) {
+        failures += 1;
+        // One blip is not worth a warning; a second means the page is showing a picture it
+        // can no longer confirm, and the clinician should be told before they act on it.
+        if (failures >= 2) setReachable(false);
+        timer = setTimeout(tick, failures >= 2 ? 8000 : 2500);
+        return;
+      }
+
+      failures = 0;
+      setReachable(true);
+      setLive(snapshot.jobs);
+      if (snapshot.jobs.length > 0) sawWork = true;
+
+      // Work seen and then gone is a panel that finished — and only a *successful* poll may
+      // conclude that. The case and ledger changed while this page held the versions it was
+      // rendered with, so ask the server for them rather than leaving a screen that says the
+      // analysis never ran.
       //
       // Guarded by `sawWork`: an empty answer on the first poll means nothing was running,
       // not that something ended.
-      if (sawWork && jobs.length === 0) {
+      if (sawWork && snapshot.jobs.length === 0) {
         setLaunch({ phase: "idle" });
         router.refresh();
         return;
@@ -136,7 +142,7 @@ export default function Workstation({
       // the request means "not started", not "nothing to do". Keep looking at the fast
       // cadence for about half a minute before settling back.
       const awaitingLaunch = launchPhase === "running" && polls < 12;
-      timer = setTimeout(tick, jobs.length > 0 || awaitingLaunch ? 2500 : 15000);
+      timer = setTimeout(tick, snapshot.jobs.length > 0 || awaitingLaunch ? 2500 : 15000);
     }
 
     tick();
@@ -144,7 +150,7 @@ export default function Workstation({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [clinicalCase.id, launchPhase, router]);
+  }, [clinicalCase.id, launchPhase, router, attempt]);
 
   const openCorrection = useCallback((entry: LedgerEntry) => {
     setEditing(entry);
@@ -202,7 +208,7 @@ export default function Workstation({
   }
 
   const rows = ledgerState?.entries ?? [];
-  const step = stepOf(clinicalCase, ledgerState, live);
+  const pipeline = pipelineOf(clinicalCase, ledgerState, live);
   // The sex is read from the ledger the clinician is looking at, so correcting it re-sorts
   // the table on the spot rather than after a reload.
   const sex = readSex(rows);
@@ -248,18 +254,29 @@ export default function Workstation({
             </span>
           </div>
           <ol className="poste-pipeline">
-            {PIPELINE.map((name, index) => (
-              <li
-                key={name}
-                className={
-                  index + 1 < step ? "done" : index + 1 === step ? "now" : undefined
-                }
-              >
-                <span className="num">{index + 1 < step ? "✓" : index + 1}</span>
-                {name}
-              </li>
-            ))}
+            {PIPELINE.map((name, index) => {
+              const state = pipeline[index];
+              return (
+                <li key={name} className={state}>
+                  <span className="num">
+                    {state === "done" ? "✓" : state === "unknown" ? "?" : index + 1}
+                  </span>
+                  {name}
+                  {state === "unknown" ? <span className="qual"> — non suivi</span> : null}
+                </li>
+              );
+            })}
           </ol>
+          {pipeline.includes("unknown") ? (
+            // Not a footnote about a bug: it is what this row can honestly say. The case
+            // record does not move when a panel finishes, so from a fresh page load an
+            // analysis that ran and one that never did look identical.
+            <p className="poste-qualifier">
+              Le dossier ne conserve pas l&apos;état de l&apos;analyse une fois celle-ci
+              terminée : ces deux étapes ne sont suivies que pendant leur exécution. L&apos;
+              onglet « Fiche » indique si une proposition existe.
+            </p>
+          ) : null}
         </div>
 
         {ledgerState === null ? (
@@ -304,7 +321,19 @@ export default function Workstation({
               ) : null}
             </section>
 
-            {live.length > 0 ? <Progress jobs={live} /> : null}
+            {live.length > 0 ? <Progress jobs={live} reachable={reachable} /> : null}
+
+            {!reachable ? (
+              <section className="poste-section">
+                <p className="error">
+                  Impossible de joindre le serveur. L&apos;état affiché est le dernier connu
+                  {live.length > 0 ? " et l'analyse est peut-être toujours en cours" : ""}.{" "}
+                  <button className="poste-retry" onClick={() => setAttempt((n) => n + 1)}>
+                    Réessayer
+                  </button>
+                </p>
+              </section>
+            ) : null}
 
             <section className="poste-section">
               <h2>Données extraites du dossier</h2>
@@ -400,12 +429,21 @@ export default function Workstation({
                     : "Lancer l'analyse"}
               </button>
               {launch.phase === "failed" ? <p className="error">{launch.message}</p> : null}
-              {launch.phase === "running" && live.length === 0 ? (
+              {launch.phase === "running" && live.length === 0 && reachable ? (
                 // Between the request landing and the first worker claiming it, the case is
                 // genuinely empty. Saying so beats a screen that looks like the click missed.
                 <p className="hint">
                   Demande envoyée. Les spécialistes apparaissent ici dès qu&apos;ils
                   commencent.
+                </p>
+              ) : null}
+              {!reachable && busy ? (
+                // The gate stays shut while the state is unknown: convening a second panel
+                // over a first one that may well be running is the expensive mistake here,
+                // and "Réessayer" above is the way out that does not risk it.
+                <p className="hint">
+                  État de l&apos;analyse inconnu tant que le serveur ne répond pas. Le bouton
+                  reste fermé pour ne pas convoquer un second panel par-dessus le premier.
                 </p>
               ) : null}
             </section>
@@ -549,21 +587,27 @@ function Value({ text }: { text: string }) {
  * of it is done. The elapsed time is the honest number, and a step past its measured usual
  * duration says so in words.
  */
-function Progress({ jobs }: { jobs: JobActivity[] }) {
+function Progress({ jobs, reachable }: { jobs: JobActivity[]; reachable: boolean }) {
   // The elapsed time is what moves between milestones, so this needs its own tick. A second
   // is finer than anyone watching a seventy-second step needs, and costs nothing.
   const [now, setNow] = useState(() => Date.now());
+  const frozen = useRef(now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+  // The moment of the last confirmed reading, kept so the clocks can stop there rather than
+  // running on through a silence.
+  if (reachable) frozen.current = now;
 
   return (
     <section className="poste-section">
-      <h2>En cours</h2>
-      <div className="poste-agents">
+      <h2>En cours{reachable ? "" : " — dernier état connu"}</h2>
+      <div className={`poste-agents${reachable ? "" : " stale"}`}>
         {jobs.map((job) => {
-          const stage = stageOf(job, now);
+          // Frozen at the last confirmed reading while the server is unreachable: a clock
+          // that keeps counting would be counting time nobody has confirmed the job spent.
+          const stage = stageOf(job, reachable ? now : frozen.current);
           const label = job.agent_role
             ? (AGENT_LABELS[job.agent_role] ?? job.agent_role)
             : (JOB_LABELS[job.job_type] ?? job.job_type);
