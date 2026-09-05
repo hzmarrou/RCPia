@@ -293,6 +293,16 @@ main:has(> .poste) { max-width: none; padding: 0; }
 .poste-metrics .v.red { color: var(--danger-fg); }
 .poste-metrics .v.amber { color: var(--warn-fg); }
 
+/* One category, headed and counted. Ninety-two rows in one run is faithful and unreadable;
+   the categories come from the API with every entry, so this only stops discarding them. */
+.poste-group + .poste-group { margin-top: 18px; }
+.poste-grouphead {
+  display: flex; align-items: baseline; gap: 12px; margin: 0 0 6px;
+}
+.poste-grouphead h3 { margin: 0; font-size: 13px; letter-spacing: .02em; }
+.poste-grouphead .counts { font-size: 11.5px; color: var(--muted); margin-left: auto; }
+.poste-grouphead .gap { color: var(--danger-fg); }
+
 .poste-tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
 /* Fixed layout, because the dossier decides the content and some of it is a whole CT report:
    left to itself the table sizes to its longest line and pushes past its pane. */
@@ -314,6 +324,9 @@ main:has(> .poste) { max-width: none; padding: 0; }
 .poste-tablewrap td { padding: 8px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .poste-tablewrap tr:last-child td { border-bottom: 0; }
 .poste-tablewrap .val { font-family: ui-monospace, monospace; }
+/* Cannot apply to this patient: still there, still correctable, but quiet and not a gap. */
+.poste-tablewrap tr.na td { color: var(--muted); }
+.poste-tablewrap .na-value { font-style: italic; }
 .poste-tablewrap .src { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 .poste-fix {
   padding: 3px 9px; font-size: 12px; white-space: nowrap;

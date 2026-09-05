@@ -12,6 +12,7 @@ import {
 } from "@/lib/activity";
 import type { CaseDetail, CaseSummary } from "@/lib/cases";
 import { correctField, convenePanel, type Ledger, type LedgerEntry } from "@/lib/ledger";
+import { groupEntries, readSex, tally } from "@/lib/ledgerView";
 import { AGENT_LABELS, docxUrl, downloadUrl, probatoireUrl } from "@/lib/pps";
 
 const CANCER_LABELS: Record<string, string> = { prostate: "Prostate", bladder: "Vessie" };
@@ -160,8 +161,11 @@ export default function Workstation({
   }
 
   const step = stepOf(clinicalCase, ledger, live);
-  const missing = rows.filter((entry) => entry.highlight === "red").length;
-  const uncertain = rows.filter((entry) => entry.highlight === "amber").length;
+  // The sex is read from the ledger the clinician is looking at, so correcting it re-sorts
+  // the table on the spot rather than after a reload.
+  const sex = readSex(rows);
+  const counts = tally(rows, sex);
+  const groups = groupEntries(rows, sex);
   const blocking = (ledger?.issues ?? []).filter((i) => i.severity === "blocking").length;
 
   return (
@@ -227,79 +231,108 @@ export default function Workstation({
               <div className="poste-metrics">
                 <div>
                   <div className="k">Données lues</div>
-                  <div className="v">{rows.length}</div>
+                  <div className="v">{counts.read}</div>
                 </div>
                 <div>
                   <div className="k">Manquantes</div>
-                  <div className="v red">{missing}</div>
+                  <div className="v red">{counts.missing}</div>
                 </div>
                 <div>
                   <div className="k">Incertaines</div>
-                  <div className="v amber">{uncertain}</div>
+                  <div className="v amber">{counts.uncertain}</div>
                 </div>
                 <div>
                   <div className="k">Bloquantes</div>
                   <div className="v">{blocking}</div>
                 </div>
               </div>
+              {counts.notApplicable > 0 ? (
+                <p className="hint">
+                  {counts.notApplicable} champ
+                  {counts.notApplicable > 1 ? "s sont marqués" : " est marqué"} sans objet
+                  d&apos;après le sexe inscrit au dossier, et ne compte
+                  {counts.notApplicable > 1 ? "nt" : ""} pas parmi les données manquantes.
+                </p>
+              ) : null}
             </section>
 
             {live.length > 0 ? <Progress jobs={live} /> : null}
 
             <section className="poste-section">
               <h2>Données extraites du dossier</h2>
-              <div className="poste-tablewrap">
-                <table>
-                  <colgroup>
-                    <col className="label" />
-                    <col />
-                    <col className="act" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>Donnée</th>
-                      <th>Valeur</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((entry, index) => (
-                      <tr
-                        // Position, because nothing else is unique. The ledger returns some
-                        // entries twice over — `platelets`, `bicarbonate` and `phosphorus`
-                        // each arrive as two rows identical in category, key, value and
-                        // origin — so a flat list has genuinely duplicate items. The grouped
-                        // table upstream never collides only because it renders one category
-                        // at a time. This is a display working around a defect in the data,
-                        // not a fix for it: the duplication is upstream and still there.
-                        key={`${entry.category}-${entry.key}-${index}`}
-                        className={
-                          entry.highlight === "red"
-                            ? "miss"
-                            : entry.highlight === "amber"
-                              ? "unc"
-                              : undefined
-                        }
-                      >
-                        <td>{entry.label}</td>
-                        <td>
-                          {entry.value === null ? (
-                            <span className="missing-value">Information manquante</span>
-                          ) : (
-                            <Value text={entry.value} />
-                          )}
-                          {entry.note ? <div className="src">{entry.note}</div> : null}
-                        </td>
-                        <td>
-                          <button className="poste-fix" onClick={() => openCorrection(entry)}>
-                            Corriger
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {groups.map((group) => (
+                <div key={group.category} className="poste-group">
+                  <div className="poste-grouphead">
+                    <h3>{group.label}</h3>
+                    <span className="counts">
+                      {group.present} lue{group.present > 1 ? "s" : ""}
+                      {group.missing > 0 ? (
+                        <span className="gap"> · {group.missing} manquante
+                          {group.missing > 1 ? "s" : ""}</span>
+                      ) : null}
+                      {group.notApplicable > 0 ? (
+                        <span> · {group.notApplicable} sans objet</span>
+                      ) : null}
+                    </span>
+                  </div>
+                  <div className="poste-tablewrap">
+                    <table>
+                      <colgroup>
+                        <col className="label" />
+                        <col />
+                        <col className="act" />
+                      </colgroup>
+                      <tbody>
+                        {group.rows.map(({ entry, applicable }, index) => (
+                          <tr
+                            // Position, because nothing else is unique. The ledger returns
+                            // some entries twice over — `platelets`, `bicarbonate` and
+                            // `phosphorus` each arrive as two rows identical in category,
+                            // key, value and origin. This is a display working around a
+                            // defect in the data, not a fix for it: the duplication is
+                            // upstream and still there.
+                            key={`${entry.key}-${index}`}
+                            className={
+                              !applicable
+                                ? "na"
+                                : entry.highlight === "red"
+                                  ? "miss"
+                                  : entry.highlight === "amber"
+                                    ? "unc"
+                                    : undefined
+                            }
+                          >
+                            <td>{entry.label}</td>
+                            <td>
+                              {!applicable ? (
+                                // Marked, not hidden: if the recorded sex is wrong, the
+                                // clinician has to be able to see what it silenced.
+                                <span className="na-value">
+                                  Sans objet
+                                  {entry.value === null ? "" : ` — ${entry.value}`}
+                                </span>
+                              ) : entry.value === null ? (
+                                <span className="missing-value">Information manquante</span>
+                              ) : (
+                                <Value text={entry.value} />
+                              )}
+                              {entry.note ? <div className="src">{entry.note}</div> : null}
+                            </td>
+                            <td>
+                              <button
+                                className="poste-fix"
+                                onClick={() => openCorrection(entry)}
+                              >
+                                Corriger
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
             </section>
 
             <section className="poste-gate">
