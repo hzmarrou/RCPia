@@ -41,73 +41,70 @@ export async function fetchActivity(caseId: string): Promise<JobActivity[]> {
 }
 
 /**
- * Where each reported step sits on the bar, and how long it usually lasts.
+ * How long each step usually takes, measured on real runs.
  *
- * **Measured, not assumed** — two runs on 4 Sep 2026 (61s and 75s), four more on 5 Sep
- * (69-83s), in line with the 47-67s seen on staging:
+ * Two runs on 4 Sep 2026 (61s, 75s), four more on 5 Sep (69-83s), in line with the 47-67s
+ * seen on staging:
  *
- *     bundle     assembling the dossier, retrieval included   ~9%    6.5-7s
- *     reasoning  writing the opinion                          ~89%   60-76s
- *     checking   citations, then recording                    <0.5%  under 150ms each
+ *     bundle     assembling the dossier, retrieval included   6.5-7s
+ *     reasoning  writing the opinion                          60-76s
+ *     checking   citations, then recording                    under 150ms each
  *
- * Drawing those four steps as equal quarters is a picture of something that does not happen:
- * it parked every real bar at 25% for a minute, which is what a run watched end to end on
- * 5 Sep showed. One step doing nine tenths of the work is not a tidy diagram, but it is the
- * work.
+ * Used for one thing only: saying when a step has run longer than it usually does. **Not**
+ * for placing a bar. A duration cannot be turned into progress — a provider that stalls the
+ * instant reasoning begins produces exactly the same elapsed seconds as one working
+ * normally, and a bar drawn from the clock would keep climbing through the stall, which is
+ * the moment a clinician most needs to be told something is wrong.
  */
-type Stage = { at: number; to: number; typicalSeconds: number };
-
-const AGENT_STAGES: Record<string, Stage> = {
-  bundle: { at: 0, to: 0.09, typicalSeconds: 7 },
-  reasoning: { at: 0.09, to: 0.99, typicalSeconds: 70 },
-  checking: { at: 0.99, to: 0.996, typicalSeconds: 0.2 },
-  recording: { at: 0.996, to: 1, typicalSeconds: 0.2 },
+const TYPICAL_SECONDS: Record<string, number> = {
+  bundle: 7,
+  reasoning: 70,
+  checking: 0.2,
+  recording: 0.2,
 };
 
-// How far into a step the bar may creep before the next milestone arrives. Short of the
-// boundary on purpose: the bar may say "well into writing the opinion", never "done writing
-// it" — that claim belongs to the worker, which has not made it yet.
-const CREEP = 0.9;
-
-export type Progress = {
-  /** 0..1. Never reaches the start of a step the job has not reported. */
-  fraction: number;
-  /** This step has already run longer than it usually does. */
-  overrunning: boolean;
+export type Stage = {
+  /** The step the worker last reported. */
+  step: string;
+  /** Seconds since it reported that step, or null when it sent no timestamp. */
+  elapsedSeconds: number | null;
+  /**
+   * Whether this step has run longer than it usually does. Null for a step with no measured
+   * duration: an unknown step has no "usually".
+   */
+  overrunning: boolean | null;
 };
 
 /**
- * How far along a job is, or null when it has not said.
+ * What a job last reported, and how long ago — or null when it has not reported anything.
  *
- * **Never claims a step the worker has not reported.** A job that has reported nothing
- * returns null so the caller can show an empty track. Within the step it *has* reported the
- * bar creeps on the clock towards, but never into, the next one — because the alternative,
- * a bar that sits still for a minute, is read as a hung run.
- *
- * The scale comes from the job: `steps` is sent with it, so a renamed or added step moves
- * the scale and the value together. A step with no measured share falls back to an equal
- * slice of the scale rather than disappearing.
+ * **There is no percentage here, on purpose.** The worker reports four milestones and
+ * nothing between them, so any position between two of them would be invented. The earlier
+ * version of this file interpolated on the clock, and that bar climbed towards nine tenths
+ * whether the agent was writing or hung. What is known is the step and how long it has been
+ * running; that is what the caller may show.
  */
-export function progressOf(job: JobActivity, now: number): Progress | null {
+export function stageOf(job: JobActivity, now: number): Stage | null {
   if (job.milestone === null || job.steps.length === 0) return null;
-  const index = job.steps.indexOf(job.milestone);
-  if (index < 0) return null;
-
-  const measured = AGENT_STAGES[job.milestone];
-  const stage: Stage = measured ?? {
-    at: index / job.steps.length,
-    to: (index + 1) / job.steps.length,
-    typicalSeconds: 30,
-  };
+  if (!job.steps.includes(job.milestone)) return null;
 
   const since = job.milestone_at === null ? NaN : Date.parse(job.milestone_at);
-  const elapsed = Number.isNaN(since) ? 0 : Math.max(now - since, 0) / 1000;
-  const share = Math.min(elapsed / stage.typicalSeconds, 1);
+  const elapsedSeconds = Number.isNaN(since) ? null : Math.max(now - since, 0) / 1000;
+  const typical = TYPICAL_SECONDS[job.milestone];
 
   return {
-    fraction: stage.at + (stage.to - stage.at) * CREEP * share,
-    overrunning: elapsed > stage.typicalSeconds,
+    step: job.milestone,
+    elapsedSeconds,
+    overrunning:
+      typical === undefined || elapsedSeconds === null ? null : elapsedSeconds > typical,
   };
+}
+
+/** "1 min 12 s", the way a wait is read rather than counted. */
+export function readableDuration(seconds: number): string {
+  const whole = Math.floor(seconds);
+  if (whole < 60) return `${whole} s`;
+  return `${Math.floor(whole / 60)} min ${String(whole % 60).padStart(2, "0")} s`;
 }
 
 export const STEP_LABELS: Record<string, string> = {

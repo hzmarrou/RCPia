@@ -353,10 +353,24 @@ main:has(> .poste) { max-width: none; padding: 0; }
   background: var(--border); overflow: hidden;
 }
 .poste-agent .stage .slow { font-style: italic; }
-.poste-agent .fill {
-  position: absolute; inset: 0 auto 0 0; background: var(--fg);
-  /* Matches the tick that feeds it, so the bar drifts rather than stepping every second. */
-  border-radius: 3px; transition: width 1s linear;
+.poste-agent .stage .since { font-variant-numeric: tabular-nums; }
+/* Indeterminate on purpose. The worker reports four milestones and nothing in between, so a
+   filled proportion would be invented — and one interpolated on the clock would keep
+   climbing through a stall. This says work is happening; the elapsed time beside it is the
+   number that is actually known. */
+.poste-agent .fill { position: absolute; inset: 0; border-radius: 3px; }
+.poste-agent .track.working .fill {
+  width: 34%; background: var(--fg);
+  animation: poste-sweep 1.6s ease-in-out infinite;
+}
+@keyframes poste-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(295%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .poste-agent .track.working .fill {
+    width: 100%; animation: none; opacity: .45;
+  }
 }
 
 .poste-gate {

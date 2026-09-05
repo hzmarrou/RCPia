@@ -38,6 +38,14 @@ describe("readSex", () => {
     expect(readSex([entry({ key: "sex", value: "non précisé" })])).toBeNull();
     expect(readSex([entry({ key: "age", value: "72" })])).toBeNull();
   });
+
+  it("refuses to act on an uncertain sex", () => {
+    // Amber is the ledger saying the reading is doubtful or the documents disagree. A
+    // doubtful value must not rule fields out, however confidently it is spelled.
+    expect(
+      readSex([entry({ key: "sex", value: "Homme", highlight: "amber" })]),
+    ).toBeNull();
+  });
 });
 
 describe("applies", () => {
@@ -75,11 +83,14 @@ describe("groupEntries", () => {
     ]);
   });
 
-  it("counts a field ruled out by sex as neither read nor missing", () => {
+  it("still counts a field ruled out by sex as the gap the API says it is", () => {
+    // The specialists are sent the ledger the API holds, so marking must not subtract from
+    // the count. A total quietly reduced here would show fewer gaps than the panel is told
+    // about — and the gate promises the panel reads what is on screen.
     const examination = groupEntries(entries, "male").find(
       (group) => group.category === "examination",
     );
-    expect(examination).toMatchObject({ present: 0, missing: 0, notApplicable: 1 });
+    expect(examination).toMatchObject({ present: 0, missing: 1, notApplicable: 1 });
   });
 
   it("keeps the ruled-out row on screen", () => {
@@ -103,11 +114,13 @@ describe("groupEntries", () => {
 });
 
 describe("tally", () => {
-  it("leaves a field ruled out by sex out of the missing count", () => {
+  it("reports the API's arithmetic and counts the marked fields alongside", () => {
     const entries = [MALE, entry({ key: "vaginal_exam" }), entry({ key: "g8_score" })];
     expect(tally(entries, "male")).toEqual({
       read: 1,
-      missing: 1,
+      // Two gaps, because the API reports two gaps and sends both to the panel. One of them
+      // is additionally marked sans objet, which is a reading aid, not a correction.
+      missing: 2,
       uncertain: 0,
       notApplicable: 1,
     });

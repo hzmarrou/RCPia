@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { progressOf, type JobActivity } from "../lib/activity";
+import { readableDuration, stageOf, type JobActivity } from "../lib/activity";
 
 /**
- * The bar's one promise: it never announces a step the worker has not reported.
+ * The one promise: nothing is reported that the worker did not say.
  *
- * A progress display that runs ahead of the work is worse than none, because the next one is
- * not believed either. These pin the promise, and the shape of the measured scale that makes
- * a seventy-second step look like seventy seconds of work.
+ * An earlier version of this file interpolated a percentage from the clock, so a bar climbed
+ * towards nine tenths whether the agent was writing or hung, and an unmeasured step could
+ * place itself *behind* the step before it. What a job knows is which milestone it last
+ * reported and when; that is all that is exposed.
  */
 
 const AGENT_STEPS = ["bundle", "reasoning", "checking", "recording"];
@@ -28,48 +29,59 @@ function job(over: Partial<JobActivity> = {}): JobActivity {
   };
 }
 
-describe("progressOf", () => {
+describe("stageOf", () => {
   it("says nothing about a job that has reported nothing", () => {
-    expect(progressOf(job({ milestone: null }), T0)).toBeNull();
+    expect(stageOf(job({ milestone: null }), T0)).toBeNull();
   });
 
   it("ignores a milestone that is not on the job's own scale", () => {
-    expect(progressOf(job({ milestone: "daydreaming" }), T0)).toBeNull();
+    expect(stageOf(job({ milestone: "daydreaming" }), T0)).toBeNull();
   });
 
-  it("starts a step at that step's share of the bar", () => {
-    expect(progressOf(job(), T0)?.fraction).toBeCloseTo(0.09, 5);
-    expect(progressOf(job({ milestone: "bundle" }), T0)?.fraction).toBeCloseTo(0, 5);
+  it("reports the step the worker last named", () => {
+    expect(stageOf(job(), T0 + 5_000)?.step).toBe("reasoning");
   });
 
-  it("creeps on the clock without ever entering the next step", () => {
-    const half = progressOf(job(), T0 + 35_000)?.fraction ?? 0;
-    const late = progressOf(job(), T0 + 600_000)?.fraction ?? 0;
-    expect(half).toBeGreaterThan(0.09);
-    expect(half).toBeLessThan(late);
-    // 0.99 is where `checking` starts, and only the worker may say it got there.
-    expect(late).toBeLessThan(0.99);
+  it("counts from the milestone, not from the start of the job", () => {
+    expect(stageOf(job(), T0 + 42_000)?.elapsedSeconds).toBe(42);
   });
 
-  it("moves visibly through the long step, where an even scale would not", () => {
-    // The whole point: writing the opinion is ~90% of the wall clock, and on four equal
-    // quarters every real run sat at 25% for a minute.
-    const early = progressOf(job(), T0 + 5_000)?.fraction ?? 0;
-    const later = progressOf(job(), T0 + 50_000)?.fraction ?? 0;
-    expect(later - early).toBeGreaterThan(0.4);
+  it("has no elapsed time when the worker sent no timestamp", () => {
+    expect(stageOf(job({ milestone_at: null }), T0 + 42_000)?.elapsedSeconds).toBeNull();
   });
 
-  it("says when a step has run longer than it usually does", () => {
-    expect(progressOf(job(), T0 + 10_000)?.overrunning).toBe(false);
-    expect(progressOf(job(), T0 + 200_000)?.overrunning).toBe(true);
+  it("never reports a negative wait when the clocks disagree", () => {
+    expect(stageOf(job(), T0 - 9_000)?.elapsedSeconds).toBe(0);
   });
 
-  it("falls back to an equal slice for a step with no measured share", () => {
+  it("says when a measured step has run longer than it usually does", () => {
+    expect(stageOf(job(), T0 + 10_000)?.overrunning).toBe(false);
+    expect(stageOf(job(), T0 + 200_000)?.overrunning).toBe(true);
+  });
+
+  it("claims nothing about how long an unmeasured step should take", () => {
+    // No measurement, no "usually" — and so no assertion either way.
     const invented = job({ milestone: "polishing", steps: [...AGENT_STEPS, "polishing"] });
-    expect(progressOf(invented, T0)?.fraction).toBeCloseTo(0.8, 5);
+    expect(stageOf(invented, T0 + 600_000)?.overrunning).toBeNull();
+    expect(stageOf(invented, T0 + 600_000)?.step).toBe("polishing");
   });
 
-  it("holds at the step's own start when the worker sent no timestamp", () => {
-    expect(progressOf(job({ milestone_at: null }), T0 + 60_000)?.fraction).toBeCloseTo(0.09, 5);
+  it("exposes no fraction at all", () => {
+    // Load-bearing: the caller cannot draw a proportion it was never given, which is what
+    // keeps a stalled provider from looking nine tenths done.
+    expect(Object.keys(stageOf(job(), T0) ?? {}).sort()).toEqual([
+      "elapsedSeconds",
+      "overrunning",
+      "step",
+    ]);
+  });
+});
+
+describe("readableDuration", () => {
+  it("reads a wait rather than counting it", () => {
+    expect(readableDuration(9.6)).toBe("9 s");
+    expect(readableDuration(59)).toBe("59 s");
+    expect(readableDuration(72)).toBe("1 min 12 s");
+    expect(readableDuration(605)).toBe("10 min 05 s");
   });
 });

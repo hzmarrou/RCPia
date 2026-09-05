@@ -39,7 +39,11 @@ const FEMALE_WORDS = new Set(["femme", "feminin", "f", "female"]);
  * inapplicable, and the table stays exactly as faithful as it was.
  */
 export function readSex(entries: LedgerEntry[]): "male" | "female" | null {
-  const recorded = entries.find((entry) => entry.key === "sex")?.value;
+  const sex = entries.find((entry) => entry.key === "sex");
+  // An uncertain sex marks nothing. Amber is the ledger saying the documents disagree or
+  // the reading is doubtful, and a doubtful value must not quietly rule fields out.
+  if (sex === undefined || sex.highlight === "amber") return null;
+  const recorded = sex.value;
   if (!recorded) return null;
   const word = recorded
     .normalize("NFD")
@@ -64,9 +68,16 @@ export type LedgerGroup = {
   category: string;
   label: string;
   rows: LedgerRow[];
-  /** Fields that apply and were read from the dossier. */
+  /** Fields read from the dossier. */
   present: number;
-  /** Fields that apply and are absent. Not-applicable fields are never gaps. */
+  /**
+   * Fields the API reports as absent — **including** the ones marked "sans objet".
+   *
+   * They are counted because the API counts them: the specialists are sent the ledger as the
+   * API holds it, so a gap subtracted here would be a gap the screen says does not exist and
+   * the panel is told about anyway. Marking is a reading aid on top of the count, not a
+   * correction of it, until applicability is decided in one place — the backend.
+   */
   missing: number;
   notApplicable: number;
 };
@@ -117,7 +128,7 @@ export function groupEntries(
     const applicable = applies(entry, sex);
     group.rows.push({ entry, applicable });
     if (!applicable) group.notApplicable += 1;
-    else if (entry.value === null) group.missing += 1;
+    if (entry.value === null) group.missing += 1;
     else group.present += 1;
   }
 
@@ -126,13 +137,19 @@ export function groupEntries(
   return [...known, ...extra].map((category) => groups.get(category) as LedgerGroup);
 }
 
-/** What the completeness panel counts. Fields that cannot apply are not gaps. */
+/**
+ * What the completeness panel counts — the API's own arithmetic, unaltered.
+ *
+ * `notApplicable` is reported alongside rather than subtracted. The gate promises the
+ * specialists read the version on screen, and they are sent the ledger the API holds: a
+ * total quietly reduced here would break that promise in the one direction that matters,
+ * by showing fewer gaps than the panel is actually told about.
+ */
 export function tally(entries: LedgerEntry[], sex: "male" | "female" | null) {
-  const applicable = entries.filter((entry) => applies(entry, sex));
   return {
-    read: applicable.filter((entry) => entry.value !== null).length,
-    missing: applicable.filter((entry) => entry.highlight === "red").length,
-    uncertain: applicable.filter((entry) => entry.highlight === "amber").length,
-    notApplicable: entries.length - applicable.length,
+    read: entries.filter((entry) => entry.value !== null).length,
+    missing: entries.filter((entry) => entry.highlight === "red").length,
+    uncertain: entries.filter((entry) => entry.highlight === "amber").length,
+    notApplicable: entries.filter((entry) => !applies(entry, sex)).length,
   };
 }

@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   JOB_LABELS,
   STEP_LABELS,
   fetchActivity,
-  progressOf,
+  readableDuration,
+  stageOf,
   type JobActivity,
 } from "@/lib/activity";
 import type { CaseDetail, CaseSummary } from "@/lib/cases";
@@ -37,6 +39,19 @@ const STORE = "rcpia.poste.panes";
 
 type Tab = "correction" | "fiche";
 
+/**
+ * Where a launch has got to.
+ *
+ * `running` covers the whole span from the request being accepted to the queue emptying,
+ * including the seconds before the first worker claims anything — the gate is shut for all
+ * of it, because the case looks idle then and a second press is a second panel.
+ */
+type LaunchState =
+  | { phase: "idle" }
+  | { phase: "sending" }
+  | { phase: "running" }
+  | { phase: "failed"; message: string };
+
 function stepOf(clinicalCase: CaseDetail, ledger: Ledger | null, live: JobActivity[]): number {
   if (live.some((job) => job.job_type === "run_agent")) return 4;
   if (clinicalCase.status === "completed") return 5;
@@ -63,6 +78,7 @@ export default function Workstation({
   ledger: Ledger | null;
   cases: CaseSummary[];
 }) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("correction");
   const [collapsed, setCollapsed] = useState(false);
   const [live, setLive] = useState<JobActivity[]>([]);
@@ -71,31 +87,55 @@ export default function Workstation({
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rows, setRows] = useState<LedgerEntry[]>(ledger?.entries ?? []);
-  const [launching, setLaunching] = useState(false);
-  const [launchError, setLaunchError] = useState<string | null>(null);
-  const [launched, setLaunched] = useState(0);
+  // The whole ledger, not only its rows: `can_run_analysis` and `issues` move with a
+  // correction too. Keeping the rows and dropping the rest left the gate deciding from the
+  // version the page was built with — a corrected blocking field kept the button disabled,
+  // and a newly created one left it enabled until the API refused the click.
+  const [ledgerState, setLedgerState] = useState<Ledger | null>(ledger);
+  const [launch, setLaunch] = useState<LaunchState>({ phase: "idle" });
   const valueInput = useRef<HTMLInputElement>(null);
+
+  // A server refresh brings a newer ledger than anything held here, so local state steps
+  // aside for it.
+  useEffect(() => {
+    setLedgerState(ledger);
+  }, [ledger]);
 
   // Poll only while something is moving, and stop as soon as it settles: an idle case should
   // not keep a request going every two seconds for as long as the tab is open.
   //
-  // `launched` restarts the loop, which is how a click gets an answer at once instead of
-  // waiting out the idle interval.
+  // The launch phase restarts the loop, which is how a click gets an answer at once instead
+  // of waiting out the idle interval.
+  const launchPhase = launch.phase;
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let polls = 0;
+    let sawWork = false;
 
     async function tick() {
       const jobs = await fetchActivity(clinicalCase.id);
       if (cancelled) return;
       setLive(jobs);
       polls += 1;
+      if (jobs.length > 0) sawWork = true;
+
+      // Work seen and then gone is a panel that finished. The case status, the fiche and the
+      // ledger all changed while this page held the versions it was rendered with, so ask
+      // the server for them rather than leaving a screen that says the analysis never ran.
+      //
+      // Guarded by `sawWork`: an empty answer on the first poll means nothing was running,
+      // not that something ended.
+      if (sawWork && jobs.length === 0) {
+        setLaunch({ phase: "idle" });
+        router.refresh();
+        return;
+      }
+
       // Work just asked for has not been claimed yet, and an empty answer one second after
       // the request means "not started", not "nothing to do". Keep looking at the fast
       // cadence for about half a minute before settling back.
-      const awaitingLaunch = launched > 0 && polls < 12;
+      const awaitingLaunch = launchPhase === "running" && polls < 12;
       timer = setTimeout(tick, jobs.length > 0 || awaitingLaunch ? 2500 : 15000);
     }
 
@@ -104,7 +144,7 @@ export default function Workstation({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [clinicalCase.id, launched]);
+  }, [clinicalCase.id, launchPhase, router]);
 
   const openCorrection = useCallback((entry: LedgerEntry) => {
     setEditing(entry);
@@ -128,7 +168,7 @@ export default function Workstation({
         value: value.trim() === "" ? null : value,
         note: reason,
       });
-      setRows(updated.entries);
+      setLedgerState(updated);
       setEditing(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "La correction a échoué.");
@@ -145,28 +185,32 @@ export default function Workstation({
    * the clinician's side that is a button that does nothing, and the second press is a
    * second panel.
    */
-  async function launch() {
-    setLaunching(true);
-    setLaunchError(null);
+  async function startAnalysis() {
+    setLaunch({ phase: "sending" });
     try {
       await convenePanel(clinicalCase.id);
-      setLaunched((count) => count + 1);
+      // Stays "running" until the poll sees work appear and then disappear. Clearing it on
+      // the response instead would re-enable the button in the seconds before the first
+      // worker claims anything, and a second press is a second panel.
+      setLaunch({ phase: "running" });
     } catch (caught) {
-      setLaunchError(
-        caught instanceof Error ? caught.message : "L'analyse n'a pas pu être lancée.",
-      );
-    } finally {
-      setLaunching(false);
+      setLaunch({
+        phase: "failed",
+        message: caught instanceof Error ? caught.message : "L'analyse n'a pas pu être lancée.",
+      });
     }
   }
 
-  const step = stepOf(clinicalCase, ledger, live);
+  const rows = ledgerState?.entries ?? [];
+  const step = stepOf(clinicalCase, ledgerState, live);
   // The sex is read from the ledger the clinician is looking at, so correcting it re-sorts
   // the table on the spot rather than after a reload.
   const sex = readSex(rows);
   const counts = tally(rows, sex);
   const groups = groupEntries(rows, sex);
-  const blocking = (ledger?.issues ?? []).filter((i) => i.severity === "blocking").length;
+  const blocking = (ledgerState?.issues ?? []).filter((i) => i.severity === "blocking").length;
+  // Anything that means work is under way or on its way: the gate stays shut for all of it.
+  const busy = live.length > 0 || launch.phase === "sending" || launch.phase === "running";
 
   return (
     <div className={`poste${collapsed ? " collapsed" : ""}`}>
@@ -218,7 +262,7 @@ export default function Workstation({
           </ol>
         </div>
 
-        {ledger === null ? (
+        {ledgerState === null ? (
           <section className="poste-section">
             <p className="muted">
               Aucune donnée extraite pour ce dossier. Déposez un document, puis revenez.
@@ -247,11 +291,15 @@ export default function Workstation({
                 </div>
               </div>
               {counts.notApplicable > 0 ? (
+                // The count above is the API's, unchanged. Saying so matters: the specialists
+                // are sent the ledger the API holds, so a field marked here is still a gap
+                // there, and a total quietly reduced would promise otherwise.
                 <p className="hint">
                   {counts.notApplicable} champ
-                  {counts.notApplicable > 1 ? "s sont marqués" : " est marqué"} sans objet
-                  d&apos;après le sexe inscrit au dossier, et ne compte
-                  {counts.notApplicable > 1 ? "nt" : ""} pas parmi les données manquantes.
+                  {counts.notApplicable > 1 ? "s sont signalés" : " est signalé"} sans objet
+                  d&apos;après le sexe inscrit au dossier. Ce repère est un confort de
+                  lecture : ces champs restent comptés ci-dessus et transmis comme manquants
+                  aux spécialistes.
                 </p>
               ) : null}
             </section>
@@ -342,17 +390,17 @@ export default function Workstation({
                 de la lecture automatique.
               </p>
               <button
-                onClick={launch}
-                disabled={!ledger.can_run_analysis || live.length > 0 || launching}
+                onClick={startAnalysis}
+                disabled={!ledgerState.can_run_analysis || busy}
               >
-                {launching
+                {launch.phase === "sending"
                   ? "Envoi de la demande…"
-                  : live.length > 0
+                  : busy
                     ? "Analyse en cours…"
                     : "Lancer l'analyse"}
               </button>
-              {launchError ? <p className="error">{launchError}</p> : null}
-              {launched > 0 && !launching && live.length === 0 ? (
+              {launch.phase === "failed" ? <p className="error">{launch.message}</p> : null}
+              {launch.phase === "running" && live.length === 0 ? (
                 // Between the request landing and the first worker claiming it, the case is
                 // genuinely empty. Saying so beats a screen that looks like the click missed.
                 <p className="hint">
@@ -492,19 +540,18 @@ function Value({ text }: { text: string }) {
 }
 
 /**
- * What is running, on the scale the API sends with each job.
+ * What is running: the step each job last reported, and how long it has been on it.
  *
- * The bar sits inside the step the worker last reported and creeps on the clock towards the
- * next one without ever entering it. Two things make that necessary rather than decorative:
- * the steps are wildly uneven — writing the opinion is roughly nine tenths of an agent's
- * wall clock — and the milestone only changes four times, so a bar pinned to milestones
- * alone stands still for a minute and reads as a hung run. The shares are measured; see
- * `lib/activity.ts`.
+ * **No percentage.** The worker reports four milestones and nothing between them, so any
+ * position between two of them is invented — and a bar interpolated on the clock climbs at
+ * the same rate whether the agent is writing or hung, which is exactly backwards at the
+ * moment it matters. The indicator is indeterminate: it says work is happening, not how much
+ * of it is done. The elapsed time is the honest number, and a step past its measured usual
+ * duration says so in words.
  */
 function Progress({ jobs }: { jobs: JobActivity[] }) {
-  // The milestone changes four times; the clock is what moves in between, so the bar needs
-  // its own tick. A second is finer than anyone watching a seventy-second step can see move,
-  // and coarse enough to cost nothing.
+  // The elapsed time is what moves between milestones, so this needs its own tick. A second
+  // is finer than anyone watching a seventy-second step needs, and costs nothing.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -516,10 +563,11 @@ function Progress({ jobs }: { jobs: JobActivity[] }) {
       <h2>En cours</h2>
       <div className="poste-agents">
         {jobs.map((job) => {
-          const progress = progressOf(job, now);
+          const stage = stageOf(job, now);
           const label = job.agent_role
             ? (AGENT_LABELS[job.agent_role] ?? job.agent_role)
             : (JOB_LABELS[job.job_type] ?? job.job_type);
+          const waiting = job.status === "waiting_for_user";
           return (
             <div key={job.id} className="poste-agent">
               <span className={`pip${job.status === "running" ? " run" : ""}`} />
@@ -527,32 +575,40 @@ function Progress({ jobs }: { jobs: JobActivity[] }) {
                 <span className="name">{label}</span>
                 <br />
                 <span className="stage">
-                  {job.status === "waiting_for_user"
+                  {waiting
                     ? "en attente d'une information"
-                    : job.milestone === null
+                    : stage === null
                       ? "en attente"
-                      : (STEP_LABELS[job.milestone] ?? job.milestone)}
-                  {progress?.overrunning ? (
-                    // Said out loud rather than left to a bar stuck near its ceiling: this
-                    // step is taking longer than it usually does, and the run is still alive.
+                      : (STEP_LABELS[stage.step] ?? stage.step)}
+                  {stage?.elapsedSeconds !== null && stage !== null ? (
+                    <span className="since">
+                      {" "}
+                      · depuis {readableDuration(stage.elapsedSeconds)}
+                    </span>
+                  ) : null}
+                  {stage?.overrunning === true ? (
+                    // Only for a step with a measured usual duration. An unknown step has no
+                    // "usually", so nothing is claimed about it.
                     <span className="slow"> — plus long que d&apos;habitude</span>
                   ) : null}
                 </span>
               </span>
-              <span className="track">
-                <span
-                  className="fill"
-                  style={{ width: `${((progress?.fraction ?? 0) * 100).toFixed(1)}%` }}
-                />
+              <span
+                className={`track${waiting || job.status === "queued" ? "" : " working"}`}
+                role="progressbar"
+                aria-label={`${label} : ${stage === null ? "en attente" : (STEP_LABELS[stage.step] ?? stage.step)}`}
+              >
+                <span className="fill" />
               </span>
             </div>
           );
         })}
       </div>
       <p className="hint">
-        Chaque barre avance aux étapes que l&apos;agent a réellement franchies, et n&apos;en
-        annonce jamais une qui n&apos;est pas atteinte. La rédaction de l&apos;avis est la
-        plus longue étape, et de loin : une barre lente n&apos;est pas une panne.
+        Chaque ligne indique l&apos;étape que l&apos;agent a réellement signalée et depuis
+        combien de temps il y est. L&apos;avancement à l&apos;intérieur d&apos;une étape
+        n&apos;est pas connu et n&apos;est donc pas affiché. La rédaction de l&apos;avis est
+        la plus longue étape, et de loin.
       </p>
     </section>
   );
