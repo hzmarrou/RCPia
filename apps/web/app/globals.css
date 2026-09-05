@@ -353,6 +353,9 @@ main:has(> .poste) { max-width: none; padding: 0; }
 }
 .poste-gate p { margin: 0; font-size: 12.5px; max-width: 52ch; }
 .poste-gate button { margin-left: auto; }
+/* The answer to a press goes on its own line under the button, not squeezed beside it. */
+.poste-gate .error, .poste-gate .hint { flex-basis: 100%; max-width: none; }
+.poste-gate .hint { color: var(--muted); }
 
 .poste-side {
   border-left: 1px solid var(--border);

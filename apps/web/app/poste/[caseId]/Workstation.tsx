@@ -71,19 +71,31 @@ export default function Workstation({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<LedgerEntry[]>(ledger?.entries ?? []);
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launched, setLaunched] = useState(0);
   const valueInput = useRef<HTMLInputElement>(null);
 
   // Poll only while something is moving, and stop as soon as it settles: an idle case should
   // not keep a request going every two seconds for as long as the tab is open.
+  //
+  // `launched` restarts the loop, which is how a click gets an answer at once instead of
+  // waiting out the idle interval.
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let polls = 0;
 
     async function tick() {
       const jobs = await fetchActivity(clinicalCase.id);
       if (cancelled) return;
       setLive(jobs);
-      timer = setTimeout(tick, jobs.length > 0 ? 2500 : 15000);
+      polls += 1;
+      // Work just asked for has not been claimed yet, and an empty answer one second after
+      // the request means "not started", not "nothing to do". Keep looking at the fast
+      // cadence for about half a minute before settling back.
+      const awaitingLaunch = launched > 0 && polls < 12;
+      timer = setTimeout(tick, jobs.length > 0 || awaitingLaunch ? 2500 : 15000);
     }
 
     tick();
@@ -91,7 +103,7 @@ export default function Workstation({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [clinicalCase.id]);
+  }, [clinicalCase.id, launched]);
 
   const openCorrection = useCallback((entry: LedgerEntry) => {
     setEditing(entry);
@@ -121,6 +133,29 @@ export default function Workstation({
       setError(caught instanceof Error ? caught.message : "La correction a échoué.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Convene the panel, and say so.
+   *
+   * The request used to be sent and forgotten: the button did not change, the first bar was
+   * up to fifteen seconds away, and a refusal disappeared into an unhandled rejection. From
+   * the clinician's side that is a button that does nothing, and the second press is a
+   * second panel.
+   */
+  async function launch() {
+    setLaunching(true);
+    setLaunchError(null);
+    try {
+      await convenePanel(clinicalCase.id);
+      setLaunched((count) => count + 1);
+    } catch (caught) {
+      setLaunchError(
+        caught instanceof Error ? caught.message : "L'analyse n'a pas pu être lancée.",
+      );
+    } finally {
+      setLaunching(false);
     }
   }
 
@@ -274,11 +309,24 @@ export default function Workstation({
                 de la lecture automatique.
               </p>
               <button
-                onClick={() => convenePanel(clinicalCase.id)}
-                disabled={!ledger.can_run_analysis || live.length > 0}
+                onClick={launch}
+                disabled={!ledger.can_run_analysis || live.length > 0 || launching}
               >
-                {live.length > 0 ? "Analyse en cours…" : "Lancer l'analyse"}
+                {launching
+                  ? "Envoi de la demande…"
+                  : live.length > 0
+                    ? "Analyse en cours…"
+                    : "Lancer l'analyse"}
               </button>
+              {launchError ? <p className="error">{launchError}</p> : null}
+              {launched > 0 && !launching && live.length === 0 ? (
+                // Between the request landing and the first worker claiming it, the case is
+                // genuinely empty. Saying so beats a screen that looks like the click missed.
+                <p className="hint">
+                  Demande envoyée. Les spécialistes apparaissent ici dès qu&apos;ils
+                  commencent.
+                </p>
+              ) : null}
             </section>
           </>
         )}
