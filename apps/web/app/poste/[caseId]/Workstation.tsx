@@ -7,7 +7,7 @@ import {
   JOB_LABELS,
   STEP_LABELS,
   fetchActivity,
-  reachedFraction,
+  progressOf,
   type JobActivity,
 } from "@/lib/activity";
 import type { CaseDetail, CaseSummary } from "@/lib/cases";
@@ -413,18 +413,29 @@ function Value({ text }: { text: string }) {
 /**
  * What is running, on the scale the API sends with each job.
  *
- * The bar advances to the *start* of the step reached and creeps no further: it never claims
- * a step the worker has not reported. Measured on real runs, writing the opinion is close to
- * nine tenths of an agent's wall clock, so an even four-part bar would sit still for a
- * minute — the scale comes from the job, not from this component.
+ * The bar sits inside the step the worker last reported and creeps on the clock towards the
+ * next one without ever entering it. Two things make that necessary rather than decorative:
+ * the steps are wildly uneven — writing the opinion is roughly nine tenths of an agent's
+ * wall clock — and the milestone only changes four times, so a bar pinned to milestones
+ * alone stands still for a minute and reads as a hung run. The shares are measured; see
+ * `lib/activity.ts`.
  */
 function Progress({ jobs }: { jobs: JobActivity[] }) {
+  // The milestone changes four times; the clock is what moves in between, so the bar needs
+  // its own tick. A second is finer than anyone watching a seventy-second step can see move,
+  // and coarse enough to cost nothing.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <section className="poste-section">
       <h2>En cours</h2>
       <div className="poste-agents">
         {jobs.map((job) => {
-          const reached = reachedFraction(job);
+          const progress = progressOf(job, now);
           const label = job.agent_role
             ? (AGENT_LABELS[job.agent_role] ?? job.agent_role)
             : (JOB_LABELS[job.job_type] ?? job.job_type);
@@ -440,12 +451,17 @@ function Progress({ jobs }: { jobs: JobActivity[] }) {
                     : job.milestone === null
                       ? "en attente"
                       : (STEP_LABELS[job.milestone] ?? job.milestone)}
+                  {progress?.overrunning ? (
+                    // Said out loud rather than left to a bar stuck near its ceiling: this
+                    // step is taking longer than it usually does, and the run is still alive.
+                    <span className="slow"> — plus long que d&apos;habitude</span>
+                  ) : null}
                 </span>
               </span>
               <span className="track">
                 <span
                   className="fill"
-                  style={{ width: `${Math.round((reached ?? 0) * 100)}%` }}
+                  style={{ width: `${((progress?.fraction ?? 0) * 100).toFixed(1)}%` }}
                 />
               </span>
             </div>
@@ -453,9 +469,9 @@ function Progress({ jobs }: { jobs: JobActivity[] }) {
         })}
       </div>
       <p className="hint">
-        Chaque barre avance aux étapes que l&apos;agent a réellement franchies. Une barre
-        immobile n&apos;est pas une panne : la rédaction de l&apos;avis est la plus longue
-        étape, et de loin.
+        Chaque barre avance aux étapes que l&apos;agent a réellement franchies, et n&apos;en
+        annonce jamais une qui n&apos;est pas atteinte. La rédaction de l&apos;avis est la
+        plus longue étape, et de loin : une barre lente n&apos;est pas une panne.
       </p>
     </section>
   );

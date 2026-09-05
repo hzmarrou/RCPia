@@ -339,9 +339,11 @@ main:has(> .poste) { max-width: none; padding: 0; }
   grid-area: bar; position: relative; height: 5px; border-radius: 3px;
   background: var(--border); overflow: hidden;
 }
+.poste-agent .stage .slow { font-style: italic; }
 .poste-agent .fill {
   position: absolute; inset: 0 auto 0 0; background: var(--fg);
-  border-radius: 3px; transition: width .45s linear;
+  /* Matches the tick that feeds it, so the bar drifts rather than stepping every second. */
+  border-radius: 3px; transition: width 1s linear;
 }
 
 .poste-gate {
