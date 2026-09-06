@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-500.css";
+import "@fontsource/ibm-plex-sans/latin-600.css";
+import "@fontsource/ibm-plex-mono/latin-400.css";
+import "@fontsource/ibm-plex-mono/latin-500.css";
+import "@fontsource/ibm-plex-serif/latin-400.css";
+import "@fontsource/ibm-plex-serif/latin-400-italic.css";
+import "@fontsource/ibm-plex-serif/latin-600.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,10 +21,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="fr">
       <body>
         <header className="banner">
-          RCPia does not replace a human RCP. All generated outputs are provisional.
+          RCPia ne remplace pas la RCP humaine. Toutes les sorties générées sont provisoires.
         </header>
         <main>{children}</main>
       </body>

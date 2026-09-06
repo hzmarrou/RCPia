@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import CaseList from "@/app/_components/CaseList";
 import {
   JOB_LABELS,
   STEP_LABELS,
@@ -13,21 +14,11 @@ import {
   type JobActivity,
 } from "@/lib/activity";
 import type { CaseDetail, CaseSummary } from "@/lib/cases";
+import { CANCER_LABELS, casePresentation } from "@/lib/caseView";
 import { correctField, convenePanel, type Ledger, type LedgerEntry } from "@/lib/ledger";
-import { groupEntries, readSex, tally } from "@/lib/ledgerView";
+import { groupEntries, readSex, SEVERITY_LABELS, tally } from "@/lib/ledgerView";
 import { PIPELINE, pipelineOf } from "@/lib/pipeline";
 import { AGENT_LABELS, docxUrl, downloadUrl, probatoireUrl } from "@/lib/pps";
-
-const CANCER_LABELS: Record<string, string> = { prostate: "Prostate", bladder: "Vessie" };
-
-const CASE_STATUS_LABELS: Record<string, string> = {
-  draft: "Brouillon",
-  parsing: "Extraction en cours",
-  ready_for_review: "À vérifier",
-  analyzing: "Analyse en cours",
-  completed: "Terminé",
-  blocked: "Bloqué",
-};
 
 // The pane widths a drag moves. Bounds exist so the centre keeps a floor: a rail dragged to
 // the right must not squeeze the ledger table out of existence.
@@ -238,37 +229,30 @@ export default function Workstation({
   // The sex is read from the ledger the clinician is looking at, so correcting it re-sorts
   // the table on the spot rather than after a reload.
   const sex = readSex(rows);
-  const counts = tally(rows, sex);
-  const groups = groupEntries(rows, sex);
-  const blocking = (ledgerState?.issues ?? []).filter((i) => i.severity === "blocking").length;
+  const issues = ledgerState?.issues ?? [];
+  const counts = tally(rows, sex, issues);
+  const groups = groupEntries(rows, sex, issues);
+  const blocking = issues.filter((issue) => issue.severity === "blocking");
   // Anything that means work is under way or on its way: the gate stays shut for all of it.
   const busy = live.length > 0 || launch.phase === "sending" || launch.phase === "running";
 
   return (
     <div className={`poste${collapsed ? " collapsed" : ""}`}>
-      <nav className="poste-rail">
-        <div className="poste-rail-label">Dossiers</div>
-        <div className="poste-caselist">
-          {cases.map((row) => (
-            <Link
-              key={row.id}
-              href={`/poste/${row.id}`}
-              className="poste-caserow"
-              aria-current={row.id === clinicalCase.id}
-            >
-              <span className="ref">{row.reference}</span>
-              <span className="sub">
-                {CANCER_LABELS[row.cancer_type] ?? row.cancer_type} ·{" "}
-                {CASE_STATUS_LABELS[row.status] ?? row.status}
-              </span>
-            </Link>
-          ))}
+      <nav className="poste-rail" aria-label="Dossiers">
+        <div className="poste-brand">
+          <Link href="/dashboard">RCPia</Link>
+          <span>Poste de travail</span>
         </div>
+        <div className="poste-rail-action">
+          <Link href="/cases/new" className="primary-link">+ Déposer un dossier</Link>
+        </div>
+        <CaseList cases={cases} activeCaseId={clinicalCase.id} />
+        <Link href="/dashboard" className="poste-dashboard-link">Tous les dossiers</Link>
       </nav>
 
       <Grip which="left" />
 
-      <main className="poste-main">
+      <section className="poste-main" aria-label="Données du dossier">
         <div className="poste-head">
           <div className="poste-titleline">
             <h1>{clinicalCase.reference}</h1>
@@ -276,7 +260,7 @@ export default function Workstation({
               {CANCER_LABELS[clinicalCase.cancer_type] ?? clinicalCase.cancer_type}
             </span>
             <span className="badge">
-              {CASE_STATUS_LABELS[clinicalCase.status] ?? clinicalCase.status}
+              {casePresentation(clinicalCase.status).label}
             </span>
           </div>
           <ol className="poste-pipeline">
@@ -347,7 +331,7 @@ export default function Workstation({
                 </div>
                 <div>
                   <div className="k">Bloquantes</div>
-                  <div className="v">{blocking}</div>
+                  <div className={`v${counts.blocking > 0 ? " red" : ""}`}>{counts.blocking}</div>
                 </div>
               </div>
               {counts.notApplicable > 0 ? (
@@ -380,6 +364,10 @@ export default function Workstation({
 
             <section className="poste-section">
               <h2>Données extraites du dossier</h2>
+              <p className="hint">
+                Les champs signalés « Bloquante » empêchent le lancement de l&apos;analyse.
+                Les autres données manquantes restent à vérifier.
+              </p>
               {groups.map((group) => (
                 <div key={group.category} className="poste-group">
                   <div className="poste-grouphead">
@@ -402,8 +390,15 @@ export default function Workstation({
                         <col />
                         <col className="act" />
                       </colgroup>
+                      <thead>
+                        <tr>
+                          <th scope="col">Donnée</th>
+                          <th scope="col">Valeur</th>
+                          <th scope="col"><span className="sr-only">Action</span></th>
+                        </tr>
+                      </thead>
                       <tbody>
-                        {group.rows.map(({ entry, applicable }, index) => (
+                        {group.rows.map(({ entry, applicable, issue }, index) => (
                           <tr
                             // Position, because nothing else is unique. The ledger returns
                             // some entries twice over — `platelets`, `bicarbonate` and
@@ -421,8 +416,19 @@ export default function Workstation({
                                     ? "unc"
                                     : undefined
                             }
+                            data-severity={issue?.severity}
                           >
-                            <td>{entry.label}</td>
+                            <td className="field">
+                              {entry.label}
+                              {issue ? (
+                                <span
+                                  className={`issue-badge ${issue.severity}`}
+                                  title={issue.message}
+                                >
+                                  {SEVERITY_LABELS[issue.severity]}
+                                </span>
+                              ) : null}
+                            </td>
                             <td>
                               {!applicable ? (
                                 // Marked, not hidden: if the recorded sex is wrong, the
@@ -436,6 +442,7 @@ export default function Workstation({
                               ) : (
                                 <Value text={entry.value} />
                               )}
+                              {entry.corrected ? <span className="poste-tag">Corrigé</span> : null}
                               {entry.note ? <div className="src">{entry.note}</div> : null}
                             </td>
                             <td>
@@ -464,6 +471,7 @@ export default function Workstation({
               <button
                 onClick={startAnalysis}
                 disabled={!ledgerState.can_run_analysis || busy}
+                aria-describedby={!ledgerState.can_run_analysis ? "poste-blocking-help" : undefined}
               >
                 {launch.phase === "sending"
                   ? "Envoi de la demande…"
@@ -471,6 +479,33 @@ export default function Workstation({
                     ? "Analyse en cours…"
                     : "Lancer l'analyse"}
               </button>
+              {!ledgerState.can_run_analysis ? (
+                <div className="poste-blockers" id="poste-blocking-help" role="status">
+                  <strong>
+                    {counts.blocking > 0
+                      ? "À corriger pour lancer l'analyse :"
+                      : "Le serveur ne permet pas encore l'analyse de cette version."}
+                  </strong>
+                  <ul>
+                    {blocking.map((issue, index) => {
+                      const entry = rows.find((row) => row.key === issue.key);
+                      return (
+                        <li key={`${issue.key}-${index}`}>
+                          {entry ? (
+                            <button
+                              className="poste-blocking-field"
+                              onClick={() => openCorrection(entry)}
+                            >
+                              {issue.label}
+                            </button>
+                          ) : <span>{issue.label}</span>}
+                          <span>{issue.message}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
               {launch.phase === "failed" ? <p className="error">{launch.message}</p> : null}
               {launch.phase === "running" && live.length === 0 && reachable ? (
                 // Between the request landing and the first worker claiming it, the case is
@@ -492,7 +527,7 @@ export default function Workstation({
             </section>
           </>
         )}
-      </main>
+      </section>
 
       <Grip which="right" />
 
@@ -507,6 +542,9 @@ export default function Workstation({
           </button>
           <button role="tab" aria-selected={tab === "fiche"} onClick={() => setTab("fiche")}>
             Fiche
+          </button>
+          <button role="tab" aria-selected="false" disabled title="Disponible prochainement">
+            Questions <span className="coming-soon">À venir</span>
           </button>
           <button
             className="poste-close"

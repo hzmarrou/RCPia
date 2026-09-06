@@ -128,7 +128,7 @@ export default async function PpsPage({
   const { pps } = result;
 
   return (
-    <section>
+    <section className="fiche-document">
       {/* Before the title: a reader who stops after one line must know this decides
           nothing. */}
       <p className="provisional">{pps.banner}</p>

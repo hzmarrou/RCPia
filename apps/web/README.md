@@ -23,5 +23,20 @@ creates, so it is opt-in rather than default.
 
 Environment:
 
-- `NEXT_PUBLIC_API_BASE_URL` — browser-visible API URL (default `http://localhost:8000`).
+- `NEXT_PUBLIC_API_BASE_URL` — browser-visible API URL (default relative `/api`).
 - `API_INTERNAL_BASE_URL` — server-side API URL inside Docker (e.g. `http://api:8000`).
+
+## Workstation
+
+The dashboard and workstation rail share the same case list: grouped by deposit day,
+newest first, with the last-updated timestamp displayed explicitly in UTC. Status dots
+always have text labels; a terminal panel without usable synthesis is not a missing-field
+warning.
+
+The workstation follows `docs/design/poste-mock.html`, with light/dark semantic tokens
+and locally bundled IBM Plex fonts (no font CDN). Blocking badges and the launch explanation
+use the API's issue severities; the launch permission remains `can_run_analysis`.
+The existing missing/uncertain counts still include fields marked "Sans objet".
+
+Progress remains indeterminate, showing only reported milestones and elapsed time.
+Questions is a disabled, forthcoming tab; no question-answering backend is connected.

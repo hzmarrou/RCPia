@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { LedgerEntry } from "../lib/ledger";
-import { applies, groupEntries, readSex, tally } from "../lib/ledgerView";
+import type { CompletenessIssue, LedgerEntry } from "../lib/ledger";
+import { applies, groupEntries, readSex, SEVERITY_LABELS, tally } from "../lib/ledgerView";
 
 /**
  * What the table may and may not decide for itself.
@@ -122,6 +122,7 @@ describe("tally", () => {
       // is additionally marked sans objet, which is a reading aid, not a correction.
       missing: 2,
       uncertain: 0,
+      blocking: 0,
       notApplicable: 1,
     });
   });
@@ -129,5 +130,52 @@ describe("tally", () => {
   it("counts everything when the dossier records no sex", () => {
     const entries = [entry({ key: "vaginal_exam" }), entry({ key: "g8_score" })];
     expect(tally(entries, null)).toMatchObject({ missing: 2, notApplicable: 0 });
+  });
+
+  it("counts blocking issues without treating every red or amber row as blocking", () => {
+    const entries = [
+      MALE,
+      entry({ key: "gleason" }),
+      entry({ key: "isup" }),
+      entry({ key: "vaginal_exam" }),
+      entry({ key: "clinical_stage", value: "cT2", highlight: "amber" }),
+    ];
+    const issues: CompletenessIssue[] = [
+      { key: "gleason", label: "Gleason", severity: "blocking", highlight: "red", message: "À renseigner" },
+      { key: "isup", label: "ISUP", severity: "required", highlight: "red", message: "À vérifier" },
+      { key: "clinical_stage", label: "Stade", severity: "uncertain", highlight: "amber", message: "Lectures divergentes" },
+    ];
+    expect(tally(entries, "male", issues)).toEqual({
+      read: 2, missing: 3, uncertain: 1, blocking: 1, notApplicable: 1,
+    });
+    const rows = groupEntries(entries, "male", issues).flatMap((group) => group.rows);
+    expect(rows.find((row) => row.entry.key === "gleason")?.issue?.severity).toBe("blocking");
+    expect(rows.find((row) => row.entry.key === "isup")?.issue?.severity).toBe("required");
+    expect(rows.find((row) => row.entry.key === "clinical_stage")?.issue?.severity).toBe("uncertain");
+    expect(rows.find((row) => row.entry.key === "vaginal_exam")?.issue).toBeNull();
+    expect(SEVERITY_LABELS.required).toContain("non bloquante");
+  });
+
+  it("keeps the strongest API severity when several issues refer to one field", () => {
+    const issue: CompletenessIssue = {
+      key: "gleason", label: "Gleason", severity: "blocking", highlight: "amber", message: "À corriger",
+    };
+    const uncertain: CompletenessIssue = { ...issue, severity: "uncertain" };
+    for (const issues of [[issue, uncertain], [uncertain, issue]]) {
+      const rows = groupEntries([entry({ key: "gleason", highlight: "amber" })], null, issues)[0].rows;
+      expect(rows[0].issue).toEqual(issue);
+      expect(tally([entry({ key: "gleason", highlight: "amber" })], null, issues).blocking).toBe(1);
+    }
+  });
+
+  it("does not hide an API blocker behind the sans-objet reading aid", () => {
+    const issue: CompletenessIssue = {
+      key: "vaginal_exam", label: "Examen", severity: "blocking", highlight: "red", message: "À corriger",
+    };
+    const entries = [entry({ key: issue.key })];
+    expect(groupEntries(entries, "male", [issue])[0].rows[0]).toMatchObject({
+      applicable: false, issue,
+    });
+    expect(tally(entries, "male", [issue])).toMatchObject({ blocking: 1, missing: 1, notApplicable: 1 });
   });
 });

@@ -1,4 +1,4 @@
-import { CATEGORY_LABELS, type LedgerEntry } from "@/lib/ledger";
+import { CATEGORY_LABELS, type CompletenessIssue, type LedgerEntry } from "@/lib/ledger";
 
 /**
  * Turning the ledger into something a clinician can read down.
@@ -62,7 +62,18 @@ export function applies(entry: LedgerEntry, sex: "male" | "female" | null): bool
   return restricted === undefined || sex === null || restricted === sex;
 }
 
-export type LedgerRow = { entry: LedgerEntry; applicable: boolean };
+export type LedgerRow = {
+  entry: LedgerEntry;
+  applicable: boolean;
+  issue: CompletenessIssue | null;
+};
+
+export const SEVERITY_LABELS = {
+  blocking: "Bloquante",
+  required: "Requise, non bloquante",
+  uncertain: "Incertaine",
+};
+const SEVERITY_ORDER = { blocking: 0, required: 1, uncertain: 2 };
 
 export type LedgerGroup = {
   category: string;
@@ -108,8 +119,16 @@ const ORDER = [
 export function groupEntries(
   entries: LedgerEntry[],
   sex: "male" | "female" | null,
+  issues: CompletenessIssue[] = [],
 ): LedgerGroup[] {
   const groups = new Map<string, LedgerGroup>();
+  const byField = new Map<string, CompletenessIssue>();
+  for (const issue of issues) {
+    const previous = byField.get(issue.key);
+    if (previous === undefined || SEVERITY_ORDER[issue.severity] < SEVERITY_ORDER[previous.severity]) {
+      byField.set(issue.key, issue);
+    }
+  }
 
   for (const entry of entries) {
     let group = groups.get(entry.category);
@@ -126,7 +145,7 @@ export function groupEntries(
     }
 
     const applicable = applies(entry, sex);
-    group.rows.push({ entry, applicable });
+    group.rows.push({ entry, applicable, issue: byField.get(entry.key) ?? null });
     if (!applicable) group.notApplicable += 1;
     if (entry.value === null) group.missing += 1;
     else group.present += 1;
@@ -145,11 +164,16 @@ export function groupEntries(
  * total quietly reduced here would break that promise in the one direction that matters,
  * by showing fewer gaps than the panel is actually told about.
  */
-export function tally(entries: LedgerEntry[], sex: "male" | "female" | null) {
+export function tally(
+  entries: LedgerEntry[],
+  sex: "male" | "female" | null,
+  issues: CompletenessIssue[] = [],
+) {
   return {
     read: entries.filter((entry) => entry.value !== null).length,
     missing: entries.filter((entry) => entry.highlight === "red").length,
     uncertain: entries.filter((entry) => entry.highlight === "amber").length,
+    blocking: issues.filter((issue) => issue.severity === "blocking").length,
     notApplicable: entries.filter((entry) => !applies(entry, sex)).length,
   };
 }
