@@ -143,6 +143,18 @@ job goes to exactly one of them. A claim takes a lease (15 minutes by default); 
 worker dies, the lease expires and another worker reclaims the job. Failures retry with
 exponential backoff up to `max_attempts`, keeping the error message on every attempt.
 
+## Field catalogue
+
+`platelets`, `bicarbonate` and `phosphorus` have one definition each. Their existing
+aliases are preserved, with the later definitions' units; newly assembled ledgers and
+new snapshots therefore contain only one row per field. Historical snapshots are not
+rewritten.
+
+**Clinical clarification pending:** the legacy alias `ph` still resolves to
+`phosphorus`, but it can also mean blood pH. Deduplication deliberately does not change
+that interpretation. A clinical decision is needed before removing or disambiguating
+the alias; the cleanup is not an endorsement of that mapping.
+
 ## Case lifecycle
 
 Case status describes the current ledger, not a clinical decision:

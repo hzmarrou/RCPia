@@ -400,12 +400,8 @@ export default function Workstation({
                       <tbody>
                         {group.rows.map(({ entry, applicable, issue }, index) => (
                           <tr
-                            // Position, because nothing else is unique. The ledger returns
-                            // some entries twice over — `platelets`, `bicarbonate` and
-                            // `phosphorus` each arrive as two rows identical in category,
-                            // key, value and origin. This is a display working around a
-                            // defect in the data, not a fix for it: the duplication is
-                            // upstream and still there.
+                            // Keep older API revisions and historical responses readable:
+                            // they may still contain duplicate field keys.
                             key={`${entry.key}-${index}`}
                             className={
                               !applicable

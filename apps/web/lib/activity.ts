@@ -52,14 +52,17 @@ export async function fetchActivity(caseId: string): Promise<ActivitySnapshot> {
 }
 
 /**
- * How long each step usually takes, measured on real runs.
+ * When a reported step warrants a slow-step warning.
  *
  * Two runs on 4 Sep 2026 (61s, 75s), four more on 5 Sep (69-83s), in line with the 47-67s
  * seen on staging:
  *
  *     bundle     assembling the dossier, retrieval included   6.5-7s
  *     reasoning  writing the opinion                          60-76s
- *     checking   citations, then recording                    under 150ms each
+ *     recording  recording the opinion                       under 150ms
+ *
+ * Checking uses the staging observation budget below, not the old 200ms local threshold.
+ * A brief phase can finish between polls while the UI still shows its last reported state.
  *
  * Used for one thing only: saying when a step has run longer than it usually does. **Not**
  * for placing a bar. A duration cannot be turned into progress — a provider that stalls the
@@ -70,7 +73,11 @@ export async function fetchActivity(caseId: string): Promise<ActivitySnapshot> {
 const TYPICAL_SECONDS: Record<string, number> = {
   bundle: 7,
   reasoning: 70,
-  checking: 0.2,
+  // Staging, 6 Sep 2026 17:52-17:54 UTC: one synthetic panel, four successful runs.
+  // Checking was enclosed in observation windows up to 0.562s, not exact attempt pairs.
+  // ceil(0.562s bound + 2.5s polling + 1.150s max RTT + 1s display margin) = 6s.
+  // Provisional warning budget, not a claimed phase duration; see apps/web/README.md.
+  checking: 6,
   recording: 0.2,
 };
 

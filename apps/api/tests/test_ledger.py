@@ -153,6 +153,53 @@ async def sign_in(client: AsyncClient, user: User) -> None:
 # --------------------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("cancer_type", list(CancerType))
+async def test_biology_fields_are_unique_in_the_ledger_and_recorded_version(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    cancer_type: CancerType,
+) -> None:
+    user, case = await seed_case_with_facts(
+        session_factory,
+        text="PQ : 220\nBicarbonates : 24\nPhosphore : 30\n",
+        cancer_type=cancer_type,
+    )
+    await sign_in(client, user)
+    response = await client.get(f"/cases/{case.id}/ledger")
+    assert response.status_code == 200
+    body = response.json()
+    keys = [entry["key"] for entry in body["entries"]]
+    assert len(keys) == len(set(keys)), "a dict keyed by field would conceal duplicate rows"
+    assert len(body["missing_fields"]) == len(set(body["missing_fields"]))
+    for key, value, unit in (
+        ("platelets", "220", None),
+        ("bicarbonate", "24", "mmol/L"),
+        ("phosphorus", "30", "mg/L"),
+    ):
+        entries = [entry for entry in body["entries"] if entry["key"] == key]
+        assert len(entries) == 1
+        assert entries[0]["value"] == value
+        assert entries[0]["unit"] == unit
+        assert entries[0]["highlight"] == "neutral"
+
+    corrected = await client.post(
+        f"/cases/{case.id}/ledger/corrections",
+        json={"fact_type": "platelets", "value": "221", "note": "Correction de test."},
+    )
+    assert corrected.status_code == 201
+    assert [entry["key"] for entry in corrected.json()["entries"]] == keys
+
+    async with session_factory() as session:
+        version = await session.scalar(
+            sa.select(CaseLedgerVersion)
+            .where(CaseLedgerVersion.case_id == case.id)
+            .order_by(CaseLedgerVersion.version.desc())
+        )
+        assert version is not None
+        stored_keys = [entry["key"] for entry in version.ledger["entries"]]
+        assert stored_keys == keys
+
+
 async def test_the_ledger_shows_values_missing_in_red_and_answered_fields_plain(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
