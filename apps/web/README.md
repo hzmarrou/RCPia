@@ -41,6 +41,36 @@ The existing missing/uncertain counts still include fields marked "Sans objet".
 Progress remains indeterminate, showing only reported milestones and elapsed time.
 Questions is a disabled, forthcoming tab; no question-answering backend is connected.
 
+### Checking warning calibration
+
+The `checking` warning uses a **provisional six-second observation budget**, not a claim
+that citation checking takes six seconds.
+
+On 6 September 2026, 17:52:07-17:53:59 UTC, one explicitly synthetic staging case
+(`TASK4-SYNTHETIC-TIMING-20260906T175207285Z`) was reviewed against its fixture and one
+panel was launched through the existing API. All three specialists and synthesis succeeded;
+no failed runs or retries were observed. The synthetic case is retained for audit.
+
+Sequential activity reads, 100ms after each response, enclosed checking in four monotonic
+observation windows: **0.286-0.562s**, median **0.410s**. Each window started before the last
+pre-checking observation and ended after recording or live-job disappearance confirmed by
+terminal run metadata. These are conservative full-phase bounds, potentially including
+reasoning tail, recording and network time, **not exact checking-to-recording durations**.
+Only one checking milestone was caught directly; the public endpoint does not expose
+attempt identity, so no exact same-attempt timestamp pairs were certified.
+
+Across 516 activity reads, median RTT was 0.081s and maximum RTT 1.150s. The warning budget
+is `ceil(0.562 + 2.5 + 1.150 + 1) = 6s`: the measured bound, the workstation's 2.5s
+after-response polling interval, observed maximum RTT and a one-second display margin.
+The other milestone thresholds are unchanged.
+
+This is a one-panel calibration, not a latency SLA or a representative tail estimate.
+Earlier current-revision logs showed an archive-only median of 2.848s and maximum of 3.148s
+(four observations); the pooled maximum across revisions was 4.235s (42 observations).
+Those partial intervals cannot be substituted for the whole checking phase. Revisit the budget with more full-phase
+observations, including cold starts and larger cases, after deployment. Unknown timestamps
+remain unknown, and elapsed time is neither capped nor converted into a progress percentage.
+
 ## Invitations
 
 `/admin/invitations`, linked from the dashboard, lets an organization administrator

@@ -64,6 +64,38 @@ describe("stageOf", () => {
     expect(stageOf(job(), T0 + 200_000)?.overrunning).toBe(true);
   });
 
+  it("does not warn during the observed staging checking window or ordinary poll lag", () => {
+    const checking = job({ milestone: "checking" });
+    expect(stageOf(checking, T0 + 562)?.overrunning).toBe(false);
+    expect(stageOf(checking, T0 + 2_000)).toEqual({
+      step: "checking", elapsedSeconds: 2, overrunning: false,
+    });
+  });
+
+  it("warns only beyond the six-second checking observation budget", () => {
+    const checking = job({ milestone: "checking" });
+    expect(stageOf(checking, T0 + 6_000)?.overrunning).toBe(false);
+    expect(stageOf(checking, T0 + 6_001)?.overrunning).toBe(true);
+    expect(stageOf(checking, T0 + 60_000)).toEqual({
+      step: "checking", elapsedSeconds: 60, overrunning: true,
+    });
+  });
+
+  it.each([null, "not-a-time"])(
+    "keeps checking duration and overrun unknown for timestamp %s", (milestone_at) => {
+      expect(stageOf(job({ milestone: "checking", milestone_at }), T0 + 60_000)).toEqual({
+        step: "checking", elapsedSeconds: null, overrunning: null,
+      });
+    },
+  );
+
+  it.each([["bundle", 7], ["reasoning", 70], ["recording", 0.2]] as const)(
+    "preserves the existing %s warning threshold", (milestone, seconds) => {
+      expect(stageOf(job({ milestone }), T0 + seconds * 1000)?.overrunning).toBe(false);
+      expect(stageOf(job({ milestone }), T0 + seconds * 1000 + 1)?.overrunning).toBe(true);
+    },
+  );
+
   it("claims nothing about how long an unmeasured step should take", () => {
     // No measurement, no "usually" — and so no assertion either way.
     const invented = job({ milestone: "polishing", steps: [...AGENT_STEPS, "polishing"] });

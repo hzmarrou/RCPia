@@ -19,7 +19,7 @@ from rcpia.cases.extraction import (
     normalize_label,
     resolve,
 )
-from rcpia.cases.fact_schema import FIELDS_BY_KEY, required_fields_for
+from rcpia.cases.fact_schema import FIELDS, FIELDS_BY_KEY, fields_for, required_fields_for
 from rcpia.cases.facts import extract_case_facts, latest_machine_facts
 from rcpia.core.models import (
     AnalysisJob,
@@ -79,6 +79,56 @@ def test_bold_markers_do_not_hide_a_label() -> None:
 
 def test_a_label_with_no_value_yields_nothing() -> None:
     assert extract_from_text("Grade :") == []
+
+
+@pytest.mark.parametrize(
+    ("label", "key"),
+    [
+        ("PQ", "platelets"),
+        ("PLQ", "platelets"),
+        ("Plaquettes", "platelets"),
+        ("Bicar", "bicarbonate"),
+        ("Bicarbonates", "bicarbonate"),
+        ("Phosphore", "phosphorus"),
+        ("ph", "phosphorus"),
+    ],
+)
+def test_biology_aliases_survive_catalogue_deduplication(label: str, key: str) -> None:
+    candidates = extract_from_text(f"{label} : 24")
+    assert [(candidate.key, candidate.value) for candidate in candidates] == [(key, "24")]
+
+
+@pytest.mark.parametrize("cancer_type", list(CancerType))
+def test_catalogue_and_resolver_emit_each_field_only_once(cancer_type: CancerType) -> None:
+    keys = [spec.key for spec in FIELDS]
+    assert len(keys) == len(set(keys))
+    resolved = resolve([], cancer_type=cancer_type)
+    resolved_keys = [fact.key for fact in resolved]
+    assert len(resolved_keys) == len(set(resolved_keys))
+    assert resolved_keys == [spec.key for spec in fields_for(cancer_type)]
+    for key in ("platelets", "bicarbonate", "phosphorus"):
+        assert resolved_keys.count(key) == 1
+
+
+@pytest.mark.parametrize(
+    ("earlier_alias", "later_alias", "key"),
+    [
+        ("PQ", "Plaquettes", "platelets"),
+        ("Bicarbonates", "Bicar", "bicarbonate"),
+        ("ph", "Phosphore", "phosphorus"),
+    ],
+)
+def test_deduplicated_aliases_keep_conflicting_readings(
+    earlier_alias: str, later_alias: str, key: str
+) -> None:
+    candidates = extract_from_text(f"{earlier_alias} : 24\n{later_alias} : 25\n")
+    facts = [
+        fact for fact in resolve(candidates, cancer_type=CancerType.bladder) if fact.key == key
+    ]
+    assert len(facts) == 1
+    assert facts[0].status is FactStatus.conflicting
+    assert facts[0].conflicting_values == ("24", "25")
+    assert len(facts[0].readings) == 2
 
 
 # --------------------------------------------------------------------------------------
