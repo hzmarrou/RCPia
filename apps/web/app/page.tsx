@@ -1,10 +1,7 @@
 import Link from "next/link";
 
-import { API_BASE_URL, fetchHealth } from "@/lib/api";
+import { SERVER_API_BASE_URL, fetchHealth } from "@/lib/api";
 
-// Server-side rendering runs inside the container, so it may need an internal
-// service URL (http://api:8000) instead of the browser-visible one.
-const SERVER_API_BASE_URL = process.env.API_INTERNAL_BASE_URL ?? API_BASE_URL;
 
 export const dynamic = "force-dynamic";
 
