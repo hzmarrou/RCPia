@@ -41,4 +41,8 @@ describe("the middleware matcher", () => {
   it("guards the workstation", () => {
     expect(config.matcher).toContain("/poste/:path*");
   });
+
+  it("guards invitation administration before the API checks the admin role", () => {
+    expect(config.matcher).toContain("/admin/:path*");
+  });
 });

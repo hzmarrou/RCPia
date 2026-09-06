@@ -27,5 +27,5 @@ export function middleware(request: NextRequest) {
  * `/poste` shipped that way for exactly one commit.
  */
 export const config = {
-  matcher: ["/dashboard/:path*", "/cases/:path*", "/poste/:path*"],
+  matcher: ["/dashboard/:path*", "/cases/:path*", "/poste/:path*", "/admin/:path*"],
 };

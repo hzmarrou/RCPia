@@ -3,17 +3,11 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { SERVER_API_BASE_URL } from "@/lib/api";
-import { fetchDashboardAccess } from "@/lib/auth";
+import { fetchDashboardAccess, ROLE_LABELS } from "@/lib/auth";
 import { fetchCases } from "@/lib/cases";
 import CaseList from "@/app/_components/CaseList";
 
 export const dynamic = "force-dynamic";
-
-const ROLE_LABELS: Record<string, string> = {
-  admin: "Administrateur",
-  uploader: "Déposant",
-  viewer: "Lecteur",
-};
 
 export default async function DashboardPage() {
   const cookieStore = await cookies();
@@ -66,7 +60,10 @@ export default async function DashboardPage() {
           <p className="eyebrow">Poste RCPia</p>
           <h1>Tableau de bord</h1>
         </div>
-        <Link href="/cases/new" className="primary-link">Déposer un dossier</Link>
+        <div className="dashboard-actions">
+          <Link href="/admin/invitations">Invitations (administration)</Link>
+          <Link href="/cases/new" className="primary-link">Déposer un dossier</Link>
+        </div>
       </div>
       <p className="muted">
         Connecté en tant que <strong>{user.full_name ?? user.email}</strong> —{" "}

@@ -38,6 +38,22 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+async def list_pending_invitations(
+    session: AsyncSession, *, organization_id: uuid.UUID
+) -> list[Invitation]:
+    """List unexpired pending invitations for one organization."""
+    invitations = await session.scalars(
+        sa.select(Invitation)
+        .where(
+            Invitation.organization_id == organization_id,
+            Invitation.status == InvitationStatus.pending,
+            Invitation.expires_at > _now(),
+        )
+        .order_by(Invitation.created_at.desc(), Invitation.id.desc())
+    )
+    return list(invitations)
+
+
 async def create_invitation(
     session: AsyncSession,
     *,
