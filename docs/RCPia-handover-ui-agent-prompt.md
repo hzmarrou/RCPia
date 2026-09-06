@@ -446,5 +446,15 @@ be right locally before anything is tested in the cloud.
 
 ## 10. First thing to do
 
-Bring the stack up locally, log in, upload a dossier from the dossiers folder, and walk the
-whole loop yourself. Then start Task 1. Report what you find that this brief got wrong.
+1. Confirm **PR #8 has merged**. If it has not, stop and say so — Task 2 conflicts with it.
+2. Bring the stack up locally, log in, upload a dossier from the dossiers folder, and walk the
+   whole loop yourself, so you have seen the thing you are changing.
+3. **Create a branch before you write any code.** One branch per task, cut from an up-to-date
+   `main`, one PR each. Never commit to `main`. Suggested names:
+   - Task 1 -> `feat-case-status-lifecycle`
+   - Task 2 -> `feat-workstation-design`
+   - Task 3 -> `feat-invitation-ui`
+   - Task 4 -> `fix-ledger-duplicates-and-threshold`
+4. Start with Task 1. It gates the rest.
+5. Report what you find that this brief got wrong. It was written from a running system on
+   6 Sep 2026 and the code will have moved.
