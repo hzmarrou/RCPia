@@ -1,0 +1,992 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Poste RCPia — maquette</title>
+<!--
+  Design reference for the RCPia workstation. Committed to the repository on 6 Sep 2026 so the
+  target design is a file rather than a link: the original lives as a Claude artifact, which
+  serves viewers a pinned version and may not be reachable by every tool.
+
+  Every value shown here is fictional. The page carries its own "Maquette" banner saying so.
+  No patient data. See docs/clinician-handover-plan.md (Stage D) and
+  docs/RCPia-handover-ui-agent-prompt.md (Task 2) for what to build from it, and for the two
+  parts that are deliberately NOT settled: the determinate progress bar, and the Questions tab.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+  /* ---------------------------------------------------------------- tokens
+     Red and amber already carry meaning in this product -- missing, and
+     uncertain -- so the accent cannot be either. A deep petrol keeps the
+     semantic colours the only warm things on the page. */
+  :root {
+    color-scheme: light;
+    /* Pane widths. Variables rather than fixed columns, so dragging a splitter is a
+       one-property write and the layout stays declarative. */
+    --rail-w: 258px;
+    --side-w: 424px;
+    --paper:      #f4f4f1;
+    --surface:    #ffffff;
+    --surface-2:  #fafaf8;
+    --rail:       #ececeA;
+    --ink:        #16191c;
+    --ink-2:      #3f454b;
+    --muted:      #6d7379;
+    --line:       #dcdedb;
+    --line-2:     #c9ccc8;
+    --accent:     #0d5b61;
+    --accent-ink: #ffffff;
+    --accent-soft:#e2eeee;
+    --missing:    #a8291f;
+    --missing-bg: #fbeceb;
+    --uncertain:  #8a5a00;
+    --uncertain-bg:#fdf3e0;
+    --ok:         #2b6349;
+    --ok-bg:      #e7f1ec;
+    --shadow:     0 1px 2px rgba(20,25,30,.06), 0 8px 24px rgba(20,25,30,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper:      #101315;
+      --surface:    #171b1e;
+      --surface-2:  #1c2124;
+      --rail:       #13171a;
+      --ink:        #e8eaea;
+      --ink-2:      #b9bfc2;
+      --muted:      #8b9297;
+      --line:       #2a3034;
+      --line-2:     #3a4247;
+      --accent:     #4fb3ba;
+      --accent-ink: #08262a;
+      --accent-soft:#153338;
+      --missing:    #f0857a;
+      --missing-bg: #331c1a;
+      --uncertain:  #e0ad55;
+      --uncertain-bg:#2f2617;
+      --ok:         #6fc39c;
+      --ok-bg:      #14291f;
+      --shadow:     0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper:#101315; --surface:#171b1e; --surface-2:#1c2124; --rail:#13171a;
+    --ink:#e8eaea; --ink-2:#b9bfc2; --muted:#8b9297; --line:#2a3034; --line-2:#3a4247;
+    --accent:#4fb3ba; --accent-ink:#08262a; --accent-soft:#153338;
+    --missing:#f0857a; --missing-bg:#331c1a;
+    --uncertain:#e0ad55; --uncertain-bg:#2f2617;
+    --ok:#6fc39c; --ok-bg:#14291f;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+
+  /* ---------------------------------------------------------------- notice */
+  .notice {
+    background: var(--uncertain-bg);
+    border-bottom: 1px solid var(--line);
+    color: var(--uncertain);
+    padding: 7px 16px;
+    font-size: 12.5px;
+    display: flex; gap: 10px; align-items: center;
+  }
+  .notice strong { color: var(--uncertain); }
+
+  /* ---------------------------------------------------------------- shell */
+  .shell {
+    display: grid;
+    grid-template-columns: var(--rail-w) 7px minmax(0, 1fr) 7px var(--side-w);
+    height: calc(100vh - 33px);
+    min-height: 560px;
+  }
+  .shell.collapsed { grid-template-columns: var(--rail-w) 7px minmax(0, 1fr) 0 0; }
+
+  /* The splitters. A hairline at rest, the accent under the pointer: a control that only
+     announces itself when you are near it, because it is furniture, not a feature. */
+  .grip {
+    position: relative; cursor: col-resize; background: none; border: 0; padding: 0;
+    touch-action: none;
+  }
+  .grip::before {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+    background: var(--line);
+  }
+  .grip:hover::before, .grip.dragging::before { left: 2px; width: 3px; background: var(--accent); }
+  .grip:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .shell.collapsed .grip.right { display: none; }
+  body.resizing { cursor: col-resize; user-select: none; }
+
+  /* ------------------------------------------------------------- left rail */
+  .rail {
+    background: var(--rail);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .brand {
+    padding: 14px 16px 12px;
+    display: flex; align-items: baseline; gap: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand b { font-size: 15px; letter-spacing: -.01em; }
+  .brand span { font-size: 11px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+
+  .rail-action { padding: 12px 12px 8px; }
+  .newcase {
+    width: 100%; text-align: left; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink);
+    border: 0; border-radius: 6px; padding: 9px 12px;
+    font-weight: 600; font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .newcase:hover { filter: brightness(1.08); }
+
+  .rail-label {
+    padding: 12px 16px 6px; font-size: 10.5px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .caselist { overflow-y: auto; flex: 1; padding: 0 8px 16px; min-height: 0; }
+  .caserow {
+    width: 100%; cursor: pointer; text-align: left;
+    background: transparent; border: 0; border-radius: 6px;
+    padding: 8px 10px; margin-bottom: 1px;
+    display: grid; grid-template-columns: 8px 1fr auto; gap: 9px; align-items: center;
+  }
+  .caserow:hover { background: var(--surface-2); }
+  .caserow[aria-current="true"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.wait { background: var(--uncertain); }
+  .dot.done { background: var(--ok); }
+  .dot.review { background: var(--missing); }
+  .caserow .ref { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; font-weight: 500; }
+  .caserow .sub { font-size: 11.5px; color: var(--muted); }
+  .caserow .when { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ---------------------------------------------------------------- centre */
+  .main { min-width: 0; overflow-y: auto; background: var(--paper); }
+  .mainhead {
+    padding: 16px 24px 0;
+    position: sticky; top: 0; background: var(--paper); z-index: 2;
+  }
+  .titleline { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 19px; margin: 0; letter-spacing: -.01em; font-family: "IBM Plex Mono", monospace; font-weight: 500; }
+  .chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line-2); color: var(--ink-2); background: var(--surface);
+  }
+  .chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: var(--ok-bg); }
+
+  /* pipeline: the spine of the product, shown as state rather than narrated */
+  .pipeline { display: flex; gap: 0; margin: 16px 0 4px; flex-wrap: wrap; }
+  .step {
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 14px 6px 12px; font-size: 12.5px;
+    border: 1px solid var(--line); border-right: 0; background: var(--surface);
+    color: var(--muted);
+  }
+  .step:first-child { border-radius: 6px 0 0 6px; }
+  .step:last-child { border-radius: 0 6px 6px 0; border-right: 1px solid var(--line); }
+  .step .num {
+    width: 17px; height: 17px; border-radius: 50%; flex: none;
+    display: grid; place-items: center; font-size: 10.5px; font-weight: 600;
+    background: var(--line); color: var(--ink-2);
+  }
+  .step.done { color: var(--ink-2); }
+  .step.done .num { background: var(--ok); color: var(--surface); }
+  .step.now { color: var(--ink); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); font-weight: 600; }
+  .step.now .num { background: var(--accent); color: var(--accent-ink); }
+
+  .section { padding: 20px 24px 0; }
+  .section h2 {
+    font-size: 12px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden;
+  }
+
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .metric { padding: 12px 16px; border-right: 1px solid var(--line); }
+  .metric:last-child { border-right: 0; }
+  .metric .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .metric .v { font-size: 21px; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .metric .v.red { color: var(--missing); }
+  .metric .v.amber { color: var(--uncertain); }
+
+  /* ledger table */
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  thead th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); font-weight: 600; padding: 9px 16px;
+    border-bottom: 1px solid var(--line); background: var(--surface-2);
+    position: sticky; top: 0;
+  }
+  tbody td { padding: 9px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr.miss { background: var(--missing-bg); }
+  tbody tr.unc  { background: var(--uncertain-bg); }
+  .field { font-weight: 500; }
+  .val { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+  .val.none { color: var(--missing); font-style: italic; font-family: inherit; }
+  .src { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .fix {
+    cursor: pointer; background: transparent; border: 1px solid var(--line-2);
+    border-radius: 5px; padding: 3px 9px; font-size: 12px; white-space: nowrap;
+  }
+  .fix:hover { border-color: var(--accent); color: var(--accent); }
+  .tag {
+    font-size: 10.5px; padding: 1px 6px; border-radius: 4px; margin-left: 7px;
+    background: var(--ok-bg); color: var(--ok); vertical-align: 1px;
+  }
+
+  /* ---------------------------------------------------- agents in progress
+     Only what the system genuinely knows is shown: which specialist, what state,
+     how long. There is no live view inside a run -- see the caption. */
+  .agents { display: grid; }
+  .agent {
+    display: grid;
+    grid-template-columns: 12px 1fr auto auto;
+    grid-template-areas: "pip who verdict clock" ".  bar bar bar";
+    gap: 5px 12px; align-items: center;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+  }
+  .agent:last-child { border-bottom: 0; }
+  .agent.synth { background: var(--surface-2); }
+  .agent .who { grid-area: who; }
+  .agent .verdict { grid-area: verdict; font-size: 12px; }
+  .agent .clock { grid-area: clock; }
+  .agent .track { grid-area: bar; }
+  .agent .name { font-weight: 500; }
+  .agent .state { font-size: 12px; color: var(--muted); }
+  .agent .verdict.prop { color: var(--ok); }
+  .agent .verdict.abst { color: var(--uncertain); }
+  .agent .clock {
+    font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums;
+    font-size: 12.5px; color: var(--muted); min-width: 46px; text-align: right;
+  }
+  .pip { grid-area: pip; width: 12px; height: 12px; border-radius: 50%; background: var(--line-2); }
+  .pip.run { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  .pip.ok  { background: var(--ok); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .pip.run { animation: none; } }
+
+  /* The bar advances on milestones the worker actually passes, and creeps between them so a
+     three-minute wait does not look frozen. It never reports more than the last milestone
+     reached: the creep is capped short of the next one.
+
+     NOTE for implementers: this determinate bar is exactly what a reviewer rejected in PR #6.
+     It is an open question, not a settled design. See section 7.1 of the agent brief. */
+  .track {
+    position: relative; height: 5px; border-radius: 3px;
+    background: var(--line); overflow: hidden; margin-top: 3px;
+  }
+  .fill {
+    position: absolute; inset: 0 auto 0 0; width: 0%;
+    background: var(--accent); border-radius: 3px;
+    transition: width .45s linear;
+  }
+  .fill.done { background: var(--ok); }
+  .fill.slow { background: var(--uncertain); }
+  .ticks { position: absolute; inset: 0; pointer-events: none; }
+  .ticks i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--surface); opacity: .8; }
+  .agent .stage { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* Panel total, so a clinician can see "three of four" without counting rows. */
+  .overall { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .overall .row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .overall .lab { font-size: 12px; color: var(--muted); }
+  .overall .cnt { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .overall .track { height: 7px; }
+
+  .caption { font-size: 11.5px; color: var(--muted); padding: 10px 16px 0; }
+
+  .gate {
+    margin: 16px 24px 28px; padding: 14px 16px;
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; background: var(--surface);
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  }
+  .gate p { margin: 0; font-size: 12.5px; color: var(--ink-2); max-width: 52ch; }
+  .run {
+    cursor: pointer; border: 0; border-radius: 6px; padding: 9px 16px;
+    background: var(--accent); color: var(--accent-ink); font-weight: 600;
+    margin-left: auto;
+  }
+  .run:hover { filter: brightness(1.08); }
+
+  /* ------------------------------------------------------------ right pane */
+  .side {
+    background: var(--surface); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .shell.collapsed .side { display: none; }
+  .sidehead {
+    display: flex; align-items: center; gap: 4px;
+    padding: 8px 8px 0; border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    cursor: pointer; background: transparent; border: 0;
+    padding: 8px 12px 9px; font-size: 12.5px; color: var(--muted);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  .closebtn { margin-left: auto; cursor: pointer; background: transparent; border: 0; color: var(--muted); font-size: 17px; padding: 4px 9px; }
+  .sidebody { overflow-y: auto; padding: 16px; flex: 1; min-height: 0; }
+
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+  input[type=text], textarea {
+    width: 100%; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink);
+    font: inherit;
+  }
+  input[type=text] { font-family: "IBM Plex Mono", monospace; }
+  textarea { resize: vertical; }
+  .save {
+    margin-top: 14px; cursor: pointer; border: 0; border-radius: 6px;
+    padding: 8px 14px; background: var(--accent); color: var(--accent-ink); font-weight: 600;
+  }
+  .hint { font-size: 11.5px; color: var(--muted); margin-top: 10px; }
+  .excerpt {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    font-family: "IBM Plex Serif", Georgia, serif; font-size: 12.5px; color: var(--ink-2);
+  }
+
+  /* fiche reads as a document, not as UI */
+  .fiche { font-family: "IBM Plex Serif", Georgia, serif; }
+  .fiche .banner {
+    font-family: "IBM Plex Sans", sans-serif; font-size: 11.5px;
+    background: var(--uncertain-bg); color: var(--uncertain);
+    border: 1px solid color-mix(in srgb, var(--uncertain) 30%, transparent);
+    border-radius: 6px; padding: 8px 10px; margin-bottom: 14px;
+  }
+  .fiche h3 { font-size: 13px; margin: 18px 0 6px; font-family: "IBM Plex Sans", sans-serif;
+    text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .fiche h3:first-of-type { margin-top: 0; }
+  .fiche p { margin: 0 0 9px; font-size: 13.5px; }
+  .diverge { border-left: 3px solid var(--uncertain); padding-left: 12px; margin: 10px 0; }
+  .diverge b { font-family: "IBM Plex Sans", sans-serif; font-size: 12px; }
+  .nom {
+    display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+    padding: 8px 0; border-bottom: 1px dashed var(--line);
+    font-family: "IBM Plex Sans", sans-serif; font-size: 13px;
+  }
+  .nom .n { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+  .nom .no { color: var(--muted); font-size: 12px; }
+
+  /* scoped assistant
+     NOTE for implementers: this tab is a new answering agent, not styling. It needs a backend,
+     case-scoped retrieval, a refusal boundary and citation attestation, and it needs the same
+     clinical sign-off as the agent brains. See section 7.2 of the agent brief. */
+  .qa { display: flex; flex-direction: column; height: 100%; }
+  .thread { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 96%; font-size: 13px; }
+  .msg.you {
+    align-self: flex-end; background: var(--accent-soft);
+    border-radius: 10px 10px 2px 10px; padding: 8px 11px;
+  }
+  .msg.it { align-self: flex-start; }
+  .msg.it .who { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+  .cite {
+    display: block; margin-top: 6px; font-size: 11.5px; color: var(--muted);
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .refuse { border-left: 3px solid var(--missing); padding-left: 10px; color: var(--ink-2); }
+  .ask { margin-top: 12px; display: flex; gap: 8px; }
+  .ask input { flex: 1; }
+  .ask button { cursor: pointer; border: 0; border-radius: 6px; padding: 0 14px; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .scope { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  @media (max-width: 1080px) {
+    .shell, .shell.collapsed { grid-template-columns: 1fr; height: auto; }
+    .grip { display: none; }
+    .rail { border-right: 0; border-bottom: 1px solid var(--line); }
+    .caselist { max-height: 200px; }
+    .side { border-left: 0; border-top: 1px solid var(--line); }
+    .shell.collapsed .side { display: flex; }
+  }
+</style>
+</head>
+<body>
+
+<div class="notice">
+  <strong>Maquette.</strong>
+  <span>Disposition seulement — toutes les valeurs affichées sont fictives. Aucune donnée patient réelle.</span>
+</div>
+
+<div class="shell" id="shell">
+
+  <!-- ------------------------------------------------------------ left rail -->
+  <nav class="rail">
+    <div class="brand"><b>RCPia</b><span>Staging</span></div>
+    <div class="rail-action">
+      <button class="newcase">＋ &nbsp;Déposer un dossier</button>
+    </div>
+    <div class="rail-label">Aujourd’hui</div>
+    <div class="caselist">
+      <button class="caserow" aria-current="true">
+        <span class="dot review"></span>
+        <span><span class="ref">DEMO-014</span><br><span class="sub">Prostate · à vérifier</span></span>
+        <span class="when">09:12</span>
+      </button>
+      <button class="caserow">
+        <span class="dot wait"></span>
+        <span><span class="ref">DEMO-013</span><br><span class="sub">Vessie · analyse en cours</span></span>
+        <span class="when">08:47</span>
+      </button>
+      <button class="caserow">
+        <span class="dot done"></span>
+        <span><span class="ref">DEMO-012</span><br><span class="sub">Vessie · fiche prête</span></span>
+        <span class="when">08:20</span>
+      </button>
+      <button class="caserow">
+        <span class="dot done"></span>
+        <span><span class="ref">DEMO-011</span><br><span class="sub">Prostate · fiche prête</span></span>
+        <span class="when">07:55</span>
+      </button>
+      <div class="rail-label">Hier</div>
+      <button class="caserow">
+        <span class="dot done"></span>
+        <span><span class="ref">DEMO-010</span><br><span class="sub">Vessie · fiche prête</span></span>
+        <span class="when">16:31</span>
+      </button>
+      <button class="caserow">
+        <span class="dot done"></span>
+        <span><span class="ref">DEMO-009</span><br><span class="sub">Prostate · fiche prête</span></span>
+        <span class="when">15:04</span>
+      </button>
+    </div>
+  </nav>
+
+  <div class="grip left" id="grip-left" role="separator" aria-orientation="vertical"
+       aria-label="Largeur de la liste des dossiers" tabindex="0"
+       aria-valuemin="180" aria-valuemax="420" aria-valuenow="258"></div>
+
+  <!-- --------------------------------------------------------------- centre -->
+  <main class="main">
+    <div class="mainhead">
+      <div class="titleline">
+        <h1>DEMO-014</h1>
+        <span class="chip">Prostate</span>
+        <span class="chip">Déposé 09:12</span>
+        <span class="chip ok">Extraction terminée</span>
+      </div>
+      <div class="pipeline">
+        <div class="step done"><span class="num">✓</span> Dépôt</div>
+        <div class="step done"><span class="num">✓</span> Lecture du document</div>
+        <div class="step now"><span class="num">3</span> Vérification par le clinicien</div>
+        <div class="step"><span class="num">4</span> Analyse par les spécialistes</div>
+        <div class="step"><span class="num">5</span> Fiche RCP</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Complétude</h2>
+      <div class="card summary">
+        <div class="metric"><div class="k">Données lues</div><div class="v">78</div></div>
+        <div class="metric"><div class="k">Manquantes</div><div class="v red">23</div></div>
+        <div class="metric"><div class="k">Incertaines</div><div class="v amber">4</div></div>
+        <div class="metric"><div class="k">Bloquantes</div><div class="v">0</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Données extraites du dossier</h2>
+      <div class="card tablewrap">
+        <table>
+          <thead>
+            <tr><th>Donnée</th><th>Valeur</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="field">PSA total</td>
+              <td><span class="val">8,40 ng/mL</span><div class="src">Biologie · p. 2</div></td>
+              <td><button class="fix" data-field="PSA total" data-value="8,40">Corriger</button></td>
+            </tr>
+            <tr class="unc">
+              <td class="field">Stade clinique (TR)</td>
+              <td><span class="val">cT2b</span><div class="src">Deux lectures divergentes : cT2a p. 1, cT2b p. 3</div></td>
+              <td><button class="fix" data-field="Stade clinique (TR)" data-value="cT2b">Corriger</button></td>
+            </tr>
+            <tr>
+              <td class="field">Gleason</td>
+              <td><span class="val">3 + 4</span><span class="tag">corrigé</span><div class="src">Anatomopathologie · p. 4</div></td>
+              <td><button class="fix" data-field="Gleason" data-value="3 + 4">Corriger</button></td>
+            </tr>
+            <tr>
+              <td class="field">Carottes positives</td>
+              <td><span class="val">4 / 18</span><div class="src">Anatomopathologie · p. 4</div></td>
+              <td><button class="fix" data-field="Carottes positives" data-value="4 / 18">Corriger</button></td>
+            </tr>
+            <tr class="miss">
+              <td class="field">Hormonothérapie</td>
+              <td><span class="val none">Information manquante</span><div class="src">Requise par le nomogramme MSKCC</div></td>
+              <td><button class="fix" data-field="Hormonothérapie" data-value="">Corriger</button></td>
+            </tr>
+            <tr class="miss">
+              <td class="field">Radiothérapie antérieure</td>
+              <td><span class="val none">Information manquante</span><div class="src">Requise par le nomogramme MSKCC</div></td>
+              <td><button class="fix" data-field="Radiothérapie antérieure" data-value="">Corriger</button></td>
+            </tr>
+            <tr>
+              <td class="field">Score G8</td>
+              <td><span class="val">15</span><div class="src">Évaluation gériatrique · p. 6</div></td>
+              <td><button class="fix" data-field="Score G8" data-value="15">Corriger</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section" id="progress" hidden>
+      <h2>Spécialistes au travail</h2>
+      <div class="card">
+        <div class="overall">
+          <div class="row"><span class="lab">Avancement du panel</span><span class="cnt" id="ocount">0 / 4 terminés</span></div>
+          <span class="track"><span class="fill" id="ofill"></span></span>
+        </div>
+        <div class="agents">
+          <div class="agent" data-role="uro">
+            <span class="pip"></span>
+            <span class="who"><span class="name">Oncologie urologique</span><br><span class="stage">en attente</span></span>
+            <span class="verdict"></span>
+            <span class="clock">—</span>
+            <span class="track"><span class="fill"></span><span class="ticks"><i style="left:9%"></i><i style="left:99%"></i></span></span>
+          </div>
+          <div class="agent" data-role="med">
+            <span class="pip"></span>
+            <span class="who"><span class="name">Oncologie médicale</span><br><span class="stage">en attente</span></span>
+            <span class="verdict"></span>
+            <span class="clock">—</span>
+            <span class="track"><span class="fill"></span><span class="ticks"><i style="left:9%"></i><i style="left:99%"></i></span></span>
+          </div>
+          <div class="agent" data-role="rad">
+            <span class="pip"></span>
+            <span class="who"><span class="name">Radiothérapie</span><br><span class="stage">en attente</span></span>
+            <span class="verdict"></span>
+            <span class="clock">—</span>
+            <span class="track"><span class="fill"></span><span class="ticks"><i style="left:9%"></i><i style="left:99%"></i></span></span>
+          </div>
+          <div class="agent synth" data-role="syn">
+            <span class="pip"></span>
+            <span class="who"><span class="name">Synthèse RCP</span><br><span class="stage">démarre après les trois avis</span></span>
+            <span class="verdict"></span>
+            <span class="clock">—</span>
+            <span class="track"><span class="fill"></span><span class="ticks"><i style="left:9%"></i><i style="left:99%"></i></span></span>
+          </div>
+        </div>
+        <p class="caption">
+          La barre avance à chaque étape franchie — dossier assemblé, avis rédigé, citations
+          vérifiées, avis enregistré — et progresse légèrement entre deux étapes pour montrer
+          que la course continue. Elle n’annonce jamais plus que la dernière étape atteinte.
+          Les étapes ne sont pas de longueur égale et la barre ne fait pas semblant : la
+          rédaction de l’avis représente à elle seule près de neuf dixièmes de la course. Le raisonnement lui-même n’est pas diffusé pendant la
+          course : il figure en annexe de la fiche, une fois l’avis rendu et vérifié.
+        </p>
+      </div>
+    </div>
+
+    <div class="gate">
+      <p>
+        Les spécialistes ne liront que la version affichée ci-dessus.
+        Corrigez d’abord ce qui doit l’être : l’analyse part de vos données, pas de la lecture automatique.
+      </p>
+      <button class="run">Lancer l’analyse</button>
+    </div>
+  </main>
+
+  <div class="grip right" id="grip-right" role="separator" aria-orientation="vertical"
+       aria-label="Largeur du panneau de droite" tabindex="0"
+       aria-valuemin="300" aria-valuemax="760" aria-valuenow="424"></div>
+
+  <!-- ----------------------------------------------------------- right pane -->
+  <aside class="side" id="side">
+    <div class="sidehead" role="tablist">
+      <button class="tab" role="tab" aria-selected="true"  data-panel="corr">Correction</button>
+      <button class="tab" role="tab" aria-selected="false" data-panel="fiche">Fiche</button>
+      <button class="tab" role="tab" aria-selected="false" data-panel="qa">Questions</button>
+      <button class="closebtn" id="close" title="Fermer">×</button>
+    </div>
+
+    <div class="sidebody" id="p-corr">
+      <div style="font-size:12px;color:var(--muted)">Donnée</div>
+      <div style="font-size:15px;font-weight:600" id="corr-field">Stade clinique (TR)</div>
+
+      <label for="corr-val">Valeur</label>
+      <input id="corr-val" type="text" value="cT2b">
+
+      <label for="corr-note">Motif de la correction</label>
+      <textarea id="corr-note" rows="3" placeholder="Ex. : deux lectures divergentes, le compte rendu du 12/03 fait foi"></textarea>
+
+      <button class="save">Enregistrer la correction</button>
+      <p class="hint">
+        La valeur lue automatiquement est conservée. La correction s’ajoute à l’historique du
+        dossier, avec son motif et son auteur.
+      </p>
+
+      <div class="excerpt">
+        « Toucher rectal : nodule du lobe droit, sans extension extra-capsulaire palpable,
+        classé <b>cT2b</b>. »
+        <div class="src" style="font-family:'IBM Plex Sans',sans-serif">Extrait du dossier déposé · p. 3</div>
+      </div>
+    </div>
+
+    <div class="sidebody fiche" id="p-fiche" hidden>
+      <div class="banner">
+        <b>DOCUMENT PROVISOIRE</b> — préparé automatiquement à partir du dossier déposé.
+        Aucune décision n’a été prise. À relire et valider en RCP.
+      </div>
+
+      <h3>Nomogrammes</h3>
+      <div class="nom"><span>Briganti 2012 — envahissement ganglionnaire</span><span class="n">4,1 %</span></div>
+      <div class="nom">
+        <span>MSKCC pré-prostatectomie</span>
+        <span class="no">impossible — hormonothérapie, radiothérapie</span>
+      </div>
+
+      <h3>Points de convergence</h3>
+      <p>Les trois spécialités retiennent un cancer localisé de risque intermédiaire et
+      s’accordent sur la nécessité d’une IRM de stadification avant décision.</p>
+
+      <h3>Divergence — arbitrage RCP requis</h3>
+      <div class="diverge">
+        <b>Modalité locale à placer en première proposition.</b>
+        <p style="margin-top:4px">
+          <i>Oncologie urologique</i> met en avant la prostatectomie totale, en reconnaissant
+          la radiothérapie comme alternative curative. <i>Radiothérapie</i> met en avant une
+          irradiation externe avec IGRT, en reconnaissant la chirurgie comme alternative.
+        </p>
+        <p>La RCP doit présenter les deux options et intégrer les préférences du patient,
+        sans attribuer de supériorité non établie.</p>
+      </div>
+
+      <h3>Informations manquantes</h3>
+      <p>23 données absentes, dont 2 empêchent le calcul d’un nomogramme. Aucune n’empêche
+      la discussion en réunion.</p>
+    </div>
+
+    <div class="sidebody qa" id="p-qa" hidden>
+      <div class="thread">
+        <div class="msg you">Pourquoi la radiothérapie ne tranche-t-elle pas ?</div>
+        <div class="msg it">
+          <div class="who">D’après ce dossier</div>
+          Elle ne tranche pas parce que les deux modalités sont curatives à ce stade et
+          qu’aucune supériorité n’est établie pour un risque intermédiaire favorable. Elle
+          demande l’IRM de stadification avant de se prononcer.
+          <span class="cite">afu.prostate.2024-2026.radiotherapie · §01.0349</span>
+        </div>
+
+        <div class="msg you">Que manque-t-il pour le MSKCC ?</div>
+        <div class="msg it">
+          <div class="who">D’après ce dossier</div>
+          Deux données : l’hormonothérapie et la radiothérapie antérieure. Tant qu’elles sont
+          absentes, le nomogramme reste « impossible » plutôt que de fournir une estimation
+          reposant sur une hypothèse.
+          <span class="cite">Registre du dossier · champs manquants</span>
+        </div>
+
+        <div class="msg you">Faut-il opérer ce patient ?</div>
+        <div class="msg it">
+          <div class="who">Hors périmètre</div>
+          <div class="refuse">
+            Je ne me prononce pas sur la décision : elle appartient à la RCP. Je peux vous
+            montrer ce que chaque spécialité a écrit, et les passages de recommandation
+            sur lesquels elles s’appuient.
+          </div>
+        </div>
+      </div>
+
+      <div class="ask">
+        <input type="text" placeholder="Poser une question sur ce dossier…">
+        <button>Envoyer</button>
+      </div>
+      <p class="scope">
+        Répond uniquement à partir de ce dossier, de la fiche et des recommandations citées.
+        Ne donne pas d’avis clinique et ne décide pas.
+      </p>
+    </div>
+  </aside>
+</div>
+
+<script>
+  // ------------------------------------------------------------------ resizing
+  // Three panes, two splitters. A clinician reading a long fiche wants the right pane wide;
+  // one working through the ledger wants the centre wide. Neither is the right default for
+  // the other, so the layout is theirs to set rather than ours to guess.
+  //
+  // NOTE for implementers: the shipped Workstation.tsx already does all of this, with
+  // keyboard support and persisted widths. Do not rebuild it from here.
+  const SIZES = {
+    left:  { prop: '--rail-w', min: 180, max: 420, start: 258 },
+    right: { prop: '--side-w', min: 300, max: 760, start: 424 },
+  };
+  // The centre pane is what everything else takes room from, so it gets a floor of its own:
+  // a rail dragged to the far right must not squeeze the ledger table out of existence.
+  const CENTRE_MIN = 360;
+  const STORE = 'rcpia.mock.panes';
+
+  function widthOf(which) {
+    return parseFloat(getComputedStyle(document.documentElement)
+      .getPropertyValue(SIZES[which].prop));
+  }
+
+  function setWidth(which, px) {
+    const spec = SIZES[which];
+    const other = which === 'left' ? widthOf('right') : widthOf('left');
+    const collapsed = document.getElementById('shell').classList.contains('collapsed');
+    const taken = (which === 'left' && collapsed) ? 0 : other;
+    // Clamp against the viewport as well as the fixed bounds, so the centre keeps its floor
+    // whatever the window is doing.
+    const room = window.innerWidth - taken - 14 - CENTRE_MIN;
+    const value = Math.round(Math.max(spec.min, Math.min(px, spec.max, room)));
+    document.documentElement.style.setProperty(spec.prop, value + 'px');
+    const grip = document.getElementById('grip-' + which);
+    if (grip) grip.setAttribute('aria-valuenow', String(value));
+    return value;
+  }
+
+  function remember() {
+    try {
+      localStorage.setItem(STORE, JSON.stringify({ left: widthOf('left'), right: widthOf('right') }));
+    } catch (error) { /* a private window, or storage switched off: not worth a message */ }
+  }
+
+  (function restore() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch (error) { saved = null; }
+    if (!saved) return;
+    if (Number.isFinite(saved.left))  setWidth('left', saved.left);
+    if (Number.isFinite(saved.right)) setWidth('right', saved.right);
+  })();
+
+  document.querySelectorAll('.grip').forEach(function (grip) {
+    const which = grip.classList.contains('left') ? 'left' : 'right';
+    // The right pane grows leftwards, so its drag reads the other way round.
+    const sign = which === 'left' ? 1 : -1;
+
+    grip.addEventListener('pointerdown', function (event) {
+      event.preventDefault();
+      const from = event.clientX;
+      const initial = widthOf(which);
+      grip.setPointerCapture(event.pointerId);
+      grip.classList.add('dragging');
+      document.body.classList.add('resizing');
+
+      function move(moved) { setWidth(which, initial + sign * (moved.clientX - from)); }
+      function stop() {
+        grip.releasePointerCapture(event.pointerId);
+        grip.classList.remove('dragging');
+        document.body.classList.remove('resizing');
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', stop);
+        grip.removeEventListener('pointercancel', stop);
+        remember();
+      }
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', stop);
+      grip.addEventListener('pointercancel', stop);
+    });
+
+    // Keyboard, because a splitter that only answers to a mouse is not a control everyone has.
+    grip.addEventListener('keydown', function (event) {
+      const step = event.shiftKey ? 48 : 12;
+      if (event.key === 'ArrowLeft')       setWidth(which, widthOf(which) - sign * step);
+      else if (event.key === 'ArrowRight') setWidth(which, widthOf(which) + sign * step);
+      else if (event.key === 'Home')       setWidth(which, SIZES[which].min);
+      else if (event.key === 'End')        setWidth(which, SIZES[which].max);
+      else return;
+      event.preventDefault();
+      remember();
+    });
+
+    grip.addEventListener('dblclick', function () {
+      setWidth(which, SIZES[which].start);
+      remember();
+    });
+  });
+
+  // A window narrowed past what the panes fit has to give the centre its floor back.
+  addEventListener('resize', function () {
+    setWidth('left', widthOf('left'));
+    setWidth('right', widthOf('right'));
+  });
+
+  // Tabs on the right pane. The pane is the mock's real proposal: correct a value, read the
+  // fiche, or ask about this case, without ever losing the case on the left.
+  const panels = { corr: p('p-corr'), fiche: p('p-fiche'), qa: p('p-qa') };
+  function p(id) { return document.getElementById(id); }
+
+  document.querySelectorAll('.tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('.tab').forEach(function (t) {
+        t.setAttribute('aria-selected', String(t === tab));
+      });
+      Object.keys(panels).forEach(function (key) {
+        panels[key].hidden = key !== tab.dataset.panel;
+      });
+    });
+  });
+
+  function showTab(name) {
+    document.querySelectorAll('.tab').forEach(function (t) {
+      t.setAttribute('aria-selected', String(t.dataset.panel === name));
+    });
+    Object.keys(panels).forEach(function (key) { panels[key].hidden = key !== name; });
+  }
+
+  // "Corriger" fills the right pane rather than navigating away -- the whole point of the
+  // three panes.
+  document.querySelectorAll('.fix').forEach(function (button) {
+    button.addEventListener('click', function () {
+      document.getElementById('shell').classList.remove('collapsed');
+      document.getElementById('corr-field').textContent = button.dataset.field;
+      document.getElementById('corr-val').value = button.dataset.value;
+      document.getElementById('corr-note').value = '';
+      showTab('corr');
+      document.getElementById('corr-val').focus();
+    });
+  });
+
+  document.getElementById('close').addEventListener('click', function () {
+    document.getElementById('shell').classList.add('collapsed');
+  });
+
+  document.querySelectorAll('.caserow').forEach(function (row) {
+    row.addEventListener('click', function () {
+      document.querySelectorAll('.caserow').forEach(function (r) {
+        r.setAttribute('aria-current', String(r === row));
+      });
+    });
+  });
+
+  // The run, played out. Durations are real: two runs measured on 4 Sep 2026 took 61s and
+  // 75s, in line with the 47-67s seen on staging earlier. Compressed here so the mock can be
+  // watched in a few seconds.
+  const SPEED = 12;
+  function mmss(ms) {
+    const s = Math.floor(ms / 1000);
+    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  // The four steps the worker actually reports, and the share of the wall clock each one
+  // takes. **Measured, not assumed** -- two real runs on 4 Sep 2026, 61s and 75s:
+  //
+  //     dossier assemblé (retrieval included)   ~9%    6.5-7s
+  //     rédaction de l’avis                     ~89%   60-74s
+  //     vérification, enregistrement            <0.5%  under 150ms
+  //
+  // The earlier guess here was 15/25/45/15, which put the bar at 40% after seven seconds and
+  // then held it still for a minute -- the exact failure the caption below warns about. One
+  // step doing nine tenths of the work is not a tidy diagram, and drawing it as four equal
+  // quarters would be a picture of something that does not happen.
+  const STAGES = [
+    { at: 0.000, to: 0.090, label: 'dossier assemblé' },
+    { at: 0.090, to: 0.990, label: 'rédaction de l’avis' },
+    { at: 0.990, to: 0.996, label: 'vérification des citations' },
+    { at: 0.996, to: 1.000, label: 'enregistrement de l’avis' },
+  ];
+
+  function runAgent(role, realSeconds, verdict, label) {
+    const row = document.querySelector('.agent[data-role="' + role + '"]');
+    const pip = row.querySelector('.pip');
+    const stage = row.querySelector('.stage');
+    const clock = row.querySelector('.clock');
+    const said = row.querySelector('.verdict');
+    const fill = row.querySelector('.fill');
+    const started = Date.now();
+    const total = (realSeconds * 1000) / SPEED;
+
+    pip.classList.add('run');
+
+    const tick = setInterval(function () {
+      const elapsed = Date.now() - started;
+      const share = Math.min(elapsed / total, 1);
+      clock.textContent = mmss(elapsed * SPEED);
+
+      const current = STAGES.filter(function (s) { return share >= s.at; }).pop() || STAGES[0];
+      stage.textContent = current.label;
+
+      // Creep towards the next milestone without ever claiming to have reached it: the bar
+      // stops just short until the stage actually changes. A bar that runs ahead of the work
+      // is worse than no bar, because the clinician stops believing the next one.
+      const span = current.to - current.at;
+      const within = span > 0 ? Math.min((share - current.at) / span, 1) : 1;
+      const shown = current.at + span * (0.82 * within);
+      fill.style.width = (shown * 100).toFixed(1) + '%';
+
+      // Longer than this speciality usually takes: say so rather than sitting at 99%.
+      if (share >= 1) {
+        fill.classList.add('slow');
+        stage.textContent = 'plus long que d’habitude — toujours en cours';
+      }
+    }, 120);
+
+    setTimeout(function () {
+      clearInterval(tick);
+      pip.classList.remove('run');
+      pip.classList.add('ok');
+      fill.classList.remove('slow');
+      fill.classList.add('done');
+      fill.style.width = '100%';
+      clock.textContent = mmss(realSeconds * 1000);
+      stage.textContent = label;
+      said.textContent = verdict === 'prop' ? 'proposition' : 'abstention';
+      said.classList.add(verdict);
+      finished += 1;
+      const ofill = document.getElementById('ofill');
+      ofill.style.width = (finished / 4 * 100) + '%';
+      if (finished === 4) ofill.classList.add('done');
+      document.getElementById('ocount').textContent = finished + ' / 4 terminés';
+    }, total);
+  }
+
+  let finished = 0;
+
+  document.querySelector('.run').addEventListener('click', function () {
+    this.textContent = 'Analyse en cours…';
+    this.disabled = true;
+    document.getElementById('progress').hidden = false;
+
+    document.querySelectorAll('.step').forEach(function (s, i) {
+      if (i === 2) { s.classList.remove('now'); s.classList.add('done'); s.querySelector('.num').textContent = '✓'; }
+      if (i === 3) { s.classList.add('now'); }
+    });
+
+    // 61s and 75s are measured; the radiotherapy figure is from an earlier staging run.
+    runAgent('rad', 67, 'prop', '12 passages retenus');
+    runAgent('med', 61, 'abst', 'avis suspendu — stadification incomplète');
+    runAgent('uro', 75, 'prop', '9 passages retenus');
+
+    // The synthesis only starts once every specialist has finished; it reads them.
+    setTimeout(function () {
+      runAgent('syn', 38, 'prop', '1 divergence, 3 informations manquantes');
+      setTimeout(function () {
+        document.querySelectorAll('.step').forEach(function (s, i) {
+          if (i === 3) { s.classList.remove('now'); s.classList.add('done'); s.querySelector('.num').textContent = '✓'; }
+          if (i === 4) { s.classList.add('now'); }
+        });
+        document.getElementById('shell').classList.remove('collapsed');
+        showTab('fiche');
+      }, (38 * 1000) / SPEED);
+    }, (75 * 1000) / SPEED);
+  });
+</script>
+
+</body>
+</html>

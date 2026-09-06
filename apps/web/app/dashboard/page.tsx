@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 
 import { SERVER_API_BASE_URL } from "@/lib/api";
 import { fetchDashboardAccess } from "@/lib/auth";
-
+import { fetchCases } from "@/lib/cases";
+import CaseList from "@/app/components/CaseList";
 
 export const dynamic = "force-dynamic";
 
@@ -45,20 +46,37 @@ export default async function DashboardPage() {
   }
 
   const { user } = access;
+  const cases = await fetchCases(SERVER_API_BASE_URL, cookieHeader);
+  if (cases === null) {
+    return (
+      <section className="panel">
+        <h1>Dossiers indisponibles</h1>
+        <p className="error" role="alert">
+          Votre session ne permet plus de consulter les dossiers.
+        </p>
+        <Link href="/login">Se reconnecter</Link>
+      </section>
+    );
+  }
 
   return (
-    <section className="panel">
-      <h1>Tableau de bord</h1>
-      <p>
+    <section className="dashboard">
+      <div className="dashboard-head">
+        <div>
+          <p className="eyebrow">Poste RCPia</p>
+          <h1>Tableau de bord</h1>
+        </div>
+        <Link href="/cases/new" className="primary-link">Déposer un dossier</Link>
+      </div>
+      <p className="muted">
         Connecté en tant que <strong>{user.full_name ?? user.email}</strong> —{" "}
         {ROLE_LABELS[user.role] ?? user.role}
       </p>
-      <p>
-        <Link href="/cases/new">Déposer un nouveau dossier</Link>
-      </p>
-      <p className="muted">
-        La génération de PPS provisoires sera disponible ici.
-      </p>
+      <div className="dashboard-cases">
+        <h2>Vos dossiers</h2>
+        <p className="muted">Du plus récent au plus ancien. Chaque dossier ouvre son poste de travail.</p>
+        <CaseList cases={cases} />
+      </div>
     </section>
   );
 }
