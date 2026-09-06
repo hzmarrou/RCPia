@@ -126,6 +126,19 @@ Two defects fixed on 6 Sep, for context:
 
 ## 5. The work
 
+**Read this before anything else in this section.**
+
+This is a working, tested, deployed application. **You are modifying it in place. You are not
+building a new one.** Nothing here asks for a new app, a new frontend, a parallel page, a
+rewrite of the workstation, or a fresh component library. If you find yourself creating a
+second version of a screen that already exists, stop — you have misread the brief.
+
+In particular, `apps/web/app/poste/[caseId]/Workstation.tsx` is 771 lines that already
+implement most of the target design's *structure*. What is missing is mostly its *appearance*,
+plus a few small additions. Each task below therefore states **what already exists** before it
+states **what changes**. Respect that split: extend the existing components, keep their props
+and tests working, and keep the diff proportionate to the change.
+
 Do these in order. Each lands as its own PR.
 
 ### Task 1 — Make case status mean something (backend)
@@ -183,20 +196,53 @@ Typography: **IBM Plex Sans** for UI, **IBM Plex Mono** for values, references a
 `font-variant-numeric: tabular-nums`, **IBM Plex Serif** for the fiche so it reads as a document
 rather than as more UI. Define both themes at token level, light on bare `:root`.
 
-#### Structure
+#### What already exists — do not rebuild any of this
 
-- **Left rail** — brand, "Déposer un dossier", case list grouped by day. Each row: a status dot
-  (red `à vérifier`, amber `analyse en cours`, green `fiche prête`), mono reference,
-  localisation, time. This is Task 1's status made visible.
-- **Centre** — title with chips; pipeline as joined segments; a completeness card showing
-  *lues / manquantes / incertaines / **bloquantes***; the ledger table with `miss` and `unc`
-  row tints; the gate box with its promise text and the launch button.
-- **Right pane** — three tabs: **Correction**, **Fiche**, **Questions** (see §7).
-- Two draggable splitters, keyboard operable, widths persisted to `localStorage` in a
-  try/catch.
+`apps/web/app/poste/[caseId]/Workstation.tsx` (771 lines) already implements, and it works:
 
-`GET /cases` already returns `id`, `reference`, `cancer_type`, `status`, `created_at`,
-`updated_at`. **No API work is needed for the list.**
+| Piece | Where |
+| --- | --- |
+| Three-pane shell with two draggable splitters, keyboard operable, widths persisted to `localStorage` | `Workstation.tsx:32-45`, `:688-745` |
+| Left case rail listing every case | `.poste-rail`, `:236-260` |
+| Pipeline as a stage list | `.poste-pipeline`, `:269`; logic in `lib/pipeline.ts` |
+| Ledger table grouped by category, with "sans objet" rows | `.poste-group`, `:368`; logic in `lib/ledgerView.ts` |
+| Right pane tabs — Correction and Fiche | `role="tab"`, `:486-492` |
+| Agent progress from real milestones | `.poste-agents`, `:633`; logic in `lib/activity.ts` |
+| Gate box, launch button, launch/error states | around `:450` |
+
+So the target design's **structure is largely built**. Treat this task as a restyle plus four
+small additions — not as building the mock.
+
+#### What actually changes
+
+1. **Appearance.** Replace the palette and typography in `apps/web/app/globals.css` with the
+   tokens above. This is the bulk of the task and it is mostly CSS. Keep the existing class
+   names where you can; renaming `.poste-*` classes churns the diff for nothing.
+2. **Status dots in the rail.** Each row gains a dot driven by Task 1's status — red
+   `à vérifier`, amber `analyse en cours`, green `fiche prête`. Small change to an existing
+   list; no new component.
+3. **Completeness card** (new, small). Above the ledger: *lues / manquantes / incertaines /
+   **bloquantes***. The counts come from the API's `issues` array; `lib/ledgerView.ts` already
+   has `tally()` — extend it rather than writing a second counter.
+4. **Blocking clarity.** The API's `issues` carry `severity` of `blocking` / `required` /
+   `uncertain` and the UI ignores it. Surface it: name the blocking field next to the disabled
+   launch button, and distinguish the three severities visually.
+5. **A third tab, "Questions"** — present but disabled, see §7.2.
+
+> Presentation only. Do not change which fields block, and do not recompute completeness in the
+> frontend. See §2.
+
+#### The one genuinely missing surface: the dashboard
+
+The case rail exists, but **only inside `/poste/[caseId]`** — you need a case id to reach the
+list of cases. `apps/web/app/dashboard/page.tsx` is a stub ending in the placeholder *"La
+génération de PPS provisoires sera disponible ici."* So a clinician who uploads today cannot
+find that case tomorrow by any route in the UI.
+
+Give the dashboard the same case list, in the new visual language, each row linking to
+`/poste/<id>`. `GET /cases` already returns `id`, `reference`, `cancer_type`, `status`,
+`created_at`, `updated_at`, and `lib/cases.ts` already has `fetchCases`. **No API work is
+needed.** Reuse the rail's row rendering rather than writing a second one.
 
 #### The blocking-clarity requirement
 
