@@ -67,7 +67,8 @@ describe("uploadDossier", () => {
     await uploadDossier(CASE.id, file);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe(`http://localhost:8000/cases/${CASE.id}/documents`);
+    // Same origin as the page: an upload names no host of its own. See tests/apiBaseUrl.spec.ts.
+    expect(url).toBe(`/api/cases/${CASE.id}/documents`);
     expect(init.body).toBeInstanceOf(FormData);
     expect((init.body as FormData).get("file")).toBe(file);
   });

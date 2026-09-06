@@ -19,11 +19,13 @@
 
 import { NextRequest } from "next/server";
 
+import { SERVER_API_BASE_URL } from "@/lib/api";
+
 // Cookies and per-user data pass through here; nothing about it may be cached or
 // pre-rendered.
 export const dynamic = "force-dynamic";
 
-const API_ORIGIN = process.env.API_INTERNAL_BASE_URL ?? "http://localhost:8000";
+const API_ORIGIN = SERVER_API_BASE_URL;
 
 // Hop-by-hop headers, and the ones the upstream must set for itself. Forwarding `host` sends
 // the browser's hostname to a container that answers on another, and forwarding a

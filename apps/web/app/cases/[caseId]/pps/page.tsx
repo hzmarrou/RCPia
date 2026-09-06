@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 
-import { API_BASE_URL } from "@/lib/api";
+import { SERVER_API_BASE_URL } from "@/lib/api";
 import {
   AGENT_LABELS,
   ANSWER_LABELS,
@@ -17,7 +17,6 @@ import {
   type TreatmentStep,
 } from "@/lib/pps";
 
-const SERVER_API_BASE_URL = process.env.API_INTERNAL_BASE_URL ?? API_BASE_URL;
 
 export const dynamic = "force-dynamic";
 

@@ -1,12 +1,11 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 
-import { API_BASE_URL } from "@/lib/api";
+import { SERVER_API_BASE_URL } from "@/lib/api";
 import { fetchCase, fetchCases } from "@/lib/cases";
 import { fetchLedger } from "@/lib/ledger";
 import Workstation from "./Workstation";
 
-const SERVER_API_BASE_URL = process.env.API_INTERNAL_BASE_URL ?? API_BASE_URL;
 
 export const dynamic = "force-dynamic";
 
