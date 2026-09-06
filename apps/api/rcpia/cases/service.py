@@ -188,6 +188,12 @@ async def _record_document(
     filename: str,
     stored: BlobInfo,
 ) -> UploadedDocument:
+    # Always take the same NO KEY UPDATE lock as extraction finalization, even when the
+    # case already says parsing. An unchanged ORM assignment would emit no UPDATE and let
+    # an upload slip between extraction's generation check and its commit.
+    await session.execute(
+        sa.update(Case).where(Case.id == case.id).values(status=CaseStatus.parsing)
+    )
     document = UploadedDocument(
         id=document_id,
         case_id=case.id,
@@ -227,7 +233,6 @@ async def _record_document(
         payload={"document_id": str(document_id)},
     )
 
-    case.status = CaseStatus.parsing
     await session.flush()
     return document
 

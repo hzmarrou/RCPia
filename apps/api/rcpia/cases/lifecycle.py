@@ -1,5 +1,6 @@
 """Case status describes panels over the current ledger, never an older fiche."""
 
+import hashlib
 import uuid
 
 import sqlalchemy as sa
@@ -14,8 +15,28 @@ from rcpia.core.models import (
     Case,
     CaseLedgerVersion,
     CaseStatus,
+    UploadedDocument,
 )
 from rcpia.jobs.models import LIVE_JOB_STATUSES
+
+
+async def intake_generation(session: AsyncSession, *, case_id: uuid.UUID) -> str:
+    """Identify the document/parse snapshot without relying on transaction timestamps."""
+    documents = await session.execute(
+        sa.select(
+            UploadedDocument.id,
+            UploadedDocument.current_parse_run,
+            UploadedDocument.parse_status,
+        )
+        .where(UploadedDocument.case_id == case_id)
+        .order_by(UploadedDocument.id)
+    )
+    return hashlib.sha256(
+        "|".join(
+            f"{document_id}:{parse_run}:{status}"
+            for document_id, parse_run, status in documents
+        ).encode()
+    ).hexdigest()
 
 
 async def refresh_analysis_status(

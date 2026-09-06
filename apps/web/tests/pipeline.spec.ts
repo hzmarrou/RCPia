@@ -126,4 +126,30 @@ describe("pipelineOf when the server has gone quiet", () => {
     expect(stages[ANALYSE]).toBe("unknown");
     expect(stages[FICHE]).toBe("unknown");
   });
+
+  it("does not resurrect an older completion when a subsequent analysis loses contact", () => {
+    const clinicalCase = medicalCase({ status: "completed" });
+    expect(pipelineOf(clinicalCase, LEDGER, RUNNING)[ANALYSE]).toBe("now");
+    const disconnected = pipelineOf(clinicalCase, LEDGER, RUNNING, false);
+    expect(disconnected[ANALYSE]).toBe("unknown");
+    expect(disconnected[FICHE]).toBe("unknown");
+  });
+
+  it("waits for a fresh case outcome after observed work disappears from the queue", () => {
+    const clinicalCase = medicalCase({ status: "completed" });
+    const awaitingRefresh = pipelineOf(clinicalCase, LEDGER, [], true, false);
+    expect(awaitingRefresh[ANALYSE]).toBe("unknown");
+    expect(awaitingRefresh[FICHE]).toBe("unknown");
+
+    expect(pipelineOf(clinicalCase, LEDGER, [], true, true)[FICHE]).toBe("done");
+    expect(pipelineOf(
+      medicalCase({ status: "blocked" }), LEDGER, [], true, true,
+    )[FICHE]).toBe("blocked");
+  });
+
+  it("keeps an invalidated completion unknown if the case refresh also loses contact", () => {
+    const stages = pipelineOf(medicalCase({ status: "completed" }), LEDGER, [], false, false);
+    expect(stages[ANALYSE]).toBe("unknown");
+    expect(stages[FICHE]).toBe("unknown");
+  });
 });

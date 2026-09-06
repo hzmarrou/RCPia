@@ -80,6 +80,7 @@ export default function Workstation({
   // Whether the last few polls reached the server. False means the state on screen is the
   // last one confirmed, not the current one — a difference worth saying out loud.
   const [reachable, setReachable] = useState(true);
+  const [caseCurrent, setCaseCurrent] = useState(true);
   // Bumped by "Réessayer": restarts the poll loop at once instead of waiting out the backoff.
   const [attempt, setAttempt] = useState(0);
   // Whether work has been seen running on this case, kept outside the polling effect so a
@@ -97,6 +98,10 @@ export default function Workstation({
   useEffect(() => {
     setLedgerState(ledger);
   }, [ledger]);
+
+  useEffect(() => {
+    setCaseCurrent(true);
+  }, [clinicalCase]);
 
   // Poll only while something is moving, and stop as soon as it settles: an idle case should
   // not keep a request going every two seconds for as long as the tab is open.
@@ -130,7 +135,10 @@ export default function Workstation({
       failures = 0;
       setReachable(true);
       setLive(snapshot.jobs);
-      if (snapshot.jobs.length > 0) sawWork.current = true;
+      if (snapshot.jobs.length > 0) {
+        sawWork.current = true;
+        setCaseCurrent(false);
+      }
 
       // An empty queue means this page needs a fresh case, not that a fiche succeeded.
       // A crash can empty the queue one poll before housekeeping records the terminal case
@@ -226,7 +234,7 @@ export default function Workstation({
   const rows = ledgerState?.entries ?? [];
   // `reachable` is passed on: while the server is silent the jobs held here are a remembered
   // picture, and a remembered picture must not tell the header an analysis is running now.
-  const pipeline = pipelineOf(clinicalCase, ledgerState, live, reachable);
+  const pipeline = pipelineOf(clinicalCase, ledgerState, live, reachable, caseCurrent);
   // The sex is read from the ledger the clinician is looking at, so correcting it re-sorts
   // the table on the spot rather than after a reload.
   const sex = readSex(rows);

@@ -151,7 +151,10 @@ A specialist failure does not change the synthesis policy: missing opinions are 
 reported to the synthesis. A usable synthesis may therefore describe an incomplete panel.
 Starting another panel returns the case to `analyzing`. A new ledger version returns it to
 `ready_for_review`; an older panel finishing cannot mark the corrected version complete.
-Document uploads retain the existing `parsing` lifecycle.
+Document uploads remain in `parsing` until extraction commits a new ledger, including while
+extraction retries or has failed. Parsing a document alone cannot restore the old fiche's
+completion. An older extraction finishing after a newer upload cannot release its preparation
+state.
 
 The worker records terminal outcomes transactionally and reconciles them on every poll, including
 crashes, exhausted leases, and historical panels left at `ready_for_review`. Reconciliation neither

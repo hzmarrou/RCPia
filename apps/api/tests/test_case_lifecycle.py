@@ -9,14 +9,18 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rcpia import worker as worker_module
+from rcpia.cases.facts import extract_case_facts
 from rcpia.cases.ledger import latest_version, record_version
 from rcpia.cases.lifecycle import refresh_analysis_status
+from rcpia.cases.service import add_document
 from rcpia.core.models import AgentRun, AgentRunStatus, AnalysisJob, Case, CaseStatus, JobStatus
 from rcpia.jobs.models import JobOutcome, JobType
 from rcpia.jobs.service import JobTransitionError, cancel, claim_next
+from rcpia.storage.local import LocalBlobStore
 from tests.test_agent_panel import ROLES, _dispatch, _settle, _start
 from tests.test_agent_panel import client as client
 from tests.test_agent_runs import seed_case, sign_in
+from tests.test_parser_contract import PDF_BYTES, llamaparse_with, successful_handler
 
 
 @pytest.fixture
@@ -75,6 +79,210 @@ async def _awaiting_synthesis(factory):
     synthesis_id = await _dispatch(factory, panel_id)
     assert synthesis_id is not None
     return user, case, synthesis_id
+
+
+@pytest.fixture
+async def uploaded_again(session_factory, runtime, monkeypatch, tmp_path):
+    user, case, synthesis_id = await _awaiting_synthesis(session_factory)
+    await _settle(session_factory, synthesis_id)
+    assert await _reconcile(session_factory, case.id) is CaseStatus.completed
+    blobs = LocalBlobStore(tmp_path / "blobs", signing_secret="synthetic-secret")
+    parser = llamaparse_with(successful_handler())
+    monkeypatch.setattr(worker_module, "get_parser", lambda: parser)
+    monkeypatch.setattr(worker_module, "get_blob_store", lambda: blobs)
+    monkeypatch.setenv("AUTO_PANEL_ROLES", "")
+    async with session_factory() as session:
+        # The seed fixture ran this extraction directly, outside the queue.
+        await session.execute(
+            sa.update(AnalysisJob).where(
+                AnalysisJob.case_id == case.id,
+                AnalysisJob.job_type == JobType.EXTRACT_FACTS,
+            ).values(status=JobStatus.completed)
+        )
+        stored = await session.get(Case, case.id)
+        await add_document(
+            session, blobs, user=user, case=stored,
+            filename="synthetic-addendum.pdf", content=PDF_BYTES,
+        )
+    monkeypatch.setenv("WORKER_JOB_TYPES", JobType.PARSE_DOSSIER)
+    assert await runtime().run_once() is not None
+    return user, case, blobs
+
+
+@pytest.mark.parametrize("outcome", [
+    None,
+    JobOutcome(JobStatus.failed, "Synthetic retry", retryable=True),
+    JobOutcome(JobStatus.failed, "Synthetic exhausted failure"),
+    JobOutcome(JobStatus.cancelled, "Synthetic cancellation"),
+])
+async def test_new_upload_never_inherits_the_previous_panels_completion(
+    session_factory, runtime, monkeypatch, uploaded_again, outcome
+):
+    _, case, _ = uploaded_again
+    assert await _status(session_factory, case.id) is CaseStatus.parsing
+    assert await _reconcile(session_factory, case.id) is CaseStatus.parsing
+    async with session_factory() as session:
+        assert (await latest_version(session, case_id=case.id)).version == 1
+
+    async def extract(session, job, **kwargs):
+        if outcome is not None:
+            return outcome
+        return await extract_case_facts(session, job)
+
+    monkeypatch.setattr(worker_module, "extract_case_facts", extract)
+    monkeypatch.setenv("WORKER_JOB_TYPES", JobType.EXTRACT_FACTS)
+    assert await runtime().run_once() is not None
+    expected = CaseStatus.ready_for_review if outcome is None else CaseStatus.parsing
+    assert await _status(session_factory, case.id) is expected
+    assert await _reconcile(session_factory, case.id) is expected
+    async with session_factory() as session:
+        assert (await latest_version(session, case_id=case.id)).version == (
+            2 if outcome is None else 1
+        )
+
+
+async def test_an_older_extraction_cannot_release_a_newer_parsed_upload(
+    session_factory, runtime, monkeypatch, uploaded_again
+):
+    user, case, blobs = uploaded_again
+    parse_worker = runtime()
+
+    async def upload_while_extracting(session, job, **kwargs):
+        async with session_factory() as other:
+            stored = await other.get(Case, case.id)
+            await add_document(
+                other, blobs, user=user, case=stored,
+                filename="synthetic-newer-addendum.pdf", content=PDF_BYTES,
+            )
+        assert await parse_worker.run_once() is not None
+        return await extract_case_facts(session, job)
+
+    monkeypatch.setattr(worker_module, "extract_case_facts", upload_while_extracting)
+    monkeypatch.setenv("WORKER_JOB_TYPES", JobType.EXTRACT_FACTS)
+    assert await runtime().run_once() is not None
+    assert await _reconcile(session_factory, case.id) is CaseStatus.parsing
+
+    async def extract(session, job, **kwargs):
+        return await extract_case_facts(session, job)
+
+    monkeypatch.setattr(worker_module, "extract_case_facts", extract)
+    assert await runtime().run_once() is not None
+    assert await _reconcile(session_factory, case.id) is CaseStatus.ready_for_review
+
+
+async def test_upload_serializes_with_extractions_final_readiness_check(
+    session_factory, runtime, monkeypatch, uploaded_again
+):
+    user, case, blobs = uploaded_again
+    checked = asyncio.Event()
+    finish = asyncio.Event()
+    all_settled = worker_module.all_documents_settled
+
+    async def pause_after_check(session, *, case_id):
+        result = await all_settled(session, case_id=case_id)
+        checked.set()
+        await finish.wait()
+        return result
+
+    async def extract(session, job, **kwargs):
+        return await extract_case_facts(session, job)
+
+    async def upload():
+        async with session_factory() as session:
+            stored = await session.get(Case, case.id)
+            assert stored.status is CaseStatus.parsing
+            await add_document(
+                session, blobs, user=user, case=stored,
+                filename="synthetic-concurrent-upload.pdf", content=PDF_BYTES,
+            )
+
+    monkeypatch.setattr(worker_module, "extract_case_facts", extract)
+    monkeypatch.setattr(worker_module, "all_documents_settled", pause_after_check)
+    monkeypatch.setenv("WORKER_JOB_TYPES", JobType.EXTRACT_FACTS)
+    extraction = asyncio.create_task(runtime().run_once())
+    await asyncio.wait_for(checked.wait(), timeout=10)
+    incoming = asyncio.create_task(upload())
+    try:
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(incoming), timeout=0.25)
+    finally:
+        finish.set()
+        await asyncio.gather(extraction, incoming)
+    assert await _status(session_factory, case.id) is CaseStatus.parsing
+    assert await _reconcile(session_factory, case.id) is CaseStatus.parsing
+
+
+async def test_enqueue_generation_does_not_depend_on_transaction_start_order(
+    session_factory, runtime, monkeypatch, uploaded_again
+):
+    user, case, blobs = uploaded_again
+    async with session_factory() as session:
+        queued = await session.scalars(
+            sa.select(AnalysisJob.id).where(
+                AnalysisJob.case_id == case.id,
+                AnalysisJob.job_type == JobType.EXTRACT_FACTS,
+                AnalysisJob.status == JobStatus.queued,
+            )
+        )
+        for job_id in queued:
+            await cancel(session, job_id, reason="Synthetic replacement upload")
+        await session.commit()
+
+    slow_started = asyncio.Event()
+    finish_slow = asyncio.Event()
+    parser = worker_module.get_parser()
+
+    class DelayedParser:
+        async def parse(self, request):
+            if request.filename == "synthetic-slow.pdf":
+                slow_started.set()
+                await finish_slow.wait()
+            return await parser.parse(request)
+
+    monkeypatch.setattr(worker_module, "get_parser", DelayedParser)
+
+    async def upload(filename):
+        async with session_factory() as session:
+            stored = await session.get(Case, case.id)
+            return await add_document(
+                session, blobs, user=user, case=stored, filename=filename, content=PDF_BYTES,
+            )
+
+    await upload("synthetic-slow.pdf")
+    parse_worker = runtime()
+    slow = asyncio.create_task(parse_worker.run_once())
+    await asyncio.wait_for(slow_started.wait(), timeout=10)
+    try:
+        fast_document = await upload("synthetic-fast.pdf")
+        assert await parse_worker.run_once() is not None
+    finally:
+        finish_slow.set()
+        await slow
+
+    async with session_factory() as session:
+        extraction = await session.scalar(
+            sa.select(AnalysisJob).where(
+                AnalysisJob.case_id == case.id,
+                AnalysisJob.job_type == JobType.EXTRACT_FACTS,
+                AnalysisJob.status == JobStatus.queued,
+            )
+        )
+        fast_parse = await session.scalar(
+            sa.select(AnalysisJob).where(
+                AnalysisJob.case_id == case.id,
+                AnalysisJob.payload["document_id"].as_string() == str(fast_document.id),
+            )
+        )
+        assert extraction.created_at < fast_parse.created_at
+        assert extraction.payload["intake_generation"]
+
+    async def extract(session, job, **kwargs):
+        return await extract_case_facts(session, job)
+
+    monkeypatch.setattr(worker_module, "extract_case_facts", extract)
+    monkeypatch.setenv("WORKER_JOB_TYPES", JobType.EXTRACT_FACTS)
+    assert await runtime().run_once() == extraction.id
+    assert await _reconcile(session_factory, case.id) is CaseStatus.ready_for_review
 
 
 async def test_api_and_real_workers_persist_both_transitions(

@@ -25,26 +25,31 @@ export const PIPELINE = [
  *   "an analysis is running now" — those jobs may have finished minutes ago. Everything the
  *   case record alone establishes still stands; only the claims that rested on live work
  *   fall back to unknown.
+ * @param caseCurrent whether a refreshed case has confirmed the outcome of observed work.
+ *   Emptying the queue does not establish success, so the old completion stays invalidated
+ *   until that refresh arrives.
  */
 export function pipelineOf(
   clinicalCase: CaseDetail,
   ledger: Ledger | null,
   live: JobActivity[],
   known = true,
+  caseCurrent = true,
 ): StageState[] {
   const uploaded = clinicalCase.documents.length > 0;
   const extracted = ledger !== null && ledger.version !== null;
-  const analysing =
-    known &&
-    (live.some((job) => job.job_type === "run_agent") || clinicalCase.status === "analyzing");
-  const finished = clinicalCase.status === "completed" && !analysing;
-  const blocked = clinicalCase.status === "blocked" && !analysing;
+  const observedAnalysis = live.some((job) => job.job_type === "run_agent");
+  const analysing = known &&
+    (observedAnalysis || (caseCurrent && clinicalCase.status === "analyzing"));
+  // Remembered work invalidates an older completion even when its poll is no longer current.
+  const finished = caseCurrent && clinicalCase.status === "completed" && !observedAnalysis;
+  const blocked = caseCurrent && clinicalCase.status === "blocked" && !observedAnalysis;
 
   const statusKnown = ["draft", "parsing", "ready_for_review", "analyzing"].includes(
     clinicalCase.status,
   );
   const beyond: StageState = finished ? "done"
-    : !known && extracted ? "unknown"
+    : (!known || !caseCurrent) && extracted ? "unknown"
     : blocked ? "blocked"
     : statusKnown || !extracted ? "pending"
     : "unknown";
