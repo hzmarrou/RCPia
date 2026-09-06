@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { SERVER_API_BASE_URL } from "@/lib/api";
 import { fetchDashboardAccess } from "@/lib/auth";
 import { fetchCases } from "@/lib/cases";
-import CaseList from "@/app/components/CaseList";
+import CaseList from "@/app/_components/CaseList";
 
 export const dynamic = "force-dynamic";
 

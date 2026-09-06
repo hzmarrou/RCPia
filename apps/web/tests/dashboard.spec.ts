@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import CaseList from "../app/components/CaseList";
+import CaseList from "../app/_components/CaseList";
 import DashboardPage from "../app/dashboard/page";
 import { caseSummary } from "./caseFixtures";
 import { elements, text } from "./elements";

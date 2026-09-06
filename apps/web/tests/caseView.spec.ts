@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import CaseList from "../app/components/CaseList";
+import CaseList from "../app/_components/CaseList";
 import { caseDate, casePresentation, groupCases } from "../lib/caseView";
 import { caseSummary } from "./caseFixtures";
 import { elements, text } from "./elements";

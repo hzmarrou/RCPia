@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import CaseList from "@/app/components/CaseList";
+import CaseList from "@/app/_components/CaseList";
 import {
   JOB_LABELS,
   STEP_LABELS,
