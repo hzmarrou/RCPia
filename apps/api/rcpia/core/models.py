@@ -74,6 +74,12 @@ class CancerType(enum.StrEnum):
 
 
 class CaseStatus(enum.StrEnum):
+    """Panel outcome for the current ledger; completed still means a provisional fiche.
+
+    blocked means the latest panel settled without a usable synthesis, not that a clinical
+    field is missing. Retries remain analyzing; clinical gaps remain ready_for_review.
+    """
+
     draft = "draft"
     parsing = "parsing"
     ready_for_review = "ready_for_review"

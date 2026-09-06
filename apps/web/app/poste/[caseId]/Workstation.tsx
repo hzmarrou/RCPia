@@ -80,6 +80,7 @@ export default function Workstation({
   // Whether the last few polls reached the server. False means the state on screen is the
   // last one confirmed, not the current one — a difference worth saying out loud.
   const [reachable, setReachable] = useState(true);
+  const [caseCurrent, setCaseCurrent] = useState(true);
   // Bumped by "Réessayer": restarts the poll loop at once instead of waiting out the backoff.
   const [attempt, setAttempt] = useState(0);
   // Whether work has been seen running on this case, kept outside the polling effect so a
@@ -97,6 +98,10 @@ export default function Workstation({
   useEffect(() => {
     setLedgerState(ledger);
   }, [ledger]);
+
+  useEffect(() => {
+    setCaseCurrent(true);
+  }, [clinicalCase]);
 
   // Poll only while something is moving, and stop as soon as it settles: an idle case should
   // not keep a request going every two seconds for as long as the tab is open.
@@ -130,22 +135,28 @@ export default function Workstation({
       failures = 0;
       setReachable(true);
       setLive(snapshot.jobs);
-      if (snapshot.jobs.length > 0) sawWork.current = true;
+      if (snapshot.jobs.length > 0) {
+        sawWork.current = true;
+        setCaseCurrent(false);
+      }
 
-      // Work seen and then gone is a panel that finished — and only a *successful* poll may
-      // conclude that. The case and ledger changed while this page held the versions it was
-      // rendered with, so ask the server for them rather than leaving a screen that says the
-      // analysis never ran.
+      // An empty queue means this page needs a fresh case, not that a fiche succeeded.
+      // A crash can empty the queue one poll before housekeeping records the terminal case
+      // status, so keep refreshing while the backend still calls it analyzing.
       //
       // Guarded by `sawWork`: an empty answer on the first poll means nothing was running,
       // not that something ended. It is a ref rather than a local so that it survives the
       // effect being torn down and rebuilt — by a retry, or by the launch phase changing.
       // Reset per run, a panel that finished while the server was unreachable could never be
       // recognised as finished afterwards, and the button stayed disabled for good.
-      if (sawWork.current && snapshot.jobs.length === 0) {
+      if (
+        snapshot.jobs.length === 0 &&
+        (sawWork.current || clinicalCase.status === "analyzing")
+      ) {
         sawWork.current = false;
         setLaunch({ phase: "idle" });
         router.refresh();
+        timer = setTimeout(tick, 2500);
         return;
       }
 
@@ -161,7 +172,7 @@ export default function Workstation({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [clinicalCase.id, launchPhase, router, attempt]);
+  }, [clinicalCase.id, clinicalCase.status, launchPhase, router, attempt]);
 
   const openCorrection = useCallback((entry: LedgerEntry) => {
     setEditing(entry);
@@ -187,6 +198,7 @@ export default function Workstation({
       });
       setLedgerState(updated);
       setEditing(null);
+      router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "La correction a échoué.");
     } finally {
@@ -210,6 +222,7 @@ export default function Workstation({
       // the response instead would re-enable the button in the seconds before the first
       // worker claims anything, and a second press is a second panel.
       setLaunch({ phase: "running" });
+      router.refresh();
     } catch (caught) {
       setLaunch({
         phase: "failed",
@@ -221,7 +234,7 @@ export default function Workstation({
   const rows = ledgerState?.entries ?? [];
   // `reachable` is passed on: while the server is silent the jobs held here are a remembered
   // picture, and a remembered picture must not tell the header an analysis is running now.
-  const pipeline = pipelineOf(clinicalCase, ledgerState, live, reachable);
+  const pipeline = pipelineOf(clinicalCase, ledgerState, live, reachable, caseCurrent);
   // The sex is read from the ledger the clinician is looking at, so correcting it re-sorts
   // the table on the spot rather than after a reload.
   const sex = readSex(rows);
@@ -272,7 +285,9 @@ export default function Workstation({
               return (
                 <li key={name} className={state}>
                   <span className="num">
-                    {state === "done" ? "✓" : state === "unknown" ? "?" : index + 1}
+                    {state === "done" ? "✓"
+                      : state === "unknown" ? "?"
+                      : state === "blocked" ? "!" : index + 1}
                   </span>
                   {name}
                   {state === "unknown" ? (
@@ -285,15 +300,10 @@ export default function Workstation({
             })}
           </ol>
           {pipeline.includes("unknown") ? (
-            // Not a footnote about a bug: it is what this row can honestly say. Either the
-            // case record does not move when a panel finishes — so a run and no run look
-            // identical from a fresh load — or the server is silent and nothing on screen is
-            // current.
             <p className="poste-qualifier">
               {reachable ? (
                 <>
-                  Le dossier ne conserve pas l&apos;état de l&apos;analyse une fois celle-ci
-                  terminée : ces deux étapes ne sont suivies que pendant leur exécution.
+                  L&apos;état de ces étapes n&apos;est pas disponible.
                   L&apos;onglet « Fiche » indique si une proposition existe.
                 </>
               ) : (
@@ -302,6 +312,12 @@ export default function Workstation({
                   Ce qui est affiché plus bas est le dernier état confirmé.
                 </>
               )}
+            </p>
+          ) : null}
+          {pipeline.includes("blocked") ? (
+            <p className="poste-qualifier" role="status">
+              L&apos;analyse s&apos;est terminée sans synthèse exploitable.
+              Les éventuels avis disponibles ne constituent pas une fiche RCP complète.
             </p>
           ) : null}
         </div>

@@ -20,9 +20,14 @@ from rcpia.agents.pi_adapter import PiNotConfigured
 from rcpia.agents.service import run_agent
 from rcpia.cases.facts import extract_case_facts
 from rcpia.cases.ledger import record_version
+from rcpia.cases.lifecycle import (
+    intake_generation,
+    reconcile_analysis_statuses,
+    refresh_analysis_status,
+)
 from rcpia.core.config import get_settings
 from rcpia.core.db import get_session_factory
-from rcpia.core.models import AnalysisJob, Case, JobStatus
+from rcpia.core.models import AnalysisJob, Case, CaseStatus, JobStatus
 from rcpia.evidence.embedding import EmbeddingError, build_embedder
 from rcpia.evidence.rerank import build_reranker
 from rcpia.jobs.milestones import MilestoneReporter, MilestoneWriter, no_milestones
@@ -95,6 +100,7 @@ def build_worker() -> Worker:
         """Catch any panel whose last specialist settled without the handler's gate running."""
         for panel_id in await panel.reconcile(session):
             logger.info("panel %s reconciled; synthesis queued", panel_id)
+        await reconcile_analysis_statuses(session)
 
     # Bound once and shared with the milestone reporters below, which need a session of
     # their own: they write while a handler still holds its transaction open.
@@ -108,6 +114,12 @@ def build_worker() -> Worker:
     async def handle_parse(session, job: AnalysisJob) -> JobOutcome | None:
         outcome = await parse_document(session, job, parser=parser, blobs=blobs)
         if outcome is None and await all_documents_settled(session, case_id=job.case_id):
+            # Parsed text is not a new ledger yet. Keep the upload in preparation until
+            # extraction commits, or reconciliation can resurrect an older completed panel.
+            case = await session.get(Case, job.case_id)
+            if case is None:
+                raise ValueError(f"Parsed document has no case {job.case_id}")
+            case.status = CaseStatus.parsing
             # Extraction reads the whole case at once, so it waits until no document is
             # still being parsed. Starting earlier would build a ledger from half the
             # evidence and call it complete.
@@ -116,11 +128,23 @@ def build_worker() -> Worker:
                 case_id=job.case_id,
                 organization_id=job.organization_id,
                 job_type=JobType.EXTRACT_FACTS,
-                payload={},
+                payload={"intake_generation": await intake_generation(
+                    session, case_id=job.case_id
+                )},
             )
         return outcome
 
     async def handle_extract(session, job: AnalysisJob) -> JobOutcome | None:
+        generation = job.payload.get("intake_generation")
+        if generation is None:
+            # Jobs queued before generation fencing still need to finish. Capture their
+            # input before extraction, never substitute the final snapshot after the work.
+            logger.info("extraction job %s has no intake generation; capturing its input", job.id)
+            generation = await intake_generation(session, case_id=job.case_id)
+        elif not isinstance(generation, str):
+            return JobOutcome(
+                JobStatus.failed, "Invalid intake generation in extraction job", retryable=False
+            )
         # **The narrative pass, which the deployed worker was running without.** `adapter`
         # is optional so that an environment with no model runtime still produces a ledger,
         # and omitting it here made the second pass return empty on every dossier: fifteen
@@ -135,6 +159,14 @@ def build_worker() -> Worker:
                 version = await record_version(
                     session, case=case, change_reason="Extraction automatique"
                 )
+                # An upload can arrive while extraction is running. Its own extraction,
+                # not this older job, must release preparation. record_version holds the
+                # case lock, shared with intake, through this check and the final commit.
+                if (
+                    generation == await intake_generation(session, case_id=case.id)
+                    and await all_documents_settled(session, case_id=case.id)
+                ):
+                    case.status = CaseStatus.ready_for_review
                 # The step that closes the chain. Until now it ended here: parse, extract,
                 # record a version, and stop -- with three worker replicas idle because nothing
                 # routed the case to them. Convening refuses on its own when the case still has
@@ -179,6 +211,9 @@ def build_worker() -> Worker:
                     logger.info(
                         "panel %s complete; synthesis queued as job %s", panel_id, dispatched.id
                     )
+            await refresh_analysis_status(
+                session, case_id=job.case_id, finishing_job_id=job.id
+            )
         return outcome
 
     worker.register(JobType.PARSE_DOSSIER, handle_parse)

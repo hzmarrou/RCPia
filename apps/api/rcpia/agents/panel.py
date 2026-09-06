@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rcpia.agents.bundle import entries_from_version
 from rcpia.agents.schemas import SYNTHESIS_ROLE
 from rcpia.cases import completeness
+from rcpia.cases.lifecycle import refresh_analysis_status
 from rcpia.core.models import (
     AgentRun,
     AgentRunStatus,
@@ -152,6 +153,10 @@ async def start_panel(
             f"{SYNTHESIS_ROLE} is not a specialist: it reads the panel and cannot run beside it."
         )
 
+    # A finishing panel and a new request must not race to describe this case's status.
+    await session.execute(
+        sa.select(Case.id).where(Case.id == case_id).with_for_update(key_share=True)
+    )
     live = await live_jobs_for(session, case_id=case_id, roles=roles)
     incompatible = [
         role
@@ -206,6 +211,7 @@ async def start_panel(
         )
 
     await session.flush()
+    await refresh_analysis_status(session, case_id=case_id)
     return PanelStart(panel=panel, jobs=jobs, reused=frozenset(reused))
 
 
