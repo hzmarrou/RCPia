@@ -175,8 +175,9 @@ that matter.
 
 ### Stage D — the visual identity
 
-Source mock: <https://claude.ai/code/artifact/7c9127dc-cf4c-4b55-95af-52d69e8d80a3> ("Poste
-RCPia"). Fictional values throughout; it carries its own "Maquette" banner saying so.
+Source mock: `docs/design/poste-mock.html`, committed to this repository. Originally the
+artifact <https://claude.ai/code/artifact/7c9127dc-cf4c-4b55-95af-52d69e8d80a3>, which serves
+viewers a pinned version. Fictional values throughout; it carries its own "Maquette" banner.
 
 **The mock is not only a restyle.** Its left rail *is* the case list (A1), and its completeness
 card carries a `Bloquantes` count (B1). Building it delivers two blockers as a side effect,

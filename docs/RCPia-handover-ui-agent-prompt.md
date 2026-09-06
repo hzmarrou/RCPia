@@ -105,15 +105,85 @@ docker compose --env-file .env -f infra/docker-compose.yml exec -T rcpia-worker 
   python -m rcpia.ops.smoke --api http://api:8000     # expect 11/11
 ```
 
-## 4. State as of 6 Sep 2026
+## 4. What is already implemented
 
-Working and verified end to end: auth, case creation, extraction (109 fields, 10 categories,
-grounded), the ledger with corrections and versions, the correction gate, the 4-agent panel,
-citation attestation, real job milestones with elapsed time, fiche view + Word export +
-evidence register, Azure staging at `stg.rcpia.online`.
+Verified by driving the running app on 6 Sep 2026, not by reading code.
 
-Open PR **#8** — splits the browser API base URL (relative `/api`) from the server one
-(absolute). Merge or rebase onto it; do not reintroduce an absolute browser URL.
+### API — every route that exists
+
+```
+POST   /auth/activate                         POST   /cases
+GET    /auth/dashboard                        GET    /cases
+POST   /auth/invitations                      GET    /cases/{id}
+POST   /auth/invitations/lookup               GET    /cases/{id}/activity
+DELETE /auth/invitations/{invitation_id}      POST   /cases/{id}/analysis
+POST   /auth/login                            GET    /cases/{id}/analysis
+POST   /auth/logout                           POST   /cases/{id}/analysis/panel
+GET    /auth/me                               POST   /cases/{id}/documents
+GET    /health                                GET    /cases/{id}/documents/{doc_id}/content
+                                              GET    /cases/{id}/ledger
+                                              POST   /cases/{id}/ledger/corrections
+                                              GET    /cases/{id}/pps
+                                              GET    /cases/{id}/pps/markdown
+                                              GET    /cases/{id}/pps/docx
+                                              GET    /cases/{id}/pps/docx/probatoire
+```
+
+**Every backend capability the handover needs already exists.** The invitation endpoints have
+no UI; `GET /cases` has no dashboard. That is the shape of the remaining work.
+
+### Web — every page that exists
+
+```
+/                     landing, with links in
+/login  /activate  /request-access
+/dashboard            A STUB. ends in a placeholder sentence
+/cases/new            upload form: reference (required), localisation, question, file
+/cases/[caseId]       older single-case view
+/cases/[caseId]/ledger
+/cases/[caseId]/pps
+/poste/[caseId]       THE MAIN SURFACE — the three-pane workstation
+```
+
+### What works, end to end
+
+| Capability | Detail |
+| --- | --- |
+| Accounts | invite-only; roles `admin` / `uploader` / `viewer`; middleware refuses unauthenticated pages |
+| Upload | `.docx` and `.pdf`; `reference` is required and the browser silently refuses submit without it |
+| Extraction | LlamaParse -> chunks -> agent -> ledger v1. 109 fields, 10 categories, grounded (14 passages on each of the last 5 runs), plus a second pass over the prose. ~55 s locally |
+| Ledger | grouped by category, sex applicability rendered "sans objet", red/amber highlights, corrections recorded as a new version with author and reason |
+| Correction gate | `can_run_analysis` false while a blocking gap exists; launch button disabled. Verified: a clean prostate dossier yields ~32 red rows of which exactly **1** blocks (`gleason`) and 1 is required-not-blocking (`isup`) |
+| Panel | 3 specialists + `rcp_synthesis`, each grounded, convened only by explicit user action |
+| Citation attestation | an agent citing evidence it was not given fails closed. Observed on staging: `briganti_2012`, rejected, 3 attempts, job failed |
+| Progress | real milestones `bundle` -> `reasoning` -> `checking` -> `recording`, with elapsed time; honest "unknown" where the backend cannot say |
+| Fiche | view page, Word export, separate evidence register (*probatoire*) |
+| Deployment | Azure Container Apps, custom domain `stg.rcpia.online`, smoke 11/11 |
+| Tests | 83 vitest tests in `apps/web/tests/`, all passing |
+
+### Known gaps, not defects
+
+The case status never advances past `ready_for_review` (Task 1). The dashboard has no case list
+(Task 2). Invitations have no UI (Task 3). Three ledger fields are defined twice (Task 4a). The
+`checking` overrun threshold is miscalibrated (Task 4b).
+
+### Two defects fixed on 6 Sep — context for why some rules exist
+
+1. The staging client bundle had `http://localhost:8000` compiled in, so **every** browser-side
+   call was refused while server-rendered pages looked healthy. `NEXT_PUBLIC_*` is inlined at
+   build time.
+2. `AUTO_PANEL_ROLES` was set on staging, so the panel convened the instant extraction finished
+   and the correction phase was skipped. Now empty everywhere.
+
+### Branching
+
+**PR #8 is open and must merge before you start Task 2.** It splits the browser API base URL
+(relative `/api`) from the server one (absolute), and it touches `lib/api.ts`, six page
+components and the web tests — the same files Task 2 restyles. Starting Task 2 first guarantees
+a conflict.
+
+Then: **one branch and one PR per task**, branched from an up-to-date `main`. Never commit to
+`main`. Do not reintroduce an absolute browser-side URL.
 
 Two defects fixed on 6 Sep, for context:
 
@@ -168,8 +238,18 @@ tests covering both transitions.
 
 ### Task 2 — The workstation restyle, including the case list
 
-Source mock: <https://claude.ai/code/artifact/7c9127dc-cf4c-4b55-95af-52d69e8d80a3>
-("Poste RCPia"). All values in it are fictional; it carries its own "Maquette" banner.
+**The design you are building: `docs/design/poste-mock.html`.** Open it in a browser — it is a
+working page, not a picture. Click *Lancer l'analyse* to watch the progress behaviour play out
+(time-compressed 12x).
+
+It is committed to this repository on purpose. The original lives as a Claude artifact at
+<https://claude.ai/code/artifact/7c9127dc-cf4c-4b55-95af-52d69e8d80a3>, which serves viewers a
+*pinned* version that may be older than the one captured here, and which your tooling may not be
+able to fetch at all. **The file in the repository is the source of truth.**
+
+All values in it are fictional; it carries its own "Maquette" banner saying so. It has
+implementer notes added inline at the two places that are not settled — the progress bar and the
+Questions tab — and at the resizing code, which the shipped workstation already implements.
 
 The mock is **not only a restyle**. Its left rail is the case list, and its completeness card
 carries a `Bloquantes` count. Both are blockers in the plan; building them here avoids doing
