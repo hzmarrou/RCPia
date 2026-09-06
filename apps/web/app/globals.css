@@ -254,6 +254,7 @@ button[disabled] {
 .dashboard-head h1 { margin: 0; font-size: 26px; }
 .dashboard-head .eyebrow { margin: 0 0 4px; }
 .dashboard-head .primary-link { align-self: center; }
+.dashboard-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .dashboard-cases { margin-top: 28px; }
 .dashboard-cases > h2 { margin: 0; font-size: 18px; }
 .dashboard-cases .poste-caselist { padding: 0; }
@@ -267,6 +268,20 @@ button[disabled] {
 .dashboard-cases .poste-caserow .sub { font-size: 13px; }
 .dashboard-cases .poste-caserow .when { font-size: 12px; }
 .case-empty { padding: 24px; background: var(--surface); border: 1px dashed var(--line-2); border-radius: 8px; }
+
+.invitations > h1 { margin: 0; }
+.invitations > .eyebrow { margin-top: 24px; margin-bottom: 4px; }
+.invitation-form { max-width: 32rem; padding: 24px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.invitations h2 { font-size: 18px; margin: 0 0 12px; }
+.invitation-created { padding: 24px; border: 1px solid var(--accent); border-radius: 8px; background: var(--surface); overflow-wrap: anywhere; }
+.invitation-created input { display: block; width: 100%; margin-top: 8px; font-family: var(--font-mono); font-size: 12px; }
+.invitation-notice { color: var(--ok); }
+.invitation-list { margin-top: 32px; }
+.invitation-list ul { list-style: none; padding: 0; }
+.invitation-list li { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.invitation-details { min-width: 0; overflow-wrap: anywhere; }
+.invitation-details span, .invitation-details time { display: block; color: var(--muted); font-size: 12px; }
+.invitation-revoke { background: transparent; border-color: var(--line-2); color: var(--missing); align-self: center; }
 
 .fiche-document { font-family: var(--font-document); font-size: 16px; line-height: 1.7; }
 .fiche-document h1, .fiche-document h2, .fiche-document h3,

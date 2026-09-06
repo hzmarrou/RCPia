@@ -43,6 +43,7 @@ describe("the authorized dashboard", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(elements(tree).find((node) => node.type === CaseList)?.props.cases).toEqual(cases);
     expect(elements(tree).some((node) => node.props.href === "/cases/new")).toBe(true);
+    expect(elements(tree).some((node) => node.props.href === "/admin/invitations")).toBe(true);
     expect(text(tree)).toContain("Compte de démonstration");
     expect(text(tree)).not.toContain("sera disponible ici");
   });

@@ -65,8 +65,15 @@ uv run python -m rcpia.auth.bootstrap "CHU Mohammed VI" admin@example.org
 ```
 
 Endpoints: `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`,
-`POST /auth/invitations` (admin), `GET /auth/invitations/{token}`,
+`GET /auth/invitations` (admin, own organization's pending and unexpired invitations),
+`POST /auth/invitations` (admin), `POST /auth/invitations/lookup`,
 `DELETE /auth/invitations/{id}` (admin), `POST /auth/activate`.
+
+Admins can manage invitations at `/admin/invitations` in the web app, linked from the
+dashboard. The list never returns tokens or their hashes. Creation returns the token
+once; the browser builds an `/activate#token=…` link on its own origin. Copy and share
+that link with its recipient: no email is sent automatically, and a lost link must be
+revoked and reissued.
 
 Sessions are server-side rows in `auth_sessions`, referenced by an httpOnly cookie.
 Revocation is therefore immediate: signing out or deactivating a user invalidates existing

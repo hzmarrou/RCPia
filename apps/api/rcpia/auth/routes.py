@@ -99,9 +99,15 @@ def _record_failure(client_key: str, account: str | None) -> None:
         account_limiter.record_failure(account)
 
 
-@router.post(
-    "/invitations", response_model=InvitationIssued, status_code=status.HTTP_201_CREATED
-)
+@router.get("/invitations", response_model=list[InvitationRead])
+async def list_invitations(session: SessionDep, admin: RequireAdmin) -> list[InvitationRead]:
+    invitations = await service.list_pending_invitations(
+        session, organization_id=admin.organization_id
+    )
+    return [InvitationRead.model_validate(invitation) for invitation in invitations]
+
+
+@router.post("/invitations", response_model=InvitationIssued, status_code=status.HTTP_201_CREATED)
 async def create_invitation(
     payload: InvitationCreate, response: Response, session: SessionDep, admin: RequireAdmin
 ) -> InvitationIssued:
@@ -200,9 +206,7 @@ async def login(
     account = payload.email.lower()
     client_key, _ = _guard_credentials(request, account)
     try:
-        user = await service.authenticate(
-            session, email=payload.email, password=payload.password
-        )
+        user = await service.authenticate(session, email=payload.email, password=payload.password)
     except service.InvalidCredentials as exc:
         await session.commit()
         _record_failure(client_key, account)

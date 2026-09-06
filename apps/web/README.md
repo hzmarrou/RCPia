@@ -40,3 +40,15 @@ The existing missing/uncertain counts still include fields marked "Sans objet".
 
 Progress remains indeterminate, showing only reported milestones and elapsed time.
 Questions is a disabled, forthcoming tab; no question-answering backend is connected.
+
+## Invitations
+
+`/admin/invitations`, linked from the dashboard, lets an organization administrator
+create invitations, copy their one-time activation links and revoke outstanding
+invitations. Access is decided by `GET /auth/invitations`, not a frontend role check.
+The API lists only the caller's organization's unexpired, pending invitations.
+
+Activation links use the web origin and a URL fragment (`/activate#token=…`).
+They are held only in the current page's memory, never in browser storage. Copy a
+link before creating another invitation or leaving the page; lost links cannot be
+retrieved. No invitation email is sent automatically.

@@ -114,6 +114,114 @@ def test_tokens_are_stored_only_as_hashes() -> None:
 # --------------------------------------------------------------------------------------
 
 
+async def test_anonymous_cannot_list_invitations(client: AsyncClient) -> None:
+    assert (await client.get("/auth/invitations")).status_code == 401
+
+
+@pytest.mark.parametrize("role", [UserRole.uploader, UserRole.viewer])
+async def test_non_admin_cannot_list_invitations(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], role: UserRole
+) -> None:
+    user, _ = await make_admin(session_factory, role=role)
+    await login(client, user.email)
+    assert (await client.get("/auth/invitations")).status_code == 403
+
+
+async def test_admin_with_no_invitations_gets_an_empty_list(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    admin, _ = await make_admin(session_factory)
+    await login(client, admin.email)
+    response = await client.get("/auth/invitations")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_invitation_list_is_scoped_pending_unexpired_and_token_free(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    admin, organization_id = await make_admin(session_factory)
+    outsider, other_organization_id = await make_admin(session_factory)
+    now = datetime.now(UTC)
+    async with session_factory() as session:
+        for index, (name, invitation_status, expiry, owner, organization) in enumerate(
+            [
+                (
+                    "older",
+                    InvitationStatus.pending,
+                    now + timedelta(days=3),
+                    admin,
+                    organization_id,
+                ),
+                (
+                    "newer",
+                    InvitationStatus.pending,
+                    now + timedelta(days=7),
+                    admin,
+                    organization_id,
+                ),
+                (
+                    "accepted",
+                    InvitationStatus.accepted,
+                    now + timedelta(days=7),
+                    admin,
+                    organization_id,
+                ),
+                (
+                    "revoked",
+                    InvitationStatus.revoked,
+                    now + timedelta(days=7),
+                    admin,
+                    organization_id,
+                ),
+                (
+                    "expired",
+                    InvitationStatus.expired,
+                    now - timedelta(days=1),
+                    admin,
+                    organization_id,
+                ),
+                (
+                    "aged",
+                    InvitationStatus.pending,
+                    now - timedelta(seconds=1),
+                    admin,
+                    organization_id,
+                ),
+                (
+                    "foreign",
+                    InvitationStatus.pending,
+                    now + timedelta(days=7),
+                    outsider,
+                    other_organization_id,
+                ),
+            ]
+        ):
+            invitation, _ = await service.create_invitation(
+                session,
+                organization_id=organization,
+                invited_by_user_id=owner.id,
+                email=f"{name}@example.org",
+                role=UserRole.uploader,
+            )
+            invitation.status = invitation_status
+            invitation.expires_at = expiry
+            invitation.created_at = now - timedelta(minutes=10 - index)
+        await session.commit()
+    await login(client, admin.email)
+    response = await client.get("/auth/invitations")
+    assert response.status_code == 200
+    assert [row["email"] for row in response.json()] == ["newer@example.org", "older@example.org"]
+    for row in response.json():
+        assert set(row) == {"id", "email", "role", "expires_at"}
+    async with session_factory() as session:
+        aged = await session.scalar(
+            sa.select(Invitation).where(Invitation.email == "aged@example.org")
+        )
+        assert aged is not None
+        assert aged.status is InvitationStatus.pending, "listing is read-only"
+
+
 async def test_admin_can_invite_and_the_token_is_shown_once(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -171,9 +279,7 @@ async def test_invitation_can_be_revoked_and_then_fails_activation(
 ) -> None:
     admin, _ = await make_admin(session_factory)
     await login(client, admin.email)
-    issued = (
-        await client.post("/auth/invitations", json={"email": "revoked@example.org"})
-    ).json()
+    issued = (await client.post("/auth/invitations", json={"email": "revoked@example.org"})).json()
 
     revoked = await client.delete(f"/auth/invitations/{issued['id']}")
     assert revoked.status_code == 204
@@ -260,9 +366,7 @@ async def test_invitation_cannot_be_used_twice(
 ) -> None:
     admin, _ = await make_admin(session_factory)
     await login(client, admin.email)
-    issued = (
-        await client.post("/auth/invitations", json={"email": "once@example.org"})
-    ).json()
+    issued = (await client.post("/auth/invitations", json={"email": "once@example.org"})).json()
     await client.post("/auth/logout")
 
     first = await client.post(
@@ -282,9 +386,7 @@ async def test_activation_rejects_an_over_long_name(
     """The column is VARCHAR(200); an over-long name is a validation error, not a 500."""
     admin, _ = await make_admin(session_factory)
     await login(client, admin.email)
-    issued = (
-        await client.post("/auth/invitations", json={"email": "long@example.org"})
-    ).json()
+    issued = (await client.post("/auth/invitations", json={"email": "long@example.org"})).json()
 
     response = await client.post(
         "/auth/activate",
@@ -299,9 +401,7 @@ async def test_activation_normalizes_whitespace_in_the_name(
 ) -> None:
     admin, _ = await make_admin(session_factory)
     await login(client, admin.email)
-    issued = (
-        await client.post("/auth/invitations", json={"email": "spaces@example.org"})
-    ).json()
+    issued = (await client.post("/auth/invitations", json={"email": "spaces@example.org"})).json()
     await client.post("/auth/logout")
 
     response = await client.post(
@@ -323,16 +423,12 @@ async def test_revocation_racing_activation_produces_one_outcome(
     """
     admin, _ = await make_admin(session_factory)
     await login(client, admin.email)
-    issued = (
-        await client.post("/auth/invitations", json={"email": "race@example.org"})
-    ).json()
+    issued = (await client.post("/auth/invitations", json={"email": "race@example.org"})).json()
 
     async def try_activate() -> bool:
         async with session_factory() as session:
             try:
-                await service.activate_invitation(
-                    session, token=issued["token"], password=PASSWORD
-                )
+                await service.activate_invitation(session, token=issued["token"], password=PASSWORD)
                 await session.commit()
                 return True
             except (service.InvalidInvitation, IntegrityError):
@@ -373,16 +469,12 @@ async def test_repeated_racing_activations_create_at_most_one_account(
 ) -> None:
     admin, _ = await make_admin(session_factory)
     await login(client, admin.email)
-    issued = (
-        await client.post("/auth/invitations", json={"email": "double@example.org"})
-    ).json()
+    issued = (await client.post("/auth/invitations", json={"email": "double@example.org"})).json()
 
     async def try_activate() -> bool:
         async with session_factory() as session:
             try:
-                await service.activate_invitation(
-                    session, token=issued["token"], password=PASSWORD
-                )
+                await service.activate_invitation(session, token=issued["token"], password=PASSWORD)
                 await session.commit()
                 return True
             except (service.InvalidInvitation, IntegrityError):
@@ -394,8 +486,10 @@ async def test_repeated_racing_activations_create_at_most_one_account(
     assert sum(outcomes) == 1, "only one concurrent activation may succeed"
     async with session_factory() as session:
         accounts = (
-            await session.execute(sa.select(User).where(User.email == "double@example.org"))
-        ).scalars().all()
+            (await session.execute(sa.select(User).where(User.email == "double@example.org")))
+            .scalars()
+            .all()
+        )
         assert len(accounts) == 1
 
 
@@ -404,9 +498,7 @@ async def test_activation_rejects_a_weak_password(
 ) -> None:
     admin, _ = await make_admin(session_factory)
     await login(client, admin.email)
-    issued = (
-        await client.post("/auth/invitations", json={"email": "weak@example.org"})
-    ).json()
+    issued = (await client.post("/auth/invitations", json={"email": "weak@example.org"})).json()
 
     response = await client.post(
         "/auth/activate", json={"token": issued["token"], "password": "short"}
@@ -420,13 +512,9 @@ async def test_invitation_lookup_shows_who_it_is_for(
 ) -> None:
     admin, _ = await make_admin(session_factory)
     await login(client, admin.email)
-    issued = (
-        await client.post("/auth/invitations", json={"email": "lookup@example.org"})
-    ).json()
+    issued = (await client.post("/auth/invitations", json={"email": "lookup@example.org"})).json()
 
-    response = await client.post(
-        "/auth/invitations/lookup", json={"token": issued["token"]}
-    )
+    response = await client.post("/auth/invitations/lookup", json={"token": issued["token"]})
 
     assert response.status_code == 200
     assert response.json()["email"] == "lookup@example.org"
