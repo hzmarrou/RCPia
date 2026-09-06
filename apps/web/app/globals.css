@@ -276,6 +276,7 @@ main:has(> .poste) { max-width: none; padding: 0; }
 .poste-pipeline li.done { color: var(--fg); }
 .poste-pipeline li.now { color: var(--fg); font-weight: 600; }
 .poste-pipeline li.now .num { background: var(--fg); color: var(--bg); }
+.poste-pipeline li.blocked { color: var(--danger-fg); background: var(--danger-bg); }
 /* A stage whose state the case record does not keep. Dashed rather than dimmed: "not
    tracked" must not read as "not done yet". */
 .poste-pipeline li.unknown { border-style: dashed; }

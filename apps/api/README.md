@@ -136,6 +136,27 @@ job goes to exactly one of them. A claim takes a lease (15 minutes by default); 
 worker dies, the lease expires and another worker reclaims the job. Failures retry with
 exponential backoff up to `max_attempts`, keeping the error message on every attempt.
 
+## Case lifecycle
+
+Case status describes the current ledger, not a clinical decision:
+
+| Status | Meaning |
+| --- | --- |
+| `ready_for_review` | The current ledger needs clinician review, including any blocking fields. |
+| `analyzing` | A panel on that ledger is waiting for specialists or synthesis, including retries. |
+| `completed` | All panels on that ledger have settled and the newest has a successful, citation-attested synthesis. The fiche remains provisional. |
+| `blocked` | All panels on that ledger have settled but the newest has no usable synthesis, including exhausted failures or cancellation. This is not the clinical completeness gate. |
+
+A specialist failure does not change the synthesis policy: missing opinions are still explicitly
+reported to the synthesis. A usable synthesis may therefore describe an incomplete panel.
+Starting another panel returns the case to `analyzing`. A new ledger version returns it to
+`ready_for_review`; an older panel finishing cannot mark the corrected version complete.
+Document uploads retain the existing `parsing` lifecycle.
+
+The worker records terminal outcomes transactionally and reconciles them on every poll, including
+crashes, exhausted leases, and historical panels left at `ready_for_review`. Reconciliation neither
+starts a new panel nor changes any clinical record. Cases without panels remain awaiting review.
+
 ## Lockfile and private registries
 
 `uv.lock` records `https://pypi.org/simple` as the source registry so it stays portable.

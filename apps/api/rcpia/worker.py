@@ -20,6 +20,7 @@ from rcpia.agents.pi_adapter import PiNotConfigured
 from rcpia.agents.service import run_agent
 from rcpia.cases.facts import extract_case_facts
 from rcpia.cases.ledger import record_version
+from rcpia.cases.lifecycle import reconcile_analysis_statuses, refresh_analysis_status
 from rcpia.core.config import get_settings
 from rcpia.core.db import get_session_factory
 from rcpia.core.models import AnalysisJob, Case, JobStatus
@@ -95,6 +96,7 @@ def build_worker() -> Worker:
         """Catch any panel whose last specialist settled without the handler's gate running."""
         for panel_id in await panel.reconcile(session):
             logger.info("panel %s reconciled; synthesis queued", panel_id)
+        await reconcile_analysis_statuses(session)
 
     # Bound once and shared with the milestone reporters below, which need a session of
     # their own: they write while a handler still holds its transaction open.
@@ -179,6 +181,9 @@ def build_worker() -> Worker:
                     logger.info(
                         "panel %s complete; synthesis queued as job %s", panel_id, dispatched.id
                     )
+            await refresh_analysis_status(
+                session, case_id=job.case_id, finishing_job_id=job.id
+            )
         return outcome
 
     worker.register(JobType.PARSE_DOSSIER, handle_parse)

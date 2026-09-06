@@ -8,10 +8,8 @@ import { PIPELINE, pipelineOf } from "../lib/pipeline";
 /**
  * What the pipeline may claim.
  *
- * The case record does not move when a panel finishes — a dossier with four completed
- * opinions still reads `ready_for_review` — so after the work stops, this page cannot tell an
- * analysis that ran from one that never happened. The rule under test is that it says so
- * rather than guessing in either direction.
+ * Recorded lifecycle states establish completion; an empty queue alone never does.
+ * Losing contact must still stop claims about work currently in flight.
  */
 
 function medicalCase(over: Partial<CaseDetail> = {}): CaseDetail {
@@ -43,12 +41,10 @@ describe("pipelineOf", () => {
     expect(pipelineOf(medicalCase(), LEDGER, [])[VERIF]).toBe("now");
   });
 
-  it("calls the analysis unknown once a dossier is ready and nothing is running", () => {
-    // Not "pending". The panel may have run an hour ago and finished; the case record reads
-    // the same either way, and "pas encore fait" would be a claim nothing supports.
+  it("shows the post-review stages as pending before a panel is convened", () => {
     const stages = pipelineOf(medicalCase(), LEDGER, []);
-    expect(stages[ANALYSE]).toBe("unknown");
-    expect(stages[FICHE]).toBe("unknown");
+    expect(stages[ANALYSE]).toBe("pending");
+    expect(stages[FICHE]).toBe("pending");
   });
 
   it("says not-yet, not unknown, before there is anything to analyse", () => {
@@ -64,18 +60,41 @@ describe("pipelineOf", () => {
   });
 
   it("never marks the analysis done on a case status that does not say so", () => {
-    // The regression this exists for: a finished panel leaves the status at
-    // `ready_for_review`, and a page that inferred completion from anything else would be
-    // inventing it.
     for (const status of ["ready_for_review", "analyzing", "blocked"]) {
       expect(pipelineOf(medicalCase({ status }), LEDGER, [])[FICHE]).not.toBe("done");
     }
   });
 
-  it("does mark it done if the backend ever starts saying so", () => {
+  it("marks both final stages done after the backend records a usable synthesis", () => {
     const stages = pipelineOf(medicalCase({ status: "completed" }), LEDGER, []);
     expect(stages[ANALYSE]).toBe("done");
     expect(stages[FICHE]).toBe("done");
+  });
+
+  it("tracks a queued or retrying panel even before activity arrives", () => {
+    const stages = pipelineOf(medicalCase({ status: "analyzing" }), LEDGER, []);
+    expect(stages[VERIF]).toBe("done");
+    expect(stages[ANALYSE]).toBe("now");
+    expect(stages[FICHE]).toBe("pending");
+  });
+
+  it("shows a terminal synthesis failure instead of guessing or declaring completion", () => {
+    const stages = pipelineOf(medicalCase({ status: "blocked" }), LEDGER, []);
+    expect(stages[VERIF]).toBe("done");
+    expect(stages[ANALYSE]).toBe("blocked");
+    expect(stages[FICHE]).toBe("blocked");
+  });
+
+  it("does not call a newly running panel complete from a previous case snapshot", () => {
+    const stages = pipelineOf(medicalCase({ status: "completed" }), LEDGER, RUNNING);
+    expect(stages[ANALYSE]).toBe("now");
+    expect(stages[FICHE]).not.toBe("done");
+  });
+
+  it("keeps unfamiliar backend statuses unknown", () => {
+    const stages = pipelineOf(medicalCase({ status: "unrecognised" }), LEDGER, []);
+    expect(stages[ANALYSE]).toBe("unknown");
+    expect(stages[FICHE]).toBe("unknown");
   });
 });
 
@@ -100,5 +119,11 @@ describe("pipelineOf when the server has gone quiet", () => {
   it("still trusts a case the backend itself calls finished", () => {
     const stages = pipelineOf(medicalCase({ status: "completed" }), LEDGER, [], false);
     expect(stages[FICHE]).toBe("done");
+  });
+
+  it("does not trust a stale analyzing case status after losing contact", () => {
+    const stages = pipelineOf(medicalCase({ status: "analyzing" }), LEDGER, [], false);
+    expect(stages[ANALYSE]).toBe("unknown");
+    expect(stages[FICHE]).toBe("unknown");
   });
 });

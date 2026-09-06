@@ -29,6 +29,7 @@ from rcpia.core.models import (
     AuditEvent,
     Case,
     CaseLedgerVersion,
+    CaseStatus,
     ExtractedFact,
     FactOrigin,
     FactStatus,
@@ -378,7 +379,9 @@ async def record_version(
     # Lock the case first: two clinicians correcting different fields at the same moment
     # would otherwise both compute the same next version number, and one would lose its
     # correction to a unique-constraint violation.
-    await session.execute(sa.select(Case.id).where(Case.id == case.id).with_for_update())
+    await session.execute(
+        sa.select(Case.id).where(Case.id == case.id).with_for_update(key_share=True)
+    )
 
     entries = await build_entries(session, case=case)
     highest = await session.scalar(
@@ -399,6 +402,15 @@ async def record_version(
     )
     session.add(version)
     await session.flush()
+    # A fiche over the previous ledger remains historical; it does not approve this version.
+    await session.execute(
+        sa.update(Case)
+        .where(
+            Case.id == case.id,
+            Case.status.in_((CaseStatus.analyzing, CaseStatus.completed, CaseStatus.blocked)),
+        )
+        .values(status=CaseStatus.ready_for_review)
+    )
     return version
 
 

@@ -5,14 +5,10 @@ import type { Ledger } from "@/lib/ledger";
 /**
  * What each stage of the dossier's life may be said to be in.
  *
- * `unknown` is the one that matters. The case record never advances past
- * `ready_for_review`: a panel can convene, run, and write four opinions, and the status the
- * API reports afterwards is the same one it reported before. So the last two stages are
- * knowable only while the work is visibly running — after that the page has no way to tell a
- * finished analysis from one that never happened, and saying "pas encore fait" would be a
- * claim nothing supports. It says it does not know instead.
+ * The backend records the panel lifecycle, including synthesis. Unknown is reserved for
+ * lost contact or a status this client does not understand, not an ordinary finished panel.
  */
-export type StageState = "done" | "now" | "pending" | "unknown";
+export type StageState = "done" | "now" | "pending" | "unknown" | "blocked";
 
 export const PIPELINE = [
   "Dépôt",
@@ -41,18 +37,23 @@ export function pipelineOf(
   const analysing =
     known &&
     (live.some((job) => job.job_type === "run_agent") || clinicalCase.status === "analyzing");
-  const finished = clinicalCase.status === "completed";
+  const finished = clinicalCase.status === "completed" && !analysing;
+  const blocked = clinicalCase.status === "blocked" && !analysing;
 
-  // Only once the dossier is ready for analysis does "has it run?" become a question this
-  // page cannot answer. Before that, not-yet is the honest answer.
-  const beyond: StageState = finished ? "done" : extracted ? "unknown" : "pending";
+  const statusKnown = ["draft", "parsing", "ready_for_review", "analyzing"].includes(
+    clinicalCase.status,
+  );
+  const beyond: StageState = finished ? "done"
+    : !known && extracted ? "unknown"
+    : blocked ? "blocked"
+    : statusKnown || !extracted ? "pending"
+    : "unknown";
 
   return [
     uploaded ? "done" : "now",
     extracted ? "done" : uploaded ? "now" : "pending",
-    analysing || finished ? "done" : extracted ? "now" : "pending",
+    analysing || finished || (known && blocked) ? "done" : extracted ? "now" : "pending",
     analysing ? "now" : beyond,
     beyond,
   ];
 }
-
