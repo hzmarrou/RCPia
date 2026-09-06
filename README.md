@@ -81,8 +81,8 @@ docker compose --env-file .env -f infra/docker-compose.yml up -d --force-recreat
 curl -s localhost:8000/openapi.json | python -c "import sys,json;print(len(json.load(sys.stdin)['paths']),'routes')"
 ```
 
-Nineteen routes is a current API; nine means only `/auth` and `/health` are mounted, so the
-image predates the routers.
+Compare the available routes with the intended release rather than relying on a fixed count.
+The schema is available only in local development; do not enable it on staging for this check.
 
 ### Running a panel of specialists at once
 
@@ -110,38 +110,31 @@ lets a small agent pool sit alongside a larger one doing parsing and extraction.
 ### Before a demo, or after a build
 
 ```bash
-python -m rcpia.ops.smoke     # nine checks, exit 0 when the deployment can produce a fiche
+python -m rcpia.ops.smoke     # runtime and database checks; no model calls
 ```
 
-`docs/runbook-smoke.md` carries the full sequence, including the upload-to-fiche run that spends
-real model time, and `python -m rcpia.ops.dev_reset` for clearing what smoke runs leave behind.
+[`docs/runbook-smoke.md`](docs/runbook-smoke.md) carries the full synthetic upload-to-fiche
+rehearsal, which requires approval for parser/model usage.
+[`docs/runbook-deploy.md`](docs/runbook-deploy.md) covers staging release, recovery,
+clinician invitations and the feedback gate.
 
-### Analysis starts by itself
+### Analysis starts after clinician review
 
-Once a dossier is parsed, extracted and has a ledger version, the specialists are convened
-automatically -- there is no button. The chain is upload → parse → extract → ledger version →
-panel → synthesis → fiche.
+The default chain is upload → parse → extract → ledger review and corrections → manual
+panel launch → synthesis → provisional fiche. The clinician starts the specialists from
+the ledger or workstation only after the API's blocking completeness gate clears.
 
-**That means every eligible upload spends model time without anyone asking.** Three specialists,
-roughly a minute each, on any dossier complete enough to analyse. It is the point of the system
-and it is also what a test upload costs, so it is a setting rather than a behaviour:
+Uploading already spends parser and extraction-model usage. Specialist analysis is a
+separate deliberate action. Keep automatic launch disabled for the clinician pilot:
 
 ```bash
-AUTO_PANEL_ROLES=urology_oncology,medical_oncology,radiation_oncology   # the default
-AUTO_PANEL_ROLES=                                                      # off; analysis is then
-                                                                       # only ever requested
+AUTO_PANEL_ROLES=   # default: clinician reviews and launches the panel
 ```
 
-**A worker fleet meeting an old queue convenes nothing.** An extraction job older than an hour
-does not start a panel by itself, because a first deploy against a database with pending
-extractions would otherwise drain the backlog and start a panel for every one of them -- measured
-here as 334 agent runs from 111 stale jobs in twenty seconds, roughly five and a half hours of
-model time. Replaying history is a deliberate act: request those analyses through the API.
-
-A case that is missing a blocking field convenes nothing and costs nothing: automatic convening
-applies the same completeness gate as the manual endpoint, so an incomplete upload does not buy
-three refusals. Re-extraction records a new ledger version and reuses the jobs already answering
-that same question rather than starting a second panel.
+Setting explicit roles enables unattended convening and needs a separate owner decision.
+That path also enforces completeness and excludes stale extraction jobs, but it does not
+replace the pilot's clinician review step. Re-extraction records a new ledger version;
+older completed analyses do not mark that new version complete.
 
 The synthesis is **not** part of the panel and is never requested directly. It is dispatched
 once, automatically, by whichever worker finishes the last specialist — and only once every
