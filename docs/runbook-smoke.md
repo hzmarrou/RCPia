@@ -1,130 +1,127 @@
-# Runbook: is this deployment able to produce a fiche?
+# Runbook: rehearse the clinician workflow
 
-Run this once per build, and before any demo.
+Run this before a clinician handover and after a change to the deployed workflow.
+Deployment and recovery are in [the release runbook](runbook-deploy.md).
+Use the actual release images, a separate clinician account and an entirely synthetic dossier.
 
-Every check here exists because the thing it checks has already been wrong in a way nothing
-announced. A stale API image is healthy and answers `/health` while serving no case routes. A
-worker starts, stays up, and cannot find the Pi runtime. Agents run, succeed, and are handed no
-guideline passages at all. None of those look like failures from the outside; each was found by
-accident, and each cost hours.
+The automated smoke command makes no model calls. The upload-to-fiche rehearsal does:
+uploading invokes the parser and extraction model; one manual panel invokes the three
+specialists and synthesis, with possible retries. Obtain explicit approval for that
+usage and agree the number of dossiers/panels before starting. Do not keep resubmitting
+when a run fails.
 
----
+## 1. Local preparation
 
-## 1. Bring the stack up
+Use localhost for visual review. Confirm whether the preview uses the real backend or
+synthetic fixture responses, and whether workers are running. An isolated UI preview
+without workers cannot prove parsing, agent progress or export.
 
-```bash
-docker compose --env-file .env -f infra/docker-compose.yml up -d --build --scale rcpia-worker=3
+For the ordinary Docker stack, use PowerShell from the repository root:
+
+```powershell
+docker compose --env-file .env -f infra\docker-compose.yml up -d --build --scale rcpia-worker=3
+docker compose --env-file .env -f infra\docker-compose.yml ps
 ```
 
-Both flags matter. `--env-file .env` because Compose reads the environment file beside *its own*
-file (`infra/.env`) and this project keeps `.env` at the repository root — without it every
-`${...}` silently takes its default, the stack starts, and the workers then refuse to run agents
-with nothing saying why. `--build` because `up` alone reuses whatever image exists.
+This replaces the local stack, so coordinate with anyone using it. `.env` must specify the
+approved package feeds, the available `POSTGRES_PORT` and empty `AUTO_PANEL_ROLES`.
+Expect three running worker containers. Do not raise concurrency without provider capacity
+approval. Inspect errors privately; logs can contain clinical material or service details.
 
-## 2. Three workers, actually running
+## 2. Automated operational smoke
 
-```bash
-docker compose --env-file .env -f infra/docker-compose.yml ps --format "{{.Name}} {{.Status}}" | grep worker
+```powershell
+docker compose --env-file .env -f infra\docker-compose.yml exec -T rcpia-worker `
+    python -m rcpia.ops.smoke --api http://api:8000
 ```
 
-Expect three lines, all `Up`. A worker that exited on startup usually means a missing credential
-or an unresolvable Pi runtime — `docker logs rcpia-rcpia-worker-1` says which.
+On staging, select the newly deployed worker revision and run:
 
-## 3. The automated checks
-
-```bash
-docker compose --env-file .env -f infra/docker-compose.yml exec rcpia-worker python -m rcpia.ops.smoke --skip-api
-python -m rcpia.ops.smoke            # from the host, including the API
+```powershell
+az containerapp exec -g rg-rcpia -n ca-rcpia-stg-worker `
+    --command 'python -m rcpia.ops.smoke --skip-api'
 ```
 
-Exit code 0 means every check passed, so this can gate a build. It covers:
+Read the command's own pass/fail output. The staging flag skips only the route-inventory
+probe: `/openapi.json` is intentionally disabled outside local development. Do not weaken
+that configuration to get a green result.
 
-| check | what it catches |
-|---|---|
-| api serves current routes | a stale API image — 19 routes is current, 9 means only `/auth` and `/health` |
-| pi entry point resolves | the deployed adapter cannot launch the runtime, however healthy the container |
-| pi runtime is 0.80.3 | an unintended upgrade |
-| agents load their brain | `--approve` missing, which makes every specialist a general-purpose agent that still answers plausibly |
-| credential is not in argv | the key readable in the process table |
-| pi config is process-local | replicas sharing one writable config directory |
-| timeouts nest | provider < process < lease, so a failure names the layer that fired |
-| no unrecoverable running jobs | rows that no worker can claim and no reaper can free, which block a case permanently |
-| recent agents were grounded | **a succeeded run with zero passages** — the worker has no retriever |
+The checks cover current routes locally, the pinned Pi runtime, brain loading, credential
+placement, process-local Pi configuration, nested timeout budgets, calculator access,
+unrecoverable jobs, recent grounding and the narrative extraction pass. The count is
+determined by the tool; a fixed historical count is not the release gate.
 
-## 4. Upload to fiche, on one dossier
+Smoke inspects recent records, which may predate the release. A fresh fixture database can
+report no previous runs/extractions; record that as unverified, not a pass. Resolve other
+failures first, perform the authorized rehearsal below, then repeat smoke and inspect that
+rehearsal's actual runs. Never suppress an assertion to make the handover appear ready.
 
-Not automated, because it spends real model time — roughly three minutes and four agent runs.
-Do it before a demo and after any change to the agent path.
+## 3. Rehearsal fixture and account
 
-```bash
-# a session
-curl -s -c /tmp/jar -X POST localhost:8000/auth/login -H 'Content-Type: application/json' \
-  -d '{"email":"<operator>","password":"<password>"}'
+Prepare one fictional prostate or bladder dossier with an expected field-value sheet.
+Have a clinical reviewer approve the fixture if clinical interpretation is required.
+Include a known blocking omission that the operator can later correct from that sheet;
+never invent a patient value simply to clear the gate.
 
-# a case, then the dossier
-CASE=$(curl -s -b /tmp/jar -X POST localhost:8000/cases -H 'Content-Type: application/json' \
-  -d '{"reference":"SMOKE-01","cancer_type":"bladder"}' | python -c "import sys,json;print(json.load(sys.stdin)['id'])")
-curl -s -o /tmp/upload.json -w 'upload http=%{http_code}\n' \
-  -b /tmp/jar -X POST "localhost:8000/cases/$CASE/documents" -F "file=@<dossier>.docx"
-```
+Use a unique reference such as `HANDOVER-SYNTHETIC-<UTC timestamp>`. Do not reuse an old
+case to claim a new full rehearsal. Keep the source, expected readings and resulting
+exports in the approved restricted workspace, not Git.
 
-**Check that line printed `http=201`, and stop if it did not.** An upload can fail without the
-rest of the chain saying anything: the case exists, the runbook continues, and nothing is ever
-parsed. `-s` alone hides it, which is why the status code is printed rather than discarded.
-`http=000` means curl abandoned the request before the server saw it — an unreadable path, or a
-`;type=` suffix on the `-F` argument, which curl rejects rather than sends.
+Create a separate `uploader` invitation through `/admin/invitations` and deliver its link
+privately. An administrator must do this manually; the app does not send email. Use an
+isolated browser context for the recipient, so an existing admin session cannot make
+authorization failures invisible. Never export browser cookies or storage state.
 
-Confirm the document actually landed before spending model time on the panel:
+## 4. Walk the complete loop
 
-```sql
-SELECT count(*) FROM uploaded_documents d JOIN cases c ON c.id = d.case_id
-WHERE c.reference = 'SMOKE-01';   -- expect 1
-```
+| Step | Action and acceptance |
+| --- | --- |
+| 1. Activate | Open the invitation link, activate with a personal password and reach the dashboard. Do not reuse administrator credentials. |
+| 2. Sign in | Sign out and sign back in. Refreshing an authenticated page should retain access; a signed-out session should not see case data. |
+| 3. Upload | Create the synthetic case and upload the dossier. Confirm upload acceptance, parsing and extraction settle, and the ledger is readable. No specialists may launch automatically. |
+| 4. Find it again | Sign out, close the session, return and find the same reference in the dashboard. Repeat on the following day before pilot handover; an immediate relogin is only the preliminary persistence check. |
+| 5. Review extraction | Compare values and source references with the expected sheet. Missing fields are red, uncertainty is amber, and each field has one ledger row. Check both themes and usable split panes locally. |
+| 6. Correct | Confirm the known blocking omission disables launch and appears in the blocking list. Follow its correction link, enter the fixture value and a reason, then confirm a new ledger version. Launch becomes available only when the API gate clears. |
+| 7. Launch once | Start one panel. Observe actual milestones and elapsed time, without percentages or invented progress. Confirm all requested specialist outcomes and subsequent synthesis; do not equate an empty activity list with success. |
+| 8. Read and export | Read the provisional fiche and its evidence references. Download and open the Word export, checking the case reference, content and provisional status. A successful download alone is not enough. |
+| 9. Recognize completion | Return to the dashboard and confirm the current-ledger case is completed only after a usable, citation-attested synthesis. A terminal panel without usable synthesis must be visibly blocked. |
+| 10. Report feedback | Submit one synthetic issue through the chosen private feedback channel and confirm the designated triage person can receive it. An undecided channel means this step is pending. |
 
-Then watch the chain settle:
+For invitations, also confirm an `uploader` cannot administer invitations and that revoking
+an unused synthetic invitation prevents activation. Do not revoke a real clinician's link
+for a rehearsal. Do not create extra model runs to exercise these account checks.
 
-```sql
-SELECT job_type, coalesce(payload->>'agent_role','-') AS role, status,
-       right(coalesce(claimed_by,'-'), 6) AS worker,
-       to_char(started_at,'HH24:MI:SS') AS started
-FROM analysis_jobs j JOIN cases c ON c.id = j.case_id
-WHERE c.reference = 'SMOKE-01' ORDER BY j.created_at;
-```
+For a live job, keep the last-known state during a connection interruption and show the
+communication problem rather than declaring completion. If the short job window prevents
+observing this safely, record the limitation and cover the interaction with the existing
+local fixtures; do not secretly submit another panel.
 
-What a healthy run looks like, measured on this stack:
+Confirm browser API calls stay on the web origin under `/api`. Neither browser network
+traffic nor redirects should target the internal Azure API hostname or `localhost:8000`
+from a staging page. Inspect only the synthetic session and do not save an unredacted HAR.
 
-- `parse_dossier` completes, then `extract_facts` about **30 s** later;
-- three `run_agent` rows appear **in the same transaction** as the ledger version;
-- **three different workers** claim them within about a second of each other;
-- specialists take **50–70 s** and their windows overlap fully;
-- `rcp_synthesis` appears only once all three have settled, and takes about **70 s**;
-- total upload to fiche: **under three minutes**.
+There is no fixed three-minute promise. Parser latency, cold starts, provider load and
+retries vary. The checking-stage warning is provisional, not an analysis timeout. On a
+citation failure, missing output or incorrect status, retain the reference and sanitized
+failure metadata, stop the affected flow and investigate; do not disable citation checks
+or relax the completeness rules.
 
-Then the fiche itself:
+## 5. Record the outcome and clean up deliberately
 
-```bash
-curl -s -b /tmp/jar "localhost:8000/cases/$CASE/pps/markdown" | head -40
-```
+Record the release SHA, image digests/revisions, synthetic reference, UTC times, terminal
+run outcomes, passed/pending/failed steps and a link to the private feedback item.
+Leave the next-day return explicitly pending until it has actually happened. Do not
+describe a localhost preview or a previous staging panel as this full rehearsal.
 
-It should carry the panel block and name the specialities that were compared.
+Staging rehearsal cases are retained for audit. Do not run local reset utilities on staging
+or delete append-only records to hide a failed attempt. For a local fixture, stop its
+services and remove only the disposable database/blobs that fixture owns. The ordinary
+local stack and other users' files are not disposable fixtures.
 
-## 5. Afterwards
+If an operator needs the existing local reset utility, inspect its documented scope first.
+It refuses outside local deployment and while work is live, but its demo-prefix selection
+can cover more cases than this rehearsal. It is not automatic end-of-run cleanup.
 
-Smoke runs leave cases behind. Clear them deliberately rather than by hand:
-
-```bash
-python -m rcpia.ops.dev_reset                      # what is there
-python -m rcpia.ops.dev_reset --demo-cases --apply # remove SMOKE-/DEMO-/E2E-/CASE- cases
-```
-
-It refuses outside a local deployment, refuses while any job is live, and does nothing without
-`--apply`.
-
----
-
-## What this runbook does not tell you
-
-Whether the fiche is *clinically* right. Every check here is about the machinery: that the chain
-runs, that the agents were given their instructions and their evidence, that the panel really ran
-in parallel. Whether the resulting opinion is good medicine is a separate question, and the
-answer to it comes from a clinician reading the output, not from a green tick here.
+This rehearsal establishes that a clinician can use the workflow and report a defect.
+It does not certify medical correctness: every fiche remains provisional and requires
+human clinical review.

@@ -2,6 +2,10 @@
 
 Provisions from nothing: registry, environment, database, storage and three container apps.
 
+For updates to an existing environment, use [the staging deployment runbook](../../docs/runbook-deploy.md).
+It covers release approval, immutable images, queue draining, rollback and clinician handover
+without reprovisioning infrastructure or replacing existing configuration.
+
 ## Names
 
 Azure Cloud Adoption Framework: a type abbreviation, the workload, the environment, and — for
