@@ -6,10 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from rcpia.agents.pi_adapter import PiAdapter, PiRunResult
-from rcpia.agents.schemas import AgentOutput, TaskBundle
+from rcpia.agents.pi_adapter import PiAdapter, PiRunResult, PiUsage
+from rcpia.agents.schemas import AgentOutput, SynthesisOutput, TaskBundle
 from rcpia.ops import brain_shadow
 from rcpia.ops.agent_brains import PROMOTIONS
+
+
+def _result(adapter: PiAdapter, output: AgentOutput) -> PiRunResult:
+    return PiRunResult(
+        agent_name=output.agent_role, output_text=output.model_dump_json(),
+        session_path=adapter.work_root / "synthetic.jsonl", session_bytes=b"",
+        provider="synthetic", model="synthetic", runtime_version=None,
+        usage=PiUsage(), duration_seconds=0.0,
+    )
 
 
 @pytest.fixture
@@ -57,14 +66,7 @@ async def test_same_bundle_reaches_both_arms_and_semantics_remain_unassessed(
             uncertainty_notes=["Synthetic missing evidence."],
             rationale="Synthetic explanation.",
         )
-        from rcpia.agents.pi_adapter import PiUsage
-
-        return PiRunResult(
-            agent_name=agent_name, output_text=output.model_dump_json(),
-            session_path=self.work_root / "synthetic.jsonl", session_bytes=b"",
-            provider="synthetic", model="synthetic", runtime_version=None,
-            usage=PiUsage(), duration_seconds=0.0,
-        )
+        return _result(self, output)
 
     monkeypatch.setattr(PiAdapter, "launcher", lambda self: (["synthetic"], None))
     monkeypatch.setattr(PiAdapter, "run", fake_run)
@@ -82,6 +84,49 @@ async def test_same_bundle_reaches_both_arms_and_semantics_remain_unassessed(
     with pytest.raises(FileExistsError):
         await brain_shadow.run(shadow_args)
     assert len(seen) == 2
+
+
+@pytest.mark.parametrize("silent", ["medical_oncology", "radiation_oncology"])
+async def test_availability_oracle_is_recorded_separately_from_contract_acceptance(
+    shadow_args: argparse.Namespace, monkeypatch: pytest.MonkeyPatch, silent: str,
+) -> None:
+    shadow_args.case = ["synthetic-withheld-and-missing-opinion-rcp_synthesis"]
+
+    async def fake_run(
+        self: PiAdapter, *, bundle: TaskBundle, agent_name: str, case_id: object,
+    ) -> PiRunResult:
+        first = bundle.inputs.agent_opinions[0]
+        output = SynthesisOutput.model_validate({
+            "agent_role": agent_name,
+            "case_id": str(case_id),
+            "recommendation": "Synthetic withholding.",
+            "recommendation_withheld": True,
+            "uncertainty_notes": ["radiation_oncology unavailable; cause unknown."],
+            "rationale": "Synthetic attributed requirement.",
+            "coverage_gaps": [{
+                "point": "[CONDITION_A] must be documented.",
+                "raised_by": [{
+                    "role": first.agent_role, "quote": first.missing_information[0],
+                }],
+                "silent": [silent],
+            }],
+        })
+        return _result(self, output)
+
+    monkeypatch.setattr(PiAdapter, "launcher", lambda self: (["synthetic"], None))
+    monkeypatch.setattr(PiAdapter, "run", fake_run)
+    await brain_shadow.run(shadow_args)
+    for arm in ("v1", "v2"):
+        record = json.loads(
+            (shadow_args.output / f"{shadow_args.case[0]}.{arm}.json").read_text(encoding="utf-8")
+        )
+        assert record["contract_valid"] is True
+        assert record["semantic_assessment"] == "pending review"
+        assert record["synthesis_availability_errors"] == (
+            [] if silent == "medical_oncology" else [
+                "coverage_gaps[0].silent: radiation_oncology has no available opinion"
+            ]
+        )
 
 
 async def test_non_brain_settings_difference_stops_before_any_run(

@@ -1,5 +1,6 @@
 """Review/runtime equivalence and executable JSON examples, not model evaluation."""
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -7,7 +8,13 @@ from pathlib import Path
 import pytest
 
 from rcpia.agents.pi_adapter import PiAdapter
-from rcpia.agents.schemas import output_model_for
+from rcpia.agents.schemas import (
+    SynthesisOutput,
+    TaskBundle,
+    check_citations,
+    check_synthesis,
+    output_model_for,
+)
 from rcpia.ops.agent_brains import (
     BEGIN,
     END,
@@ -16,6 +23,7 @@ from rcpia.ops.agent_brains import (
     expected_brains,
     payload,
 )
+from rcpia.ops.brain_v2_cases import shadow_cases, synthesis_availability_errors
 
 REVIEW_ONLY = {
     "nutrition": "agent-nutrition-brain-v2.md",
@@ -91,3 +99,42 @@ def test_malformed_review_boundaries_are_rejected(text: str) -> None:
 def test_editorial_text_is_excluded_without_changing_prompt_content() -> None:
     body = "<identity>\nIdentity.\n</identity>\n<style>\nStyle.\n</style>"
     assert payload(f"Editorial text.\n{BEGIN}\n\n{body}\n{END}\n") == body + "\n"
+
+
+def test_recorded_synthesis_availability_evidence_has_matching_inputs_and_outputs() -> None:
+    """Audit recorded model structures, not semantic correctness or future model reliability."""
+    path = (
+        REPOSITORY_ROOT / "docs" / "implementation"
+        / "agent-brains-v2-synthesis-availability.json"
+    )
+    evidence = json.loads(path.read_text(encoding="utf-8"))
+    cases = {
+        case.case_id: case for case in shadow_cases()
+        if case.bundle.inputs.agent_role == "rcp_synthesis"
+    }
+    assert {record["case_id"] for record in evidence["cases"]} == set(cases)
+    assert len(evidence["cases"]) == len(cases)
+    for record in evidence["cases"]:
+        case = cases[record["case_id"]]
+        bundle = TaskBundle.model_validate({
+            **evidence["bundle_template"], "inputs": record["inputs"],
+        })
+        assert bundle == case.bundle
+        assert record["expected"] == case.expected
+        assert record["bundle_sha256"] == hashlib.sha256(
+            bundle.model_dump_json(by_alias=True).encode("utf-8")
+        ).hexdigest()
+        output = SynthesisOutput.model_validate(record["output"])
+        assert output.case_id == bundle.inputs.case_id
+        assert output.recommendation_withheld == case.expected_withheld
+        check_citations(output, bundle)
+        check_synthesis(output, bundle)
+        assert record["contract_valid"] is True
+        assert synthesis_availability_errors(output, bundle) == (
+            record["synthesis_availability_errors"]
+        ) == []
+        prior = SynthesisOutput.model_validate(record["prior_output"])
+        assert prior.case_id == bundle.inputs.case_id
+        check_citations(prior, bundle)
+        check_synthesis(prior, bundle)
+        assert synthesis_availability_errors(prior, bundle) == record["prior_availability_errors"]

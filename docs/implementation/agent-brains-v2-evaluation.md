@@ -52,12 +52,17 @@ Canonical payload hashes for the final V2 candidate:
 | `urology_oncology` | `a8a6bc1657ee3a7a941dc7b6c5b64215d218c85d9ed13a02b93f36c6ae0236d2` |
 | `medical_oncology` | `bbd178942b8b658d6278fb26ae556b6ca0e2f5d137552552a42652c8f02d8843` |
 | `radiation_oncology` | `2b5e35032873ce4ac126b050543299aea40f447452f345736b3636c4611b05d2` |
-| `rcp_synthesis` | `1b0bb8b501ad9c1054b7153a2d240a4ce02e664e9fe2c757787e00c0758269dd` |
+| `rcp_synthesis` | `7bc264e4ebe65c9500d493e70863d526c79d32d141230629ff04405d7bdb6efd` |
 
 The initial synthesis candidate had hash
 `7fea21e51d6500ca108275446234912406bc82729e5d01d3a8847dde359f7532`.
 Its results are retained separately from the final synthesis reruns. The other
 three prompt hashes did not change during evaluation.
+
+The pre-review synthesis revision was
+`1b0bb8b501ad9c1054b7153a2d240a4ce02e664e9fe2c757787e00c0758269dd`.
+The final hash above additionally separates unavailable opinions from silence.
+Earlier outputs remain unchanged and are not substituted with later successes.
 
 ## Contract alignment and deliberate limits
 
@@ -104,17 +109,23 @@ Existing tooling was reused without dependency changes:
 | Evidence | Result |
 | --- | --- |
 | Local full API suite before the final additional regression, `python -m pytest -n 2 -q` | 1,833 passed; 10 skipped |
-| Final implementation API suite in PR CI, `uv run pytest` | 1,824 passed; 20 skipped |
+| Pre-review implementation API suite in PR CI, `uv run pytest` | 1,824 passed; 20 skipped |
 | `python -m ruff check .` | Passed |
 | `python -m mypy rcpia` | Passed; 123 source files |
 | Existing `test_pi_runtime_contract.py` with the configured provider | 5 passed |
 | Affected asset/behavior/orchestration tests after the final synthesis clarification | 117 passed |
+| Affected tests after the unavailable/silent review correction | 127 passed |
 | Web CI | 136 tests passed; typecheck, lint and production build passed |
 | Corpus-only CI and GitGuardian | Passed |
 
 CI run `34072962657` covers implementation commit `49b910a`. Its four checks
 passed. Local and CI skip counts differ; the table reports each observed result
 rather than treating them as identical runs.
+
+The correction's focused Ruff and mypy checks also pass. The committed synthetic
+evidence test reconstructs the exact bundles, checks their hashes and production
+contracts, and independently applies the availability oracle to recorded outputs.
+It does not establish semantic entailment or predict future model behavior.
 
 The real-runtime checks use Pi `0.80.3` and synthetic codeword/session inputs.
 Three agent executions exercise actual brain loading, its negative trust control
@@ -165,6 +176,11 @@ append-system text, records prompt/bundle hashes and usage, and does not retry
 rejected output. It writes production-contract acceptance separately from
 `semantic_assessment: "pending review"`. Each output directory is exclusive.
 
+For synthesis it also records `synthesis_availability_errors`, an out-of-band
+check that every `silent` role has an actual available opinion and is not listed
+as missing. This uses the production role normalizer but does not alter the
+production validator, contract acceptance or pending full semantic assessment.
+
 The initial arms completed using `azure-openai-responses` / `gpt-5.6-sol` and Pi
 `0.80.3`. All 46 recorded bundle hashes matched the predefined cases, and the
 paired manifests were identical.
@@ -185,24 +201,31 @@ replacement is substituted into the first-attempt denominator.
 
 ### Assessed behavior
 
-Every original cell was assessed against its predeclared criteria. The table
-counts usable outputs meeting both the production contract and the scenario
-oracle; contract acceptance alone is not a safety or grounding score.
+Every original cell was assessed against its predeclared criteria. Independent
+PR review then identified an incorrectly accepted attribution: an unavailable
+opinion was classified as silent. Naming its unavailability elsewhere does not
+repair that contradiction.
 
-| Scenario | V1 | Initial V2 | Final V2 evidence |
-| --- | --- | --- | --- |
-| Specialists: supported main and alternative | 2/3 | 2/3 | 2/3 |
-| Specialists: missing applicability | 3/3 | 3/3 | 3/3 |
-| Specialists: empty corpus | 3/3 | 3/3 | 3/3 |
-| Specialists: adjacent-only guidance | 3/3 | 3/3 | 3/3 |
-| Specialists: contradictory patient facts | 3/3 | 3/3 | 3/3 |
-| Specialists: nomogram refusal | 3/3 | 3/3 | 3/3 |
-| Synthesis: atomic convergence | 1/1 | 1/1 | 1/1 |
-| Synthesis: divergence | 0/1 | 1/1 | 1/1 |
-| Synthesis: silence/coverage gap | 1/1 | 1/1 | 1/1 |
-| Synthesis: withheld and missing opinion | 0/1 | 0/1 | 1/1 |
-| Synthesis: metadata-only support | 0/1 | 1/1 | 1/1 |
-| Total | 19/23 | 21/23 | 22/23 |
+The prior report's **22/23 pre-review result is corrected to 21/23** when the
+availability requirement is applied. This is an explicit oracle correction, not
+a claim that the original assessment caught the defect. The table counts usable
+outputs meeting the production contract and scenario criteria, including the
+corrected availability rule applied to preserved earlier synthesis outputs.
+
+| Scenario | V1 | Initial V2 | Pre-review V2 | Corrected V2 |
+| --- | --- | --- | --- | --- |
+| Specialists: supported main and alternative | 2/3 | 2/3 | 2/3 | 2/3 |
+| Specialists: missing applicability | 3/3 | 3/3 | 3/3 | 3/3 |
+| Specialists: empty corpus | 3/3 | 3/3 | 3/3 | 3/3 |
+| Specialists: adjacent-only guidance | 3/3 | 3/3 | 3/3 | 3/3 |
+| Specialists: contradictory patient facts | 3/3 | 3/3 | 3/3 | 3/3 |
+| Specialists: nomogram refusal | 3/3 | 3/3 | 3/3 | 3/3 |
+| Synthesis: atomic convergence | 1/1 | 1/1 | 1/1 | 1/1 |
+| Synthesis: divergence | 0/1 | 1/1 | 1/1 | 1/1 |
+| Synthesis: silence/coverage gap | 1/1 | 1/1 | 1/1 | 1/1 |
+| Synthesis: withheld and missing opinion | 0/1 | 0/1 | 0/1 | 1/1 |
+| Synthesis: metadata-only support | 0/1 | 1/1 | 1/1 | 1/1 |
+| Total | 19/23 | 21/23 | 21/23 | 22/23 |
 
 Each specialist row contains one case per active specialist. The final column
 retains the original 18 specialist executions because their prompt hashes did not
@@ -223,36 +246,60 @@ safety advantage. Calculator cases retain the independently supported option in
 both arms, with V2 generally carrying more exact refusal provenance.
 
 Semantic review of the initial comparison identified one shared failure:
-both V1 and V2 represented two distinct abstentions as a convergence. The final
+both V1 and V2 represented two distinct abstentions as a convergence. The
 synthesis instruction explicitly excludes agreement on generic status while
 retaining genuine shared positions on specific options or conditions in withheld
 opinions. The validator was not weakened or changed.
 
-All five fixed synthesis cases were rerun after this correction, not only the
-failing case; all five passed the production contract. Their bundle hashes match
-the original V1 inputs. All five also pass semantic assessment: the distinct
-abstentions no longer form a convergence, while their missing facts, calculator
-refusal and unavailable opinion remain explicit. No new material V2 regression
-was identified in these abstract fixtures.
+Five pre-review synthesis reruns fixed that status-only convergence, but the
+incomplete-panel output still put unavailable radiation oncology in three
+`silent` lists. The earlier assessment incorrectly treated this as non-blocking.
+
+The PR correction now reserves `silent` for actual available opinions, updates
+the examples and audit instructions, and adds an explicit out-of-band oracle.
+Unavailable opinions are reported separately, not as coverage gaps. With only
+one usable opinion and no valid structured comparison, the prompt preserves
+attributed content while withholding if required by the unchanged output schema;
+it does not invent a silent participant to satisfy that schema.
+
+All five fixed synthesis cases were rerun again under the corrected frozen hash
+above, with the stronger criterion declared before execution. All five passed
+production validation, the availability check and the assessed scenario criteria.
+Input hashes match the original cases. The incomplete-panel output preserves
+both distinct suspensions, their missing facts, the calculator refusal/reason
+and missing input, while radiation oncology appears only as unavailable, never
+in `silent`. Real silence between the two available opinions remains visible.
 
 Review found no invented patient values, clinical rules or calculator estimates
 in either arm. Observed failures concerned citation channels, withholding state
 and comparison categorization. This small abstract pack cannot establish their
 absence in realistic clinical cases.
 
-**Useful-detail losses and representation limits remain visible.** Final V2
-synthesis omits the background `[CONTEXT_A]` in the silence and withheld cases,
-and does not repeat the absent clinical question in several cases. The required
-positions, conditions and withholding reasons remain, but these are real context
-omissions rather than improvements. In the incomplete-panel case, the unavailable
-radiation role appears in `coverage_gaps[*].silent` while its unavailability and
-unknown cause are explicitly stated elsewhere; no position is attributed to it.
+**Useful-detail losses remain visible.** The corrected reruns omit background
+`[CONTEXT_A]` in the atomic and withheld cases and do not repeat the absent
+clinical question in several cases. Required positions, conditions and
+withholding reasons remain, but these are context omissions, not improvements.
 
 Empty structured `alternatives` in some synthesis outputs is not, by itself, an
 option-coverage loss: the corresponding sources mention the alternative only in
 recommendation text and have empty structured alternatives. V2 preserves the
 position in prose and coverage gaps rather than inventing an option/rationale/ID
 triplet or borrowing reference metadata.
+
+### Auditable correction evidence
+
+`agent-brains-v2-synthesis-availability.json` contains all five exact fixture
+inputs, a shared TaskBundle template, bundle/prompt hashes, provider/runtime
+identity, previous and corrected parsed outputs, availability errors and concise
+per-case assessments. The previous incomplete-panel output has three availability
+errors; every corrected output has zero. This makes the correction auditable
+without access to local sessions or another provider run.
+
+The artifact contains only abstract synthetic material, not provider sessions,
+credentials or user dossiers. It does not publish the original V1 or specialist
+outputs, so it does not independently substantiate the entire historical
+23-cell comparison. All five corrected fixed-case outputs also passed pure
+provisional PPS assembly; these remain development cases, not clinical validation.
 
 ### Supplemental linked V2 panel
 
@@ -273,8 +320,10 @@ This added five agent executions, for 51 specialist/synthesis executions includi
 the 46 paired runs. Final-synthesis follow-up added seven more: the five fixed
 cases, a positive shared-condition case within withheld opinions, and a rerun of
 the linked synthesis on the same three accepted specialist opinions. Together
-with the three separate codeword/session probes, this is 61 provider-backed agent
-executions. Individual executions can contain more than one provider request.
+with the three separate codeword/session probes, this was 61 provider-backed
+agent executions before PR review. The five availability-correction reruns bring
+the total to 66 recorded executions (63 specialist/synthesis plus three probes).
+Individual executions can contain more than one provider request.
 
 The linked synthesis produced two separately attested convergences and one
 coverage gap, without converting silence into agreement. Every quote was checked
@@ -287,19 +336,21 @@ Pure PPS assembly accepted the synthesis with `decision.taken=false` and
 upload, extraction, retrieval, persisted-job, browser or Word-export rehearsal.
 The running local app and staging were not modified.
 
-The positive withheld-opinion probe retained an attested convergence on the
+The pre-review positive withheld-opinion probe retained an attested convergence on the
 specific requirement to document `[CONDITION_A]`, while preserving both
-abstentions, calculator refusal and missing opinion. The final linked synthesis
+abstentions, calculator refusal and missing opinion. The pre-review linked synthesis
 also passed production validation, semantic review and provisional PPS assembly.
 It retains two genuine three-role convergences, with no remaining option-specific
 silence. Six opinion-field quotes, three copied option/rationale/ID triplets and
 four role-prefixed references match their sources. The different coverage-gap
 count is faithful to the positions actually expressed, not a reason to demand
-textual similarity to the first synthesis.
+textual similarity to the first synthesis. These two supplemental probes used
+the earlier `1b0bb8...` revision and were not repeated for the availability fix.
 
 These additional outputs are kept separately from the primary comparison. Frozen
 prompts, bundles, outputs, sessions and per-case assessments are retained as local
-evaluation artifacts; raw sessions and user dossiers are not committed.
+evaluation artifacts. Only the five synthetic before/after correction pairs are
+additionally committed; raw sessions and user dossiers are not committed.
 
 ## Review and rollback
 
@@ -307,8 +358,9 @@ Independent review identified relative evaluation paths and two synthesis
 withholding defects. Those were corrected with targeted regressions, without
 weakening production contracts. Follow-up technical review found no remaining
 significant issue in the prompts, synchronization/evaluation helpers or new tests,
-including the final status-only-convergence clarification. The separate paired
-semantic assessment is recorded above.
+including the status-only-convergence clarification. A subsequent independent
+review correctly blocked the unavailable/silent conflation; that correction and
+the revised assessment are documented above and remain subject to re-review.
 
 Promote the four active runtime brains together. Roll back the whole promotion
 commit/PR as one unit, including its review/runtime equivalence assets; reverting

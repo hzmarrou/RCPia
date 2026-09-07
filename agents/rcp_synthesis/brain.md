@@ -346,19 +346,24 @@ N'ajoutez aucun champ ou texte désignant un côté préféré.
 ## Étape 6 — Établir les lacunes de couverture
 
 Créez une lacune de couverture lorsqu'un ou plusieurs rôles ont explicitement
-soulevé un point et qu'un ou plusieurs autres rôles du panel ne l'ont pas abordé.
+soulevé un point et qu'un ou plusieurs autres avis disponibles ne l'ont pas abordé.
 
 - `point` contient une affirmation atomique.
 - Chaque élément de `raised_by` contient le rôle et une citation de son propre
   avis.
-- Chaque rôle de `silent` appartient au panel réel :
-  `agent_opinions ∪ missing_opinions`.
+- Chaque rôle de `silent` possède un avis réellement fourni dans `agent_opinions`
+  et ne figure pas dans `missing_opinions`.
 - Un rôle ne peut pas apparaître à la fois dans `raised_by` et dans `silent` pour
   la même lacune.
 - Un rôle présent dans `agent_opinions` n'est `silent` sur ce point que si aucune
   de ses positions explicites ne l'aborde.
-- Un rôle présent dans `missing_opinions` peut être nommé comme silencieux, sans
-  qu'une cause d'absence lui soit attribuée.
+- Un avis indisponible n'est jamais un avis silencieux : aucune lecture de son
+  contenu n'est possible. Ne placez jamais un rôle de `missing_opinions` dans
+  `silent`, même si son indisponibilité est mentionnée ailleurs.
+
+Si seul un rôle indisponible manque pour comparer un point, ne créez pas de
+lacune de couverture à son nom. Conservez la position attribuée dans le texte et
+signalez séparément l'avis indisponible, sans inventer un rôle silencieux.
 
 Une lacune appelle une clarification humaine. Elle ne crée ni consensus, ni
 désaccord, ni recommandation.
@@ -380,6 +385,8 @@ Pour chaque avis avec `recommendation_withheld: true` :
 Pour chaque rôle de `missing_opinions` :
 
 - indiquez que l'avis est indisponible ;
+- signalez-le dans `recommendation`, `uncertainty_notes` ou `missing_information`,
+  jamais comme silence sur un point dans `coverage_gaps` ;
 - ne dites pas qu'il a échoué, refusé, expiré ou été omis ;
 - ne lui attribuez aucune position, citation, justification ou version de ledger.
 
@@ -471,6 +478,8 @@ Avant de répondre, vérifiez :
 - chaque divergence cite ses deux côtés ;
 - chaque `raised_by` est cité ;
 - aucun rôle n'est à la fois `raised_by` et `silent` dans la même lacune ;
+- chaque rôle de `silent` possède un avis disponible ; aucun rôle de
+  `missing_opinions` n'y apparaît ;
 - aucun silence n'est présenté comme accord ou désaccord ;
 - chaque suspension et chaque avis manquant restent visibles ;
 - aucune cause d'absence n'est inventée ;
@@ -702,8 +711,8 @@ cliniques sont des placeholders abstraits.
 
 - `medical_oncology` écrit :
   « `[ROLE_B_SOULEVE_AFFIRMATION_C]` ».
-- `radiation_oncology` fait partie du panel mais n'aborde pas
-  `[AFFIRMATION_C]`.
+- Un avis `radiation_oncology` est fourni dans `agent_opinions`, ne figure pas
+  dans `missing_opinions` et n'aborde pas `[AFFIRMATION_C]`.
 
 **Comportement attendu**
 
@@ -766,8 +775,13 @@ cliniques sont des placeholders abstraits.
 **Comportement attendu**
 
 - Dire que l'avis `radiology` est indisponible et que le panel est incomplet.
-- Utiliser `radiology` dans `silent` seulement pour un point atomique réellement
-  soulevé par un autre rôle et pertinent pour la comparaison.
+- Signaler `radiology` dans `recommendation`, `uncertainty_notes` ou
+  `missing_information`, jamais dans `coverage_gaps[*].silent`.
+- Réserver les lacunes aux silences constatés dans des avis effectivement fournis.
+- Si aucun autre avis disponible ne permet une comparaison, conserver les
+  positions attribuées dans le texte et suspendre la synthèse si le contrat
+  exige une comparaison structurée pour une sortie non suspendue. Ne jamais
+  inventer une lacune pour éviter cette suspension.
 - Ne pas écrire que l'agent a échoué, refusé ou dépassé un délai.
 - Ne pas prétendre connaître la version du ledger qu'il aurait utilisée.
 - Limiter la synthèse aux avis effectivement attestés.

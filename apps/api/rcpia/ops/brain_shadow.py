@@ -23,9 +23,10 @@ from rcpia.agents.pi_adapter import (
     PiRunFailed,
     runtime_version,
 )
+from rcpia.agents.schemas import SynthesisOutput
 from rcpia.agents.service import _validated_output
 from rcpia.ops.agent_brains import PROMOTIONS
-from rcpia.ops.brain_v2_cases import shadow_cases
+from rcpia.ops.brain_v2_cases import shadow_cases, synthesis_availability_errors
 
 
 def _hash(text: str) -> str:
@@ -118,6 +119,10 @@ async def run(args: argparse.Namespace) -> None:
                 else:
                     record["contract_valid"] = True
                     record["output"] = output.model_dump(mode="json")
+                    if isinstance(output, SynthesisOutput):
+                        record["synthesis_availability_errors"] = synthesis_availability_errors(
+                            output, case.bundle,
+                        )
             target = args.output / f"{case.case_id}.{arm}.json"
             target.write_text(_json(record), encoding="utf-8")
             print(

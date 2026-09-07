@@ -36,8 +36,10 @@ from rcpia.agents.schemas import (
     NomogramReading,
     OutputFormat,
     SourceSnippet,
+    SynthesisOutput,
     TaskBundle,
     TreatmentOption,
+    normalise_role,
     output_model_for,
 )
 from rcpia.nomograms.contract import Reason, Status
@@ -67,6 +69,23 @@ COMMON_CRITERIA = (
     "Use only supplied citation IDs in structured channels; do not invent facts or guidance.",
     "Remain provisional: do not claim that a board decided, validated or initiated a plan.",
 )
+SYNTHESIS_AVAILABILITY_CRITERION = (
+    "Reserve coverage_gaps[*].silent for actual available agent_opinions; never include "
+    "missing_opinions. Report unavailable roles separately in recommendation, "
+    "uncertainty_notes or missing_information, without inventing their positions or causes."
+)
+
+
+def synthesis_availability_errors(output: SynthesisOutput, bundle: TaskBundle) -> list[str]:
+    """Out-of-band evaluation only; production attestation deliberately permits more."""
+    available = {normalise_role(opinion.agent_role) for opinion in bundle.inputs.agent_opinions}
+    available -= {normalise_role(role) for role in bundle.inputs.missing_opinions}
+    return [
+        f"coverage_gaps[{index}].silent: {role} has no available opinion"
+        for index, gap in enumerate(output.coverage_gaps)
+        for role in gap.silent
+        if role not in available
+    ]
 
 
 @dataclass(frozen=True)
@@ -425,7 +444,7 @@ def _synthesis_case(scenario: str) -> BrainCase:
     return BrainCase(
         case_id=case_id,
         bundle=_bundle(inputs),
-        expected=[*COMMON_CRITERIA, *criteria],
+        expected=[*COMMON_CRITERIA, SYNTHESIS_AVAILABILITY_CRITERION, *criteria],
         expected_summary=summary,
         expected_withheld=withheld,
     )

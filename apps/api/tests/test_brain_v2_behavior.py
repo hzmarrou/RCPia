@@ -46,6 +46,7 @@ from rcpia.ops.brain_v2_cases import (
     SYNTHETIC_NOTICE,
     BrainCase,
     shadow_cases,
+    synthesis_availability_errors,
 )
 from rcpia.pps.generator import (
     agent_label,
@@ -135,6 +136,14 @@ def _payload(case: BrainCase) -> dict[str, Any]:
                     *second.missing_information,
                     "Avis sollicité de radiation_oncology non disponible.",
                 ],
+                coverage_gaps=[{
+                    "point": "Nécessité de documenter [CONDITION_A].",
+                    "raised_by": [{
+                        "role": first.agent_role,
+                        "quote": first.missing_information[0],
+                    }],
+                    "silent": [second.agent_role],
+                }],
             )
         else:
             payload["recommendation"] = (
@@ -520,6 +529,36 @@ def test_gap_silence_is_panel_scoped_and_cannot_also_raise_the_same_point() -> N
         _validated(case, payload)
 
 
+@pytest.mark.parametrize(
+    ("silent", "valid"),
+    [
+        (["medical_oncology"], True),
+        (["radiation_oncology"], False),
+        (["medical_oncology", "radiation_oncology"], False),
+    ],
+)
+@pytest.mark.parametrize("aliased", [False, True])
+def test_silence_oracle_distinguishes_available_from_missing_opinions(
+    silent: list[str], valid: bool, aliased: bool,
+) -> None:
+    case = _case("withheld-and-missing-opinion", SYNTHESIS_ROLE)
+    if aliased:
+        case.bundle.inputs.agent_opinions[1].agent_role = " medical_oncology "
+        case.bundle.inputs.missing_opinions = [" radiation_oncology "]
+    payload = _payload(case)
+    payload["coverage_gaps"][0]["silent"] = silent
+    # The unchanged production validator accepts even the unavailable role.
+    output = _validated(case, payload)
+    assert isinstance(output, SynthesisOutput)
+    errors = synthesis_availability_errors(output, case.bundle)
+    assert (not errors) is valid
+    if not valid:
+        assert errors == [
+            "coverage_gaps[0].silent: radiation_oncology has no available opinion"
+        ]
+    assert any("radiation_oncology" in item for item in output.missing_information)
+
+
 def test_mechanical_attestation_accepts_metadata_that_is_not_a_specialist_position() -> None:
     """Current _searchable includes supports; V2 must be stronger than this check."""
     case = _case("metadata-only-support", SYNTHESIS_ROLE)
@@ -542,6 +581,31 @@ def test_mechanical_attestation_accepts_metadata_that_is_not_a_specialist_positi
     assert isinstance(_validated(case, payload), SynthesisOutput)
 
 
+def test_single_available_opinion_is_preserved_without_manufacturing_a_silent_role() -> None:
+    case = _case("silence-coverage-gap", SYNTHESIS_ROLE)
+    payload = _payload(case)
+    first = case.bundle.inputs.agent_opinions[0]
+    case.bundle.inputs.agent_opinions = [first]
+    case.bundle.inputs.missing_opinions = ["medical_oncology", "radiation_oncology"]
+    payload.update(
+        recommendation=f"urology_oncology : {first.recommendation}",
+        coverage_gaps=[],
+        evidence_references=[reference.model_dump() for reference in first.evidence_references],
+        missing_information=[
+            "medical_oncology : avis indisponible.",
+            "radiation_oncology : avis indisponible.",
+        ],
+    )
+    with pytest.raises(PiOutputInvalid, match="au moins une convergence"):
+        _validated(case, payload)
+    payload["recommendation_withheld"] = True
+    output = _validated(case, payload)
+    assert isinstance(output, SynthesisOutput)
+    assert first.recommendation in output.recommendation
+    assert not output.coverage_gaps and not synthesis_availability_errors(output, case.bundle)
+    _document(case, output).assert_provisional()
+
+
 def test_mechanical_attestation_does_not_check_a_compound_points_entailment() -> None:
     case = _case("atomic-convergence", SYNTHESIS_ROLE)
     payload = _payload(case)
@@ -561,6 +625,8 @@ def test_fixed_synthesis_preserves_missing_and_withheld_but_does_not_invent_fail
     output = _validated(case)
     assert isinstance(output, SynthesisOutput)
     assert not output.convergences and not output.divergences
+    assert not synthesis_availability_errors(output, case.bundle)
+    assert output.coverage_gaps[0].silent == ["medical_oncology"]
     reduced = opinion_of(output)
     assert reduced.recommendation_withheld is True
     for opinion in inputs.agent_opinions:
@@ -580,6 +646,9 @@ def test_fixed_synthesis_preserves_missing_and_withheld_but_does_not_invent_fail
     # missing_opinions alone gives no failure cause; do not falsely label a technical failure.
     assert agent_label("radiation_oncology") in panel.absent
     assert panel.failed == []
+    assert all(
+        agent_label("radiation_oncology") not in point.attribution for point in panel.points
+    )
 
 
 def test_reference_free_attested_comparisons_require_withholding_without_erasure() -> None:

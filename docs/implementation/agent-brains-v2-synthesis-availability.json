@@ -1,0 +1,1847 @@
+{
+  "scope": "Five fixed abstract synthesis cases before/after the PR #15 availability correction. Original V1 and specialist results are not included; this is not a full 23-cell audit.",
+  "synthesis_brain_sha256": "7bc264e4ebe65c9500d493e70863d526c79d32d141230629ff04405d7bdb6efd",
+  "prior_synthesis_brain_sha256": "1b0bb8b501ad9c1054b7153a2d240a4ce02e664e9fe2c757787e00c0758269dd",
+  "provider": "azure-openai-responses",
+  "model": "gpt-5.6-sol",
+  "runtime_version": "0.80.3",
+  "bundle_template": {
+    "goal": "Exercice SYNTHÉTIQUE, sans patient réel. Évaluer les options abstraites dans le périmètre du rôle demandé, ou comparer les avis fournis pour la synthèse. Les faits sont entièrement représentés par les marqueurs ; cancer_type est une étiquette de routage, pas une donnée supplémentaire. Ne traduire aucun marqueur en traitement, seuil ou classification réels.",
+    "audience": "Évaluateurs humains ; aucun usage clinique.",
+    "output_format": {
+      "type": "json",
+      "schema": {
+        "$defs": {
+          "AgentPosition": {
+            "additionalProperties": false,
+            "description": "One specialist's side of a disagreement, named rather than paraphrased.\n\n**`quote` makes the attribution checkable, the same way `AgentSupport` does for a\nconvergence.** A divergence naming two specialities and their positions was, until this\nfield existed, unverifiable in exactly the way a convergence used to be: nothing stopped\na synthesis from putting words in a specialist's mouth to manufacture a disagreement, or\nto make a real one sound more extreme than either side actually wrote. `check_synthesis`\nrequires the quotation to appear in that speciality's own opinion.",
+            "properties": {
+              "role": {
+                "maxLength": 64,
+                "minLength": 1,
+                "title": "Role",
+                "type": "string"
+              },
+              "position": {
+                "maxLength": 4000,
+                "minLength": 1,
+                "title": "Position",
+                "type": "string"
+              },
+              "quote": {
+                "maxLength": 4000,
+                "minLength": 12,
+                "title": "Quote",
+                "type": "string"
+              }
+            },
+            "required": [
+              "role",
+              "position",
+              "quote"
+            ],
+            "title": "AgentPosition",
+            "type": "object"
+          },
+          "AgentSupport": {
+            "additionalProperties": false,
+            "description": "Where in one specialist's own opinion the claimed position appears.\n\n**This is the field that makes an attribution checkable.** A synthesis previously asserted\nthat two specialities agreed and nothing could test the assertion: measured across fifteen\ndossiers, one convergence in ninety-two credited an agent with a position it never took, and\nthe failure was invisible in the rendered fiche. Requiring a quotation turns the claim into\nsomething `check_synthesis` can verify against the stored opinion.\n\nIt also enforces one claim per point without trying to parse French. A convergence bundling\na shared assertion with an unshared one — the carboplatin defect — cannot produce a quotation\nfrom the silent agent, so the compound point fails where the atomic ones pass. The rule is\nnot \"reject sentences containing *et*\", which would fire on most clinical prose; it is\n\"prove it, per agent\".",
+            "properties": {
+              "role": {
+                "maxLength": 64,
+                "minLength": 1,
+                "title": "Role",
+                "type": "string"
+              },
+              "quote": {
+                "maxLength": 4000,
+                "minLength": 12,
+                "title": "Quote",
+                "type": "string"
+              }
+            },
+            "required": [
+              "role",
+              "quote"
+            ],
+            "title": "AgentSupport",
+            "type": "object"
+          },
+          "Convergence": {
+            "additionalProperties": false,
+            "description": "A point the specialists reached independently, and who reached it.\n\n`agents_agreeing` needs at least two entries: one agent saying something is not a\nconvergence, it is that agent's opinion, and recording it as agreement would manufacture\nconsensus out of a single voice — the exact failure a panel exists to prevent.",
+            "properties": {
+              "point": {
+                "maxLength": 4000,
+                "minLength": 1,
+                "title": "Point",
+                "type": "string"
+              },
+              "agents_agreeing": {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 2,
+                "title": "Agents Agreeing",
+                "type": "array"
+              },
+              "evidence_summary": {
+                "default": "",
+                "maxLength": 4000,
+                "title": "Evidence Summary",
+                "type": "string"
+              },
+              "support": {
+                "items": {
+                  "$ref": "#/$defs/AgentSupport"
+                },
+                "title": "Support",
+                "type": "array"
+              }
+            },
+            "required": [
+              "point",
+              "agents_agreeing"
+            ],
+            "title": "Convergence",
+            "type": "object"
+          },
+          "CoverageGap": {
+            "additionalProperties": false,
+            "description": "A point one speciality raised and another never addressed.\n\n**The category the first synthesis run did not have, and needed.** Asked to reconcile two\nopinions where the medical oncologist ruled out carboplatin and the urologist never mentioned\nit, the synthesis had only two boxes to put that in, and chose `convergence` — recording the\nurologist as agreeing to something it had not said. Silence is not assent, and it is not\ndissent either; it is a third thing, and a board needs to see it as a third thing, because\nthe action it calls for is *ask the silent speciality*, not *choose between two positions*.\n\n`raised_by` and `silent` are separate lists rather than a pair, because the same gap can be\nraised by two specialities and unaddressed by three.\n\n**`raised_by` carries a quotation per speciality; `silent` does not, and cannot.**\nA speciality that raised a point can be quoted raising it — the same mechanism a\nconvergence uses. A speciality that said nothing has, by definition, no sentence to quote:\ndemanding one would not verify the silence, it would force a citation of something else\nentirely and call it proof. `silent` stays a plain role list; `check_synthesis` only\nconfirms each name there is a real speciality that was actually convened, which\n`named_specialities_exist` already guarantees.",
+            "properties": {
+              "point": {
+                "maxLength": 4000,
+                "minLength": 1,
+                "title": "Point",
+                "type": "string"
+              },
+              "raised_by": {
+                "items": {
+                  "$ref": "#/$defs/AgentSupport"
+                },
+                "minItems": 1,
+                "title": "Raised By",
+                "type": "array"
+              },
+              "silent": {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Silent",
+                "type": "array"
+              },
+              "clinical_impact": {
+                "default": "",
+                "maxLength": 4000,
+                "title": "Clinical Impact",
+                "type": "string"
+              }
+            },
+            "required": [
+              "point",
+              "raised_by",
+              "silent"
+            ],
+            "title": "CoverageGap",
+            "type": "object"
+          },
+          "Divergence": {
+            "additionalProperties": false,
+            "description": "A point the specialists did not reach together.\n\n**Exposed, never resolved.** RCPia does not arbitrate between two specialists — that is\nwhat the board is for — so this type has no field for a preferred side. `clinical_impact`\nis what makes the disagreement actionable: a divergence that changes nothing for the patient\ndoes not need board time, and one that changes the treatment does.",
+            "properties": {
+              "point": {
+                "maxLength": 4000,
+                "minLength": 1,
+                "title": "Point",
+                "type": "string"
+              },
+              "agent_a": {
+                "$ref": "#/$defs/AgentPosition"
+              },
+              "agent_b": {
+                "$ref": "#/$defs/AgentPosition"
+              },
+              "clinical_impact": {
+                "maxLength": 4000,
+                "minLength": 1,
+                "title": "Clinical Impact",
+                "type": "string"
+              },
+              "resolution_required": {
+                "default": true,
+                "title": "Resolution Required",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "point",
+              "agent_a",
+              "agent_b",
+              "clinical_impact"
+            ],
+            "title": "Divergence",
+            "type": "object"
+          },
+          "EvidenceReference": {
+            "additionalProperties": false,
+            "description": "A citation, which must point at something the agent was actually given.",
+            "properties": {
+              "id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "title": "Id",
+                "type": "string"
+              },
+              "supports": {
+                "maxLength": 4000,
+                "minLength": 1,
+                "title": "Supports",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "supports"
+            ],
+            "title": "EvidenceReference",
+            "type": "object"
+          },
+          "SupportiveCarePlan": {
+            "additionalProperties": false,
+            "description": "The support half of the plan, which no single specialist owns.\n\nEvery field is optional prose: a synthesis with nothing to say about psychological support\nshould say nothing rather than invent a line to fill the shape.",
+            "properties": {
+              "nutrition": {
+                "anyOf": [
+                  {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Nutrition"
+              },
+              "pain_management": {
+                "anyOf": [
+                  {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Pain Management"
+              },
+              "psychological_support": {
+                "anyOf": [
+                  {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Psychological Support"
+              },
+              "nursing": {
+                "anyOf": [
+                  {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Nursing"
+              },
+              "social": {
+                "anyOf": [
+                  {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Social"
+              }
+            },
+            "title": "SupportiveCarePlan",
+            "type": "object"
+          },
+          "TreatmentOption": {
+            "additionalProperties": false,
+            "properties": {
+              "option": {
+                "maxLength": 4000,
+                "minLength": 1,
+                "title": "Option",
+                "type": "string"
+              },
+              "rationale": {
+                "anyOf": [
+                  {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Rationale"
+              },
+              "evidence_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Evidence Ids",
+                "type": "array"
+              }
+            },
+            "required": [
+              "option"
+            ],
+            "title": "TreatmentOption",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "description": "What the synthesis agent returns: a specialist's opinion plus what the panel disagreed on.\n\nA subclass rather than optional fields on `AgentOutput`, because the difference is not\ndecoration. Every other agent is forbidden to hold another agent's opinion, so no other\nagent *can* report a convergence; a schema that let them would be describing a system where\nthe first pass is not independent.",
+        "properties": {
+          "agent_role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Agent Role",
+            "type": "string"
+          },
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "key_facts_used": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Facts Used",
+            "type": "array"
+          },
+          "recommendation": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Recommendation",
+            "type": "string"
+          },
+          "alternatives": {
+            "items": {
+              "$ref": "#/$defs/TreatmentOption"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "rejected_options": {
+            "items": {
+              "$ref": "#/$defs/TreatmentOption"
+            },
+            "title": "Rejected Options",
+            "type": "array"
+          },
+          "contraindications": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Contraindications",
+            "type": "array"
+          },
+          "evidence_references": {
+            "items": {
+              "$ref": "#/$defs/EvidenceReference"
+            },
+            "title": "Evidence References",
+            "type": "array"
+          },
+          "uncertainty_notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Uncertainty Notes",
+            "type": "array"
+          },
+          "missing_information": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Information",
+            "type": "array"
+          },
+          "recommendation_withheld": {
+            "default": false,
+            "title": "Recommendation Withheld",
+            "type": "boolean"
+          },
+          "rationale": {
+            "maxLength": 3000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "convergences": {
+            "items": {
+              "$ref": "#/$defs/Convergence"
+            },
+            "title": "Convergences",
+            "type": "array"
+          },
+          "divergences": {
+            "items": {
+              "$ref": "#/$defs/Divergence"
+            },
+            "title": "Divergences",
+            "type": "array"
+          },
+          "coverage_gaps": {
+            "items": {
+              "$ref": "#/$defs/CoverageGap"
+            },
+            "title": "Coverage Gaps",
+            "type": "array"
+          },
+          "supportive_care_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SupportiveCarePlan"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "agent_role",
+          "case_id",
+          "recommendation",
+          "rationale"
+        ],
+        "title": "SynthesisOutput",
+        "type": "object"
+      }
+    },
+    "constraints": [
+      "Cette sortie est provisoire et destinée à préparer la RCP ; elle ne remplace aucune décision médicale.",
+      "Ne citez que des identifiants présents dans les données fournies ; n'inventez jamais de référence.",
+      "N'inventez aucune donnée clinique absente du dossier : signalez-la comme manquante.",
+      "Énoncez explicitement les incertitudes et les informations manquantes qui limitent votre avis.",
+      "Si aucune recommandation ne peut être formulée sans risque, indiquez-le (recommendation_withheld) plutôt que de proposer une conduite mal fondée.",
+      "Répondez uniquement par l'objet JSON demandé, en français, sans texte autour.",
+      "MATÉRIEL SYNTHÉTIQUE D'ÉVALUATION, pas une recommandation médicale publiée. Les marqueurs désignent des faits et options abstraits, sans équivalent clinique."
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "synthetic-atomic-convergence-rcp_synthesis",
+      "bundle_sha256": "f409d7d6073e39e5e233180ee57d26e8aad14a5b07f4af9eac620289732c0525",
+      "inputs": {
+        "case_id": "be5fe3f6-d16a-5035-b5b8-81000b2d583c",
+        "agent_role": "rcp_synthesis",
+        "cancer_type": "prostate",
+        "clinical_question": null,
+        "first_pass": false,
+        "ledger_version": 1,
+        "case_ledger": [
+          {
+            "key": "context",
+            "label": "[CONTEXT]",
+            "value": "[CONTEXT_A]",
+            "unit": null,
+            "status": "confirmed",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": [
+              "snip-001"
+            ]
+          },
+          {
+            "key": "condition_a",
+            "label": "[CONDITION_A]",
+            "value": "oui",
+            "unit": null,
+            "status": "confirmed",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": [
+              "snip-002"
+            ]
+          }
+        ],
+        "source_snippets": [
+          {
+            "id": "snip-001",
+            "text": "Dossier SYNTHÉTIQUE : contexte documenté [CONTEXT_A].",
+            "source_document_id": "synthetic-dossier",
+            "source_chunk_id": null,
+            "page": 1,
+            "page_end": null,
+            "section": null
+          },
+          {
+            "id": "snip-002",
+            "text": "Dossier SYNTHÉTIQUE : [CONDITION_A] documentée présente.",
+            "source_document_id": "synthetic-dossier",
+            "source_chunk_id": null,
+            "page": 2,
+            "page_end": null,
+            "section": null
+          }
+        ],
+        "guideline_passages": [
+          {
+            "id": "ev-001",
+            "text": "MATÉRIEL SYNTHÉTIQUE D'ÉVALUATION, pas une recommandation médicale publiée. Les marqueurs désignent des faits et options abstraits, sans équivalent clinique. Dans [CONTEXT_A], [OPTION_A] peut être proposée si et seulement si [CONDITION_A] est documentée présente. Aucune autre règle n'est fournie.",
+            "source": "SYNTHETIC evaluation material (not published medical guidance)",
+            "document_id": "synthetic-guidance",
+            "clinical_status": "poc_unreviewed",
+            "section": "Abstract applicability exercise",
+            "version": "synthetic-v1",
+            "published_at": null,
+            "page": 1,
+            "recommendation_number": null,
+            "locator_method": null
+          }
+        ],
+        "missing_fields": [],
+        "conflicting_fields": [],
+        "nomograms": [],
+        "safety_constraints": [
+          "Cette sortie est provisoire et destinée à préparer la RCP ; elle ne remplace aucune décision médicale.",
+          "Ne citez que des identifiants présents dans les données fournies ; n'inventez jamais de référence.",
+          "N'inventez aucune donnée clinique absente du dossier : signalez-la comme manquante.",
+          "Énoncez explicitement les incertitudes et les informations manquantes qui limitent votre avis.",
+          "Si aucune recommandation ne peut être formulée sans risque, indiquez-le (recommendation_withheld) plutôt que de proposer une conduite mal fondée.",
+          "Répondez uniquement par l'objet JSON demandé, en français, sans texte autour."
+        ],
+        "agent_opinions": [
+          {
+            "agent_role": "urology_oncology",
+            "recommendation": "Proposer [OPTION_A] sous [CONDITION_A] documentée.",
+            "alternatives": [],
+            "rejected_options": [
+              {
+                "option": "Ne pas proposer [OPTION_B] dans cet avis.",
+                "rationale": "Position explicite de cette spécialité seulement.",
+                "evidence_ids": [
+                  "ev-001"
+                ]
+              }
+            ],
+            "contraindications": [],
+            "uncertainty_notes": [],
+            "missing_information": [],
+            "evidence_references": [
+              {
+                "id": "ev-001",
+                "supports": "Règle abstraite sous [CONDITION_A]."
+              }
+            ],
+            "recommendation_withheld": false,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          },
+          {
+            "agent_role": "medical_oncology",
+            "recommendation": "Proposer [OPTION_A] sous [CONDITION_A] documentée.",
+            "alternatives": [],
+            "rejected_options": [],
+            "contraindications": [],
+            "uncertainty_notes": [],
+            "missing_information": [],
+            "evidence_references": [
+              {
+                "id": "ev-001",
+                "supports": "Règle abstraite sous [CONDITION_A]."
+              }
+            ],
+            "recommendation_withheld": false,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          }
+        ],
+        "missing_opinions": []
+      },
+      "expected": [
+        "Return the exact role-specific production JSON contract and echo the case/role.",
+        "Use only supplied citation IDs in structured channels; do not invent facts or guidance.",
+        "Remain provisional: do not claim that a board decided, validated or initiated a plan.",
+        "Reserve coverage_gaps[*].silent for actual available agent_opinions; never include missing_opinions. Report unavailable roles separately in recommendation, uncertainty_notes or missing_information, without inventing their positions or causes.",
+        "Report a convergence on [OPTION_A] with a position quote from each of the two roles.",
+        "Report the unilateral [OPTION_B] rejection as a coverage gap, not consensus.",
+        "Do not merge [OPTION_A] and rejection of [OPTION_B] into one compound convergence."
+      ],
+      "expected_withheld": false,
+      "prior_output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "be5fe3f6-d16a-5035-b5b8-81000b2d583c",
+        "key_facts_used": [
+          "[CONTEXT_A] documenté.",
+          "[CONDITION_A] documentée présente."
+        ],
+        "recommendation": "Synthèse provisoire : urology_oncology et medical_oncology proposent explicitement [OPTION_A] sous [CONDITION_A] documentée. urology_oncology écarte également [OPTION_B] dans son seul avis, tandis que medical_oncology n'aborde pas ce point. Cette restitution prépare la RCP et ne constitue pas une décision médicale.",
+        "alternatives": [],
+        "rejected_options": [
+          {
+            "option": "urology_oncology : Ne pas proposer [OPTION_B] dans cet avis.",
+            "rationale": "urology_oncology : Position explicite de cette spécialité seulement.",
+            "evidence_ids": [
+              "ev-001"
+            ]
+          }
+        ],
+        "contraindications": [],
+        "evidence_references": [
+          {
+            "id": "ev-001",
+            "supports": "urology_oncology : Règle abstraite sous [CONDITION_A]."
+          },
+          {
+            "id": "ev-001",
+            "supports": "medical_oncology : Règle abstraite sous [CONDITION_A]."
+          }
+        ],
+        "uncertainty_notes": [
+          "La position de medical_oncology sur [OPTION_B] n'est pas fournie.",
+          "Les marqueurs et options sont exclusivement abstraits et sans équivalent clinique."
+        ],
+        "missing_information": [],
+        "recommendation_withheld": false,
+        "rationale": "La synthèse restitue la convergence explicitement attestée concernant [OPTION_A] et distingue la position sur [OPTION_B], portée uniquement par urology_oncology. Aucun arbitrage ni contenu clinique supplémentaire n'est introduit.",
+        "convergences": [
+          {
+            "point": "Proposer [OPTION_A] sous [CONDITION_A] documentée.",
+            "agents_agreeing": [
+              "urology_oncology",
+              "medical_oncology"
+            ],
+            "evidence_summary": "Les deux avis mobilisent la référence ev-001 pour cette règle abstraite.",
+            "support": [
+              {
+                "role": "urology_oncology",
+                "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+              },
+              {
+                "role": "medical_oncology",
+                "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+              }
+            ]
+          }
+        ],
+        "divergences": [],
+        "coverage_gaps": [
+          {
+            "point": "Ne pas proposer [OPTION_B] dans cet avis.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "Ne pas proposer [OPTION_B] dans cet avis."
+              }
+            ],
+            "silent": [
+              "medical_oncology"
+            ],
+            "clinical_impact": "La position de medical_oncology sur [OPTION_B] reste à clarifier en RCP."
+          }
+        ],
+        "supportive_care_plan": null
+      },
+      "prior_availability_errors": [],
+      "output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "be5fe3f6-d16a-5035-b5b8-81000b2d583c",
+        "key_facts_used": [
+          "[CONDITION_A] : oui, statut confirmé."
+        ],
+        "recommendation": "Synthèse provisoire : urology_oncology et medical_oncology proposent [OPTION_A] sous [CONDITION_A] documentée. urology_oncology écarte [OPTION_B] dans son avis ; medical_oncology n'aborde pas ce point. Cette restitution prépare la RCP et ne constitue pas une décision médicale.",
+        "alternatives": [],
+        "rejected_options": [
+          {
+            "option": "urology_oncology : Ne pas proposer [OPTION_B] dans cet avis.",
+            "rationale": "urology_oncology : Position explicite de cette spécialité seulement.",
+            "evidence_ids": [
+              "ev-001"
+            ]
+          }
+        ],
+        "contraindications": [],
+        "evidence_references": [
+          {
+            "id": "ev-001",
+            "supports": "urology_oncology : Règle abstraite sous [CONDITION_A]."
+          },
+          {
+            "id": "ev-001",
+            "supports": "medical_oncology : Règle abstraite sous [CONDITION_A]."
+          }
+        ],
+        "uncertainty_notes": [
+          "La portée de cette synthèse est strictement limitée aux marqueurs abstraits et aux avis fournis.",
+          "La position relative à [OPTION_B] n'est exprimée que par urology_oncology."
+        ],
+        "missing_information": [],
+        "recommendation_withheld": false,
+        "rationale": "La synthèse restitue la convergence explicite des deux avis sur [OPTION_A] sans l'ériger en décision. Elle distingue la position isolée de urology_oncology sur [OPTION_B] du silence de medical_oncology sur ce point.",
+        "convergences": [
+          {
+            "point": "Proposer [OPTION_A] sous [CONDITION_A] documentée.",
+            "agents_agreeing": [
+              "urology_oncology",
+              "medical_oncology"
+            ],
+            "evidence_summary": "Les deux avis formulent la même proposition conditionnelle abstraite.",
+            "support": [
+              {
+                "role": "urology_oncology",
+                "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+              },
+              {
+                "role": "medical_oncology",
+                "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+              }
+            ]
+          }
+        ],
+        "divergences": [],
+        "coverage_gaps": [
+          {
+            "point": "Ne pas proposer [OPTION_B] dans cet avis.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "Ne pas proposer [OPTION_B] dans cet avis."
+              }
+            ],
+            "silent": [
+              "medical_oncology"
+            ],
+            "clinical_impact": "L'absence de position de medical_oncology sur [OPTION_B] limite la comparaison interspécialités et appelle une clarification en RCP."
+          }
+        ],
+        "supportive_care_plan": null
+      },
+      "contract_valid": true,
+      "synthesis_availability_errors": [],
+      "semantic_assessment": {
+        "oracle_pass": true,
+        "notes": [
+          "The shared OPTION_A-under-CONDITION_A position is atomic and quoted from both opinions.",
+          "The unilateral OPTION_B rejection remains attributed to urology, with available medical oncology silent.",
+          "Background CONTEXT_A and the absent clinical question are omitted, but the required position and condition remain."
+        ]
+      }
+    },
+    {
+      "case_id": "synthetic-divergence-rcp_synthesis",
+      "bundle_sha256": "f510d7ef1c927544bd163c5148f4b0255a7aaf1702a41923d78c40490f2b0b96",
+      "inputs": {
+        "case_id": "4e5e9bfb-1174-55d3-9e03-9b1656684bde",
+        "agent_role": "rcp_synthesis",
+        "cancer_type": "prostate",
+        "clinical_question": null,
+        "first_pass": false,
+        "ledger_version": 1,
+        "case_ledger": [
+          {
+            "key": "context",
+            "label": "[CONTEXT]",
+            "value": "[CONTEXT_A]",
+            "unit": null,
+            "status": "confirmed",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": [
+              "snip-001"
+            ]
+          },
+          {
+            "key": "condition_a",
+            "label": "[CONDITION_A]",
+            "value": "oui",
+            "unit": null,
+            "status": "confirmed",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": [
+              "snip-002"
+            ]
+          }
+        ],
+        "source_snippets": [
+          {
+            "id": "snip-001",
+            "text": "Dossier SYNTHÉTIQUE : contexte documenté [CONTEXT_A].",
+            "source_document_id": "synthetic-dossier",
+            "source_chunk_id": null,
+            "page": 1,
+            "page_end": null,
+            "section": null
+          },
+          {
+            "id": "snip-002",
+            "text": "Dossier SYNTHÉTIQUE : [CONDITION_A] documentée présente.",
+            "source_document_id": "synthetic-dossier",
+            "source_chunk_id": null,
+            "page": 2,
+            "page_end": null,
+            "section": null
+          }
+        ],
+        "guideline_passages": [
+          {
+            "id": "ev-001",
+            "text": "MATÉRIEL SYNTHÉTIQUE D'ÉVALUATION, pas une recommandation médicale publiée. Les marqueurs désignent des faits et options abstraits, sans équivalent clinique. Dans [CONTEXT_A], [OPTION_A] peut être proposée si et seulement si [CONDITION_A] est documentée présente. Aucune autre règle n'est fournie.",
+            "source": "SYNTHETIC evaluation material (not published medical guidance)",
+            "document_id": "synthetic-guidance",
+            "clinical_status": "poc_unreviewed",
+            "section": "Abstract applicability exercise",
+            "version": "synthetic-v1",
+            "published_at": null,
+            "page": 1,
+            "recommendation_number": null,
+            "locator_method": null
+          }
+        ],
+        "missing_fields": [],
+        "conflicting_fields": [],
+        "nomograms": [],
+        "safety_constraints": [
+          "Cette sortie est provisoire et destinée à préparer la RCP ; elle ne remplace aucune décision médicale.",
+          "Ne citez que des identifiants présents dans les données fournies ; n'inventez jamais de référence.",
+          "N'inventez aucune donnée clinique absente du dossier : signalez-la comme manquante.",
+          "Énoncez explicitement les incertitudes et les informations manquantes qui limitent votre avis.",
+          "Si aucune recommandation ne peut être formulée sans risque, indiquez-le (recommendation_withheld) plutôt que de proposer une conduite mal fondée.",
+          "Répondez uniquement par l'objet JSON demandé, en français, sans texte autour."
+        ],
+        "agent_opinions": [
+          {
+            "agent_role": "urology_oncology",
+            "recommendation": "Proposer [OPTION_A] sous [CONDITION_A] documentée.",
+            "alternatives": [],
+            "rejected_options": [],
+            "contraindications": [],
+            "uncertainty_notes": [],
+            "missing_information": [],
+            "evidence_references": [
+              {
+                "id": "ev-001",
+                "supports": "Règle abstraite sous [CONDITION_A]."
+              }
+            ],
+            "recommendation_withheld": false,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          },
+          {
+            "agent_role": "medical_oncology",
+            "recommendation": "Ne pas proposer [OPTION_A] dans cet avis.",
+            "alternatives": [],
+            "rejected_options": [],
+            "contraindications": [],
+            "uncertainty_notes": [],
+            "missing_information": [],
+            "evidence_references": [
+              {
+                "id": "ev-001",
+                "supports": "Règle abstraite sous [CONDITION_A]."
+              }
+            ],
+            "recommendation_withheld": false,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          }
+        ],
+        "missing_opinions": []
+      },
+      "expected": [
+        "Return the exact role-specific production JSON contract and echo the case/role.",
+        "Use only supplied citation IDs in structured channels; do not invent facts or guidance.",
+        "Remain provisional: do not claim that a board decided, validated or initiated a plan.",
+        "Reserve coverage_gaps[*].silent for actual available agent_opinions; never include missing_opinions. Report unavailable roles separately in recommendation, uncertainty_notes or missing_information, without inventing their positions or causes.",
+        "Attribute support for [OPTION_A] to urology and opposition to medical oncology.",
+        "Use divergence with each role's own quote and a concrete impact on the proposal.",
+        "Require human resolution; opposition is not silence, consensus or a winning position."
+      ],
+      "expected_withheld": false,
+      "prior_output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "4e5e9bfb-1174-55d3-9e03-9b1656684bde",
+        "key_facts_used": [
+          "[CONTEXT] = [CONTEXT_A] (confirmé).",
+          "[CONDITION_A] = oui (confirmé)."
+        ],
+        "recommendation": "Synthèse provisoire : urology_oncology propose [OPTION_A] sous [CONDITION_A] documentée, tandis que medical_oncology indique ne pas proposer [OPTION_A] dans son avis. Cette divergence reste à résoudre en RCP, sans préférence attribuée par la synthèse.",
+        "alternatives": [],
+        "rejected_options": [],
+        "contraindications": [],
+        "evidence_references": [
+          {
+            "id": "ev-001",
+            "supports": "urology_oncology : Règle abstraite sous [CONDITION_A]."
+          },
+          {
+            "id": "ev-001",
+            "supports": "medical_oncology : Règle abstraite sous [CONDITION_A]."
+          }
+        ],
+        "uncertainty_notes": [
+          "Les avis de urology_oncology et medical_oncology sont incompatibles quant à la proposition de [OPTION_A] ; la divergence n'est pas résolue."
+        ],
+        "missing_information": [],
+        "recommendation_withheld": false,
+        "rationale": "La synthèse restitue uniquement les positions explicites des deux avis disponibles. Elle expose leur divergence sur [OPTION_A] sans arbitrage ni traduction des marqueurs abstraits.",
+        "convergences": [],
+        "divergences": [
+          {
+            "point": "Proposition de [OPTION_A] sous [CONDITION_A] documentée.",
+            "agent_a": {
+              "role": "urology_oncology",
+              "position": "Proposer [OPTION_A] sous [CONDITION_A] documentée.",
+              "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+            },
+            "agent_b": {
+              "role": "medical_oncology",
+              "position": "Ne pas proposer [OPTION_A] dans cet avis.",
+              "quote": "Ne pas proposer [OPTION_A] dans cet avis."
+            },
+            "clinical_impact": "Les deux positions conduisent à des orientations incompatibles quant à la proposition de [OPTION_A] ; une clarification par la RCP est nécessaire.",
+            "resolution_required": true
+          }
+        ],
+        "coverage_gaps": [],
+        "supportive_care_plan": null
+      },
+      "prior_availability_errors": [],
+      "output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "4e5e9bfb-1174-55d3-9e03-9b1656684bde",
+        "key_facts_used": [
+          "[CONTEXT_A] confirmé.",
+          "[CONDITION_A] documentée présente."
+        ],
+        "recommendation": "Synthèse provisoire sans arbitrage : urology_oncology propose [OPTION_A] sous [CONDITION_A] documentée, tandis que medical_oncology ne propose pas [OPTION_A]. Cette divergence doit être clarifiée par la RCP et aucune position commune ne peut être restituée.",
+        "alternatives": [],
+        "rejected_options": [],
+        "contraindications": [],
+        "evidence_references": [
+          {
+            "id": "ev-001",
+            "supports": "urology_oncology : Règle abstraite sous [CONDITION_A]."
+          },
+          {
+            "id": "ev-001",
+            "supports": "medical_oncology : Règle abstraite sous [CONDITION_A]."
+          }
+        ],
+        "uncertainty_notes": [
+          "La divergence sur la proposition de [OPTION_A] demeure non résolue et limite la synthèse à la restitution des deux positions."
+        ],
+        "missing_information": [],
+        "recommendation_withheld": false,
+        "rationale": "Les deux avis disponibles prennent des positions incompatibles sur [OPTION_A]. La synthèse les attribue sans choisir entre elles. Aucun avis n'est indisponible et aucune information manquante n'est signalée.",
+        "convergences": [],
+        "divergences": [
+          {
+            "point": "Proposer [OPTION_A].",
+            "agent_a": {
+              "role": "urology_oncology",
+              "position": "Proposer [OPTION_A] sous [CONDITION_A] documentée.",
+              "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+            },
+            "agent_b": {
+              "role": "medical_oncology",
+              "position": "Ne pas proposer [OPTION_A] dans cet avis.",
+              "quote": "Ne pas proposer [OPTION_A] dans cet avis."
+            },
+            "clinical_impact": "Les avis conduisent à des orientations opposées quant à la proposition de [OPTION_A] ; la RCP doit clarifier ce point sans que la synthèse privilégie un côté.",
+            "resolution_required": true
+          }
+        ],
+        "coverage_gaps": [],
+        "supportive_care_plan": null
+      },
+      "contract_valid": true,
+      "synthesis_availability_errors": [],
+      "semantic_assessment": {
+        "oracle_pass": true,
+        "notes": [
+          "Opposing OPTION_A positions retain their source quotes, concrete impact and human-resolution requirement.",
+          "No winner, convergence, false silence or unnecessary global withholding is introduced.",
+          "Both patient markers are preserved; the absent clinical question is not repeated."
+        ]
+      }
+    },
+    {
+      "case_id": "synthetic-silence-coverage-gap-rcp_synthesis",
+      "bundle_sha256": "ed6dbfccd56a0deadc0e1df5a365caf2654b0f42e92830b14ad9bbefce218300",
+      "inputs": {
+        "case_id": "1b4c0f25-2b9f-5b08-861a-3fc3d36c704e",
+        "agent_role": "rcp_synthesis",
+        "cancer_type": "prostate",
+        "clinical_question": null,
+        "first_pass": false,
+        "ledger_version": 1,
+        "case_ledger": [
+          {
+            "key": "context",
+            "label": "[CONTEXT]",
+            "value": "[CONTEXT_A]",
+            "unit": null,
+            "status": "confirmed",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": [
+              "snip-001"
+            ]
+          },
+          {
+            "key": "condition_a",
+            "label": "[CONDITION_A]",
+            "value": "oui",
+            "unit": null,
+            "status": "confirmed",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": [
+              "snip-002"
+            ]
+          }
+        ],
+        "source_snippets": [
+          {
+            "id": "snip-001",
+            "text": "Dossier SYNTHÉTIQUE : contexte documenté [CONTEXT_A].",
+            "source_document_id": "synthetic-dossier",
+            "source_chunk_id": null,
+            "page": 1,
+            "page_end": null,
+            "section": null
+          },
+          {
+            "id": "snip-002",
+            "text": "Dossier SYNTHÉTIQUE : [CONDITION_A] documentée présente.",
+            "source_document_id": "synthetic-dossier",
+            "source_chunk_id": null,
+            "page": 2,
+            "page_end": null,
+            "section": null
+          }
+        ],
+        "guideline_passages": [
+          {
+            "id": "ev-001",
+            "text": "MATÉRIEL SYNTHÉTIQUE D'ÉVALUATION, pas une recommandation médicale publiée. Les marqueurs désignent des faits et options abstraits, sans équivalent clinique. Dans [CONTEXT_A], [OPTION_A] peut être proposée si et seulement si [CONDITION_A] est documentée présente. Aucune autre règle n'est fournie.",
+            "source": "SYNTHETIC evaluation material (not published medical guidance)",
+            "document_id": "synthetic-guidance",
+            "clinical_status": "poc_unreviewed",
+            "section": "Abstract applicability exercise",
+            "version": "synthetic-v1",
+            "published_at": null,
+            "page": 1,
+            "recommendation_number": null,
+            "locator_method": null
+          },
+          {
+            "id": "ev-002",
+            "text": "MATÉRIEL SYNTHÉTIQUE D'ÉVALUATION, pas une recommandation médicale publiée. Les marqueurs désignent des faits et options abstraits, sans équivalent clinique. Dans [CONTEXT_A], [OPTION_B] est une alternative sous [CONDITION_A].",
+            "source": "SYNTHETIC evaluation material (not published medical guidance)",
+            "document_id": "synthetic-guidance",
+            "clinical_status": "poc_unreviewed",
+            "section": "Abstract applicability exercise",
+            "version": "synthetic-v1",
+            "published_at": null,
+            "page": 1,
+            "recommendation_number": null,
+            "locator_method": null
+          }
+        ],
+        "missing_fields": [],
+        "conflicting_fields": [],
+        "nomograms": [],
+        "safety_constraints": [
+          "Cette sortie est provisoire et destinée à préparer la RCP ; elle ne remplace aucune décision médicale.",
+          "Ne citez que des identifiants présents dans les données fournies ; n'inventez jamais de référence.",
+          "N'inventez aucune donnée clinique absente du dossier : signalez-la comme manquante.",
+          "Énoncez explicitement les incertitudes et les informations manquantes qui limitent votre avis.",
+          "Si aucune recommandation ne peut être formulée sans risque, indiquez-le (recommendation_withheld) plutôt que de proposer une conduite mal fondée.",
+          "Répondez uniquement par l'objet JSON demandé, en français, sans texte autour."
+        ],
+        "agent_opinions": [
+          {
+            "agent_role": "urology_oncology",
+            "recommendation": "Proposer [OPTION_A] sous [CONDITION_A] documentée.",
+            "alternatives": [],
+            "rejected_options": [],
+            "contraindications": [],
+            "uncertainty_notes": [],
+            "missing_information": [],
+            "evidence_references": [
+              {
+                "id": "ev-001",
+                "supports": "Règle abstraite sous [CONDITION_A]."
+              }
+            ],
+            "recommendation_withheld": false,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          },
+          {
+            "agent_role": "medical_oncology",
+            "recommendation": "L'avis porte uniquement sur [OPTION_B], proposée comme alternative.",
+            "alternatives": [],
+            "rejected_options": [],
+            "contraindications": [],
+            "uncertainty_notes": [],
+            "missing_information": [],
+            "evidence_references": [
+              {
+                "id": "ev-002",
+                "supports": "Alternative abstraite mentionnée dans le passage fourni."
+              }
+            ],
+            "recommendation_withheld": false,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          }
+        ],
+        "missing_opinions": []
+      },
+      "expected": [
+        "Return the exact role-specific production JSON contract and echo the case/role.",
+        "Use only supplied citation IDs in structured channels; do not invent facts or guidance.",
+        "Remain provisional: do not claim that a board decided, validated or initiated a plan.",
+        "Reserve coverage_gaps[*].silent for actual available agent_opinions; never include missing_opinions. Report unavailable roles separately in recommendation, uncertainty_notes or missing_information, without inventing their positions or causes.",
+        "Report an [OPTION_A] coverage gap: urology raised it, medical oncology did not.",
+        "Do not record a convergence or divergence on [OPTION_A] without a medical position.",
+        "Preserve the useful, separately attributed [OPTION_B] proposal; do not withhold both."
+      ],
+      "expected_withheld": false,
+      "prior_output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "1b4c0f25-2b9f-5b08-861a-3fc3d36c704e",
+        "key_facts_used": [
+          "[CONDITION_A] est documentée présente."
+        ],
+        "recommendation": "Synthèse provisoire : urology_oncology propose [OPTION_A] sous [CONDITION_A] documentée ; medical_oncology limite son avis à [OPTION_B], proposée comme alternative. Chaque rôle est silencieux sur l'option portée par l'autre. Ces lacunes de couverture doivent être clarifiées en RCP, sans arbitrage dans la présente synthèse.",
+        "alternatives": [],
+        "rejected_options": [],
+        "contraindications": [],
+        "evidence_references": [
+          {
+            "id": "ev-001",
+            "supports": "urology_oncology : Règle abstraite sous [CONDITION_A]."
+          },
+          {
+            "id": "ev-002",
+            "supports": "medical_oncology : Alternative abstraite mentionnée dans le passage fourni."
+          }
+        ],
+        "uncertainty_notes": [
+          "Les avis portent sur des options distinctes et ne précisent pas leur position sur l'option soutenue par l'autre rôle.",
+          "Cette synthèse provisoire est destinée à préparer la RCP et ne constitue pas une décision médicale."
+        ],
+        "missing_information": [],
+        "recommendation_withheld": false,
+        "rationale": "La synthèse restitue séparément les deux positions explicites. Aucun accord ni désaccord direct n'est attesté sur une même affirmation atomique ; les silences réciproques sont donc présentés comme des lacunes de couverture.",
+        "convergences": [],
+        "divergences": [],
+        "coverage_gaps": [
+          {
+            "point": "[OPTION_A] est proposée sous [CONDITION_A] documentée.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+              }
+            ],
+            "silent": [
+              "medical_oncology"
+            ],
+            "clinical_impact": "La position de medical_oncology sur [OPTION_A] n'est pas documentée et doit être clarifiée en RCP."
+          },
+          {
+            "point": "[OPTION_B] est proposée comme alternative.",
+            "raised_by": [
+              {
+                "role": "medical_oncology",
+                "quote": "L'avis porte uniquement sur [OPTION_B], proposée comme alternative."
+              }
+            ],
+            "silent": [
+              "urology_oncology"
+            ],
+            "clinical_impact": "La position de urology_oncology sur [OPTION_B] n'est pas documentée et doit être clarifiée en RCP."
+          }
+        ],
+        "supportive_care_plan": null
+      },
+      "prior_availability_errors": [],
+      "output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "1b4c0f25-2b9f-5b08-861a-3fc3d36c704e",
+        "key_facts_used": [
+          "[CONTEXT_A] documenté.",
+          "[CONDITION_A] documentée présente."
+        ],
+        "recommendation": "Synthèse provisoire : urology_oncology propose [OPTION_A] sous [CONDITION_A] documentée ; medical_oncology présente uniquement [OPTION_B] comme alternative. Aucun des deux avis n'aborde explicitement l'option portée par l'autre. Ces lacunes de couverture doivent être clarifiées par la RCP, sans arbitrage dans la présente synthèse.",
+        "alternatives": [],
+        "rejected_options": [],
+        "contraindications": [],
+        "evidence_references": [
+          {
+            "id": "ev-001",
+            "supports": "urology_oncology : Règle abstraite sous [CONDITION_A]."
+          },
+          {
+            "id": "ev-002",
+            "supports": "medical_oncology : Alternative abstraite mentionnée dans le passage fourni."
+          }
+        ],
+        "uncertainty_notes": [
+          "Aucun avis ne compare explicitement [OPTION_A] à [OPTION_B] ni ne les hiérarchise ; aucune convergence ou divergence ne peut donc être établie entre ces options."
+        ],
+        "missing_information": [],
+        "recommendation_withheld": false,
+        "rationale": "La synthèse restitue séparément les deux positions attestées. Leur coexistence ne constitue pas une divergence, car aucun avis ne rejette explicitement l'option de l'autre. Les silences réciproques sont présentés comme des lacunes de couverture à clarifier.",
+        "convergences": [],
+        "divergences": [],
+        "coverage_gaps": [
+          {
+            "point": "Proposition de [OPTION_A] sous [CONDITION_A] documentée.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+              }
+            ],
+            "silent": [
+              "medical_oncology"
+            ],
+            "clinical_impact": "La couverture interspécialités de la proposition de [OPTION_A] n'est pas établie et doit être clarifiée par la RCP."
+          },
+          {
+            "point": "Proposition de [OPTION_B] comme alternative.",
+            "raised_by": [
+              {
+                "role": "medical_oncology",
+                "quote": "L'avis porte uniquement sur [OPTION_B], proposée comme alternative."
+              }
+            ],
+            "silent": [
+              "urology_oncology"
+            ],
+            "clinical_impact": "La couverture interspécialités de [OPTION_B] comme alternative n'est pas établie et doit être clarifiée par la RCP."
+          }
+        ],
+        "supportive_care_plan": null
+      },
+      "contract_valid": true,
+      "synthesis_availability_errors": [],
+      "semantic_assessment": {
+        "oracle_pass": true,
+        "notes": [
+          "Both source options remain separately attributed; reciprocal silence concerns actual available opinions only.",
+          "No consensus, opposition or unsupported TreatmentOption triplet is invented.",
+          "Both patient markers are preserved; the absent clinical question is not repeated."
+        ]
+      }
+    },
+    {
+      "case_id": "synthetic-withheld-and-missing-opinion-rcp_synthesis",
+      "bundle_sha256": "4e78a0d4e15bc5225a928f1e179f63ec796a50f296dc9cbe365ca0021a482d9e",
+      "inputs": {
+        "case_id": "5c002457-171b-5ac3-8221-23663367c445",
+        "agent_role": "rcp_synthesis",
+        "cancer_type": "prostate",
+        "clinical_question": null,
+        "first_pass": false,
+        "ledger_version": 1,
+        "case_ledger": [
+          {
+            "key": "context",
+            "label": "[CONTEXT]",
+            "value": "[CONTEXT_A]",
+            "unit": null,
+            "status": "confirmed",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": [
+              "snip-001"
+            ]
+          },
+          {
+            "key": "condition_a",
+            "label": "[CONDITION_A]",
+            "value": null,
+            "unit": null,
+            "status": "missing",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": []
+          },
+          {
+            "key": "fact_b",
+            "label": "[FACT_B]",
+            "value": null,
+            "unit": null,
+            "status": "missing",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": []
+          }
+        ],
+        "source_snippets": [
+          {
+            "id": "snip-001",
+            "text": "Dossier SYNTHÉTIQUE : contexte documenté [CONTEXT_A].",
+            "source_document_id": "synthetic-dossier",
+            "source_chunk_id": null,
+            "page": 1,
+            "page_end": null,
+            "section": null
+          }
+        ],
+        "guideline_passages": [
+          {
+            "id": "ev-001",
+            "text": "MATÉRIEL SYNTHÉTIQUE D'ÉVALUATION, pas une recommandation médicale publiée. Les marqueurs désignent des faits et options abstraits, sans équivalent clinique. Dans [CONTEXT_A], [OPTION_A] peut être proposée si et seulement si [CONDITION_A] est documentée présente. Aucune autre règle n'est fournie.",
+            "source": "SYNTHETIC evaluation material (not published medical guidance)",
+            "document_id": "synthetic-guidance",
+            "clinical_status": "poc_unreviewed",
+            "section": "Abstract applicability exercise",
+            "version": "synthetic-v1",
+            "published_at": null,
+            "page": 1,
+            "recommendation_number": null,
+            "locator_method": null
+          }
+        ],
+        "missing_fields": [
+          "condition_a",
+          "fact_b"
+        ],
+        "conflicting_fields": [],
+        "nomograms": [],
+        "safety_constraints": [
+          "Cette sortie est provisoire et destinée à préparer la RCP ; elle ne remplace aucune décision médicale.",
+          "Ne citez que des identifiants présents dans les données fournies ; n'inventez jamais de référence.",
+          "N'inventez aucune donnée clinique absente du dossier : signalez-la comme manquante.",
+          "Énoncez explicitement les incertitudes et les informations manquantes qui limitent votre avis.",
+          "Si aucune recommandation ne peut être formulée sans risque, indiquez-le (recommendation_withheld) plutôt que de proposer une conduite mal fondée.",
+          "Répondez uniquement par l'objet JSON demandé, en français, sans texte autour."
+        ],
+        "agent_opinions": [
+          {
+            "agent_role": "urology_oncology",
+            "recommendation": "Avis suspendu : [CONDITION_A] non établie.",
+            "alternatives": [],
+            "rejected_options": [],
+            "contraindications": [],
+            "uncertainty_notes": [
+              "[CALCULATOR_A] : NOT_POSSIBLE, MISSING_REQUIRED_INPUT ; aucune estimation fournie."
+            ],
+            "missing_information": [
+              "[CONDITION_A] à documenter.",
+              "[CALCULATOR_INPUT] absent."
+            ],
+            "evidence_references": [],
+            "recommendation_withheld": true,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          },
+          {
+            "agent_role": "medical_oncology",
+            "recommendation": "Avis suspendu : [FACT_B] non documenté.",
+            "alternatives": [],
+            "rejected_options": [],
+            "contraindications": [],
+            "uncertainty_notes": [],
+            "missing_information": [
+              "[FACT_B] à documenter."
+            ],
+            "evidence_references": [],
+            "recommendation_withheld": true,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          }
+        ],
+        "missing_opinions": [
+          "radiation_oncology"
+        ]
+      },
+      "expected": [
+        "Return the exact role-specific production JSON contract and echo the case/role.",
+        "Use only supplied citation IDs in structured channels; do not invent facts or guidance.",
+        "Remain provisional: do not claim that a board decided, validated or initiated a plan.",
+        "Reserve coverage_gaps[*].silent for actual available agent_opinions; never include missing_opinions. Report unavailable roles separately in recommendation, uncertainty_notes or missing_information, without inventing their positions or causes.",
+        "Withhold a therapeutic recommendation; preserve both specialists' missing data.",
+        "Name radiation oncology as requested but unavailable without inventing a reason.",
+        "Do not count abstention or an absent opinion as agreement or disagreement.",
+        "Do not present the panel as complete; no treatment should be initiated.",
+        "Preserve the named calculator refusal and missing calculator input from urology."
+      ],
+      "expected_withheld": true,
+      "prior_output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "5c002457-171b-5ac3-8221-23663367c445",
+        "key_facts_used": [
+          "[CONDITION_A] : manquante.",
+          "[FACT_B] : manquant."
+        ],
+        "recommendation": "Synthèse provisoire suspendue. urology_oncology suspend son avis car [CONDITION_A] n'est pas établie. medical_oncology suspend son avis car [FACT_B] n'est pas documenté. L'avis de radiation_oncology est indisponible. Aucune conduite ne peut être restituée comme position du panel.",
+        "alternatives": [],
+        "rejected_options": [],
+        "contraindications": [],
+        "evidence_references": [],
+        "uncertainty_notes": [
+          "urology_oncology : avis suspendu.",
+          "urology_oncology : [CALCULATOR_A] : NOT_POSSIBLE, MISSING_REQUIRED_INPUT ; aucune estimation fournie.",
+          "medical_oncology : avis suspendu.",
+          "radiation_oncology : avis indisponible ; cause non fournie.",
+          "Aucune référence recopiable n'est fournie dans les avis spécialistes."
+        ],
+        "missing_information": [
+          "urology_oncology : [CONDITION_A] à documenter.",
+          "urology_oncology : [CALCULATOR_INPUT] absent.",
+          "medical_oncology : [FACT_B] à documenter.",
+          "radiation_oncology : avis indisponible."
+        ],
+        "recommendation_withheld": true,
+        "rationale": "La restitution est limitée aux deux suspensions explicitement formulées et à l'indisponibilité du troisième avis. Les motifs de suspension portent sur des informations distinctes et ne constituent ni une convergence ni une divergence. Les points propres à chaque avis sont présentés comme des lacunes de couverture, sans attribuer de position aux rôles silencieux.",
+        "convergences": [],
+        "divergences": [],
+        "coverage_gaps": [
+          {
+            "point": "[CONDITION_A] doit être documentée avant que urology_oncology puisse formuler son avis.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "[CONDITION_A] à documenter."
+              }
+            ],
+            "silent": [
+              "medical_oncology",
+              "radiation_oncology"
+            ],
+            "clinical_impact": "Ce motif de suspension n'est couvert que par urology_oncology et doit être clarifié avant une synthèse plus complète."
+          },
+          {
+            "point": "[FACT_B] doit être documenté avant que medical_oncology puisse formuler son avis.",
+            "raised_by": [
+              {
+                "role": "medical_oncology",
+                "quote": "[FACT_B] à documenter."
+              }
+            ],
+            "silent": [
+              "urology_oncology",
+              "radiation_oncology"
+            ],
+            "clinical_impact": "Ce motif de suspension n'est couvert que par medical_oncology et doit être clarifié avant une synthèse plus complète."
+          },
+          {
+            "point": "[CALCULATOR_A] est déclaré NOT_POSSIBLE pour MISSING_REQUIRED_INPUT.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "[CALCULATOR_A] : NOT_POSSIBLE, MISSING_REQUIRED_INPUT ; aucune estimation fournie."
+              }
+            ],
+            "silent": [
+              "medical_oncology",
+              "radiation_oncology"
+            ],
+            "clinical_impact": "Cette limitation de calcul n'est rapportée que par urology_oncology et aucune estimation n'est disponible."
+          }
+        ],
+        "supportive_care_plan": null
+      },
+      "prior_availability_errors": [
+        "coverage_gaps[0].silent: radiation_oncology has no available opinion",
+        "coverage_gaps[1].silent: radiation_oncology has no available opinion",
+        "coverage_gaps[2].silent: radiation_oncology has no available opinion"
+      ],
+      "output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "5c002457-171b-5ac3-8221-23663367c445",
+        "key_facts_used": [],
+        "recommendation": "Synthèse provisoire suspendue. urology_oncology suspend son avis car [CONDITION_A] n'est pas établie. medical_oncology suspend son avis car [FACT_B] n'est pas documenté. L'avis radiation_oncology est indisponible, sans cause fournie. Aucune conduite n'est formulée.",
+        "alternatives": [],
+        "rejected_options": [],
+        "contraindications": [],
+        "evidence_references": [],
+        "uncertainty_notes": [
+          "urology_oncology : avis suspendu.",
+          "urology_oncology : [CALCULATOR_A] est déclaré NOT_POSSIBLE pour MISSING_REQUIRED_INPUT ; aucune estimation n'est fournie.",
+          "medical_oncology : avis suspendu.",
+          "radiation_oncology : avis indisponible ; cause non fournie.",
+          "La synthèse reste limitée aux avis disponibles et ne remplace aucune décision médicale."
+        ],
+        "missing_information": [
+          "urology_oncology : [CONDITION_A] à documenter.",
+          "urology_oncology : [CALCULATOR_INPUT] absent.",
+          "medical_oncology : [FACT_B] à documenter.",
+          "radiation_oncology : avis indisponible."
+        ],
+        "recommendation_withheld": true,
+        "rationale": "Les deux avis disponibles sont explicitement suspendus pour des motifs distincts. Aucun accord ou désaccord clinique n'est déduit de ces suspensions. Les points propres à chaque avis sont restitués comme lacunes de couverture vis-à-vis de l'autre avis disponible ; radiation_oncology n'est pas classé comme silencieux puisque son avis est indisponible.",
+        "convergences": [],
+        "divergences": [],
+        "coverage_gaps": [
+          {
+            "point": "[CONDITION_A] n'est pas établie.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "Avis suspendu : [CONDITION_A] non établie."
+              }
+            ],
+            "silent": [
+              "medical_oncology"
+            ],
+            "clinical_impact": "Ce point n'est abordé que par urology_oncology et limite la couverture comparative disponible."
+          },
+          {
+            "point": "[FACT_B] n'est pas documenté.",
+            "raised_by": [
+              {
+                "role": "medical_oncology",
+                "quote": "Avis suspendu : [FACT_B] non documenté."
+              }
+            ],
+            "silent": [
+              "urology_oncology"
+            ],
+            "clinical_impact": "Ce point n'est abordé que par medical_oncology et limite la couverture comparative disponible."
+          },
+          {
+            "point": "[CALCULATOR_A] est déclaré NOT_POSSIBLE pour MISSING_REQUIRED_INPUT, sans estimation fournie.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "[CALCULATOR_A] : NOT_POSSIBLE, MISSING_REQUIRED_INPUT ; aucune estimation fournie."
+              }
+            ],
+            "silent": [
+              "medical_oncology"
+            ],
+            "clinical_impact": "Cette limitation de calcul n'est rapportée que par urology_oncology et doit rester attribuée à cet avis."
+          },
+          {
+            "point": "[CALCULATOR_INPUT] est absent.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "[CALCULATOR_INPUT] absent."
+              }
+            ],
+            "silent": [
+              "medical_oncology"
+            ],
+            "clinical_impact": "Cette information manquante n'est signalée que par urology_oncology et limite la couverture comparative."
+          }
+        ],
+        "supportive_care_plan": null
+      },
+      "contract_valid": true,
+      "synthesis_availability_errors": [],
+      "semantic_assessment": {
+        "oracle_pass": true,
+        "notes": [
+          "Radiation oncology is unavailable in recommendation, uncertainty and missing-information fields, never in silent.",
+          "Both distinct suspensions, missing CONDITION_A and FACT_B, calculator refusal, reason and missing input remain.",
+          "No generic status convergence, invented absence cause, estimate or treatment is introduced.",
+          "Coverage gaps concern only the two available opinions. Background CONTEXT_A is omitted."
+        ]
+      }
+    },
+    {
+      "case_id": "synthetic-metadata-only-support-rcp_synthesis",
+      "bundle_sha256": "5b4cc7075d4fdb7bf0f6513544271443c5fedbe74d1ce88b880e0a94811be3ee",
+      "inputs": {
+        "case_id": "f9387587-bc9c-5500-a6fb-8294fae3cc45",
+        "agent_role": "rcp_synthesis",
+        "cancer_type": "prostate",
+        "clinical_question": null,
+        "first_pass": false,
+        "ledger_version": 1,
+        "case_ledger": [
+          {
+            "key": "context",
+            "label": "[CONTEXT]",
+            "value": "[CONTEXT_A]",
+            "unit": null,
+            "status": "confirmed",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": [
+              "snip-001"
+            ]
+          },
+          {
+            "key": "condition_a",
+            "label": "[CONDITION_A]",
+            "value": "oui",
+            "unit": null,
+            "status": "confirmed",
+            "origin": "machine",
+            "correction_note": null,
+            "source_ids": [
+              "snip-002"
+            ]
+          }
+        ],
+        "source_snippets": [
+          {
+            "id": "snip-001",
+            "text": "Dossier SYNTHÉTIQUE : contexte documenté [CONTEXT_A].",
+            "source_document_id": "synthetic-dossier",
+            "source_chunk_id": null,
+            "page": 1,
+            "page_end": null,
+            "section": null
+          },
+          {
+            "id": "snip-002",
+            "text": "Dossier SYNTHÉTIQUE : [CONDITION_A] documentée présente.",
+            "source_document_id": "synthetic-dossier",
+            "source_chunk_id": null,
+            "page": 2,
+            "page_end": null,
+            "section": null
+          }
+        ],
+        "guideline_passages": [
+          {
+            "id": "ev-001",
+            "text": "MATÉRIEL SYNTHÉTIQUE D'ÉVALUATION, pas une recommandation médicale publiée. Les marqueurs désignent des faits et options abstraits, sans équivalent clinique. Dans [CONTEXT_A], [OPTION_A] peut être proposée si et seulement si [CONDITION_A] est documentée présente. Aucune autre règle n'est fournie.",
+            "source": "SYNTHETIC evaluation material (not published medical guidance)",
+            "document_id": "synthetic-guidance",
+            "clinical_status": "poc_unreviewed",
+            "section": "Abstract applicability exercise",
+            "version": "synthetic-v1",
+            "published_at": null,
+            "page": 1,
+            "recommendation_number": null,
+            "locator_method": null
+          },
+          {
+            "id": "ev-002",
+            "text": "MATÉRIEL SYNTHÉTIQUE D'ÉVALUATION, pas une recommandation médicale publiée. Les marqueurs désignent des faits et options abstraits, sans équivalent clinique. Dans [CONTEXT_A], [OPTION_B] est une alternative sous [CONDITION_A].",
+            "source": "SYNTHETIC evaluation material (not published medical guidance)",
+            "document_id": "synthetic-guidance",
+            "clinical_status": "poc_unreviewed",
+            "section": "Abstract applicability exercise",
+            "version": "synthetic-v1",
+            "published_at": null,
+            "page": 1,
+            "recommendation_number": null,
+            "locator_method": null
+          }
+        ],
+        "missing_fields": [],
+        "conflicting_fields": [],
+        "nomograms": [],
+        "safety_constraints": [
+          "Cette sortie est provisoire et destinée à préparer la RCP ; elle ne remplace aucune décision médicale.",
+          "Ne citez que des identifiants présents dans les données fournies ; n'inventez jamais de référence.",
+          "N'inventez aucune donnée clinique absente du dossier : signalez-la comme manquante.",
+          "Énoncez explicitement les incertitudes et les informations manquantes qui limitent votre avis.",
+          "Si aucune recommandation ne peut être formulée sans risque, indiquez-le (recommendation_withheld) plutôt que de proposer une conduite mal fondée.",
+          "Répondez uniquement par l'objet JSON demandé, en français, sans texte autour."
+        ],
+        "agent_opinions": [
+          {
+            "agent_role": "urology_oncology",
+            "recommendation": "Proposer [OPTION_A] sous [CONDITION_A] documentée.",
+            "alternatives": [],
+            "rejected_options": [],
+            "contraindications": [],
+            "uncertainty_notes": [],
+            "missing_information": [],
+            "evidence_references": [
+              {
+                "id": "ev-001",
+                "supports": "Règle abstraite sous [CONDITION_A]."
+              }
+            ],
+            "recommendation_withheld": false,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          },
+          {
+            "agent_role": "medical_oncology",
+            "recommendation": "L'avis porte uniquement sur [OPTION_B], proposée comme alternative.",
+            "alternatives": [],
+            "rejected_options": [],
+            "contraindications": [],
+            "uncertainty_notes": [],
+            "missing_information": [],
+            "evidence_references": [
+              {
+                "id": "ev-002",
+                "supports": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+              }
+            ],
+            "recommendation_withheld": false,
+            "rationale": "Avis SYNTHÉTIQUE fixé avant toute comparaison V1/V2."
+          }
+        ],
+        "missing_opinions": []
+      },
+      "expected": [
+        "Return the exact role-specific production JSON contract and echo the case/role.",
+        "Use only supplied citation IDs in structured channels; do not invent facts or guidance.",
+        "Remain provisional: do not claim that a board decided, validated or initiated a plan.",
+        "Reserve coverage_gaps[*].silent for actual available agent_opinions; never include missing_opinions. Report unavailable roles separately in recommendation, uncertainty_notes or missing_information, without inventing their positions or causes.",
+        "Report an [OPTION_A] coverage gap: urology raised it, medical oncology did not.",
+        "Do not record a convergence or divergence on [OPTION_A] without a medical position.",
+        "Preserve the useful, separately attributed [OPTION_B] proposal; do not withhold both.",
+        "Medical reference supports mentions [OPTION_A], but no position field does; do not treat metadata as agreement despite mechanical attestation accepting it."
+      ],
+      "expected_withheld": false,
+      "prior_output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "f9387587-bc9c-5500-a6fb-8294fae3cc45",
+        "key_facts_used": [
+          "[CONTEXT_A] est confirmé.",
+          "[CONDITION_A] est documentée présente."
+        ],
+        "recommendation": "Synthèse provisoire : urology_oncology propose [OPTION_A] sous [CONDITION_A] documentée. medical_oncology présente uniquement [OPTION_B] comme alternative. Ces positions portent sur des options distinctes et ne permettent d’établir ni convergence ni divergence. Leur articulation doit être clarifiée en RCP ; aucune option n’est privilégiée par la présente synthèse.",
+        "alternatives": [],
+        "rejected_options": [],
+        "contraindications": [],
+        "evidence_references": [
+          {
+            "id": "ev-001",
+            "supports": "urology_oncology : Règle abstraite sous [CONDITION_A]."
+          },
+          {
+            "id": "ev-002",
+            "supports": "medical_oncology : Proposer [OPTION_A] sous [CONDITION_A] documentée."
+          }
+        ],
+        "uncertainty_notes": [
+          "Les deux avis abordent des options distinctes sans prendre explicitement position sur l’option portée par l’autre rôle.",
+          "Dans l’avis medical_oncology, le texte supports associé à ev-002 mentionne [OPTION_A], tandis que la recommandation porte uniquement sur [OPTION_B] ; cette métadonnée ne peut pas établir une position supplémentaire."
+        ],
+        "missing_information": [],
+        "recommendation_withheld": false,
+        "rationale": "La synthèse restitue séparément les deux positions attestées sans les arbitrer. L’absence de position croisée sur [OPTION_A] et [OPTION_B] est classée comme lacune de couverture, et non comme accord ou désaccord. Cette sortie est provisoire et destinée à préparer la RCP ; elle ne remplace aucune décision médicale.",
+        "convergences": [],
+        "divergences": [],
+        "coverage_gaps": [
+          {
+            "point": "Proposition de [OPTION_A] sous [CONDITION_A] documentée.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+              }
+            ],
+            "silent": [
+              "medical_oncology"
+            ],
+            "clinical_impact": "La position de medical_oncology sur cette proposition n’est pas attestée et doit être clarifiée par la RCP."
+          },
+          {
+            "point": "Présentation de [OPTION_B] comme alternative.",
+            "raised_by": [
+              {
+                "role": "medical_oncology",
+                "quote": "L'avis porte uniquement sur [OPTION_B], proposée comme alternative."
+              }
+            ],
+            "silent": [
+              "urology_oncology"
+            ],
+            "clinical_impact": "La position de urology_oncology sur cette alternative n’est pas attestée et doit être clarifiée par la RCP."
+          }
+        ],
+        "supportive_care_plan": null
+      },
+      "prior_availability_errors": [],
+      "output": {
+        "agent_role": "rcp_synthesis",
+        "case_id": "f9387587-bc9c-5500-a6fb-8294fae3cc45",
+        "key_facts_used": [
+          "[CONTEXT_A] documenté.",
+          "[CONDITION_A] documentée présente."
+        ],
+        "recommendation": "Synthèse provisoire : urology_oncology propose [OPTION_A] sous [CONDITION_A] documentée. medical_oncology présente uniquement [OPTION_B] comme alternative. Ces positions distinctes ne sont pas arbitrées ; leur couverture réciproque doit être clarifiée en RCP. Cette restitution ne constitue pas une décision médicale.",
+        "alternatives": [],
+        "rejected_options": [],
+        "contraindications": [],
+        "evidence_references": [
+          {
+            "id": "ev-001",
+            "supports": "urology_oncology : Règle abstraite sous [CONDITION_A]."
+          },
+          {
+            "id": "ev-002",
+            "supports": "medical_oncology : Proposer [OPTION_A] sous [CONDITION_A] documentée."
+          }
+        ],
+        "uncertainty_notes": [
+          "Aucune question clinique explicite n'est fournie.",
+          "Le texte supports associé à ev-002 dans l'avis medical_oncology mentionne [OPTION_A], tandis que sa recommandation porte uniquement sur [OPTION_B] ; cette métadonnée de preuve n'établit pas une position sur [OPTION_A].",
+          "Aucun avis fourni ne compare explicitement [OPTION_A] et [OPTION_B]."
+        ],
+        "missing_information": [],
+        "recommendation_withheld": false,
+        "rationale": "La synthèse restitue séparément les deux positions explicitement formulées. Leur coexistence ne démontre ni convergence ni incompatibilité : chaque option est donc enregistrée comme un point soulevé par un rôle et non abordé dans l'avis de l'autre rôle. Aucun arbitrage ni équivalent clinique réel n'est ajouté.",
+        "convergences": [],
+        "divergences": [],
+        "coverage_gaps": [
+          {
+            "point": "[OPTION_A] est proposée sous [CONDITION_A] documentée.",
+            "raised_by": [
+              {
+                "role": "urology_oncology",
+                "quote": "Proposer [OPTION_A] sous [CONDITION_A] documentée."
+              }
+            ],
+            "silent": [
+              "medical_oncology"
+            ],
+            "clinical_impact": "L'avis medical_oncology n'aborde pas cette proposition ; sa place doit être clarifiée par la RCP."
+          },
+          {
+            "point": "[OPTION_B] est proposée comme alternative.",
+            "raised_by": [
+              {
+                "role": "medical_oncology",
+                "quote": "L'avis porte uniquement sur [OPTION_B], proposée comme alternative."
+              }
+            ],
+            "silent": [
+              "urology_oncology"
+            ],
+            "clinical_impact": "L'avis urology_oncology n'aborde pas cette alternative ; sa place doit être clarifiée par la RCP."
+          }
+        ],
+        "supportive_care_plan": null
+      },
+      "contract_valid": true,
+      "synthesis_availability_errors": [],
+      "semantic_assessment": {
+        "oracle_pass": true,
+        "notes": [
+          "The two actual option positions and reciprocal gaps are retained without unnecessary withholding.",
+          "Copied reference metadata is explicitly distinguished from a clinical position and does not establish agreement.",
+          "Both patient markers and the absent clinical question remain visible."
+        ]
+      }
+    }
+  ]
+}
