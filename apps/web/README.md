@@ -38,6 +38,10 @@ and locally bundled IBM Plex fonts (no font CDN). Blocking badges and the launch
 use the API's issue severities; the launch permission remains `can_run_analysis`.
 The existing missing/uncertain counts still include fields marked "Sans objet".
 
+Detailed progress and connection-retry feedback appear directly below the analysis
+launch controls, after the ledger. Polling does not scroll or navigate the page.
+The compact header keeps the overall status; a recorded current completion adds
+"Voir la fiche RCP" beside the inline follow-up, never from an empty queue alone.
 Progress remains indeterminate, showing only reported milestones and elapsed time.
 Questions is a disabled, forthcoming tab; no question-answering backend is connected.
 

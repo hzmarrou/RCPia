@@ -348,20 +348,6 @@ export default function Workstation({
               ) : null}
             </section>
 
-            {live.length > 0 ? <Progress jobs={live} reachable={reachable} /> : null}
-
-            {!reachable ? (
-              <section className="poste-section">
-                <p className="error">
-                  Impossible de joindre le serveur. L&apos;état affiché est le dernier connu
-                  {live.length > 0 ? " et l'analyse est peut-être toujours en cours" : ""}.{" "}
-                  <button className="poste-retry" onClick={() => setAttempt((n) => n + 1)}>
-                    Réessayer
-                  </button>
-                </p>
-              </section>
-            ) : null}
-
             <section className="poste-section">
               <h2>Données extraites du dossier</h2>
               <p className="hint">
@@ -468,6 +454,7 @@ export default function Workstation({
                 onClick={startAnalysis}
                 disabled={!ledgerState.can_run_analysis || busy}
                 aria-describedby={!ledgerState.can_run_analysis ? "poste-blocking-help" : undefined}
+                aria-controls="poste-analysis-feedback"
               >
                 {launch.phase === "sending"
                   ? "Envoi de la demande…"
@@ -514,13 +501,21 @@ export default function Workstation({
               {!reachable && busy ? (
                 // The gate stays shut while the state is unknown: convening a second panel
                 // over a first one that may well be running is the expensive mistake here,
-                // and "Réessayer" above is the way out that does not risk it.
+                // and "Réessayer" below is the way out that does not risk it.
                 <p className="hint">
                   État de l&apos;analyse inconnu tant que le serveur ne répond pas. Le bouton
                   reste fermé pour ne pas convoquer un second panel par-dessus le premier.
                 </p>
               ) : null}
             </section>
+
+            <AnalysisFeedback
+              caseId={clinicalCase.id}
+              jobs={live}
+              reachable={reachable}
+              ficheReady={!busy && pipeline[4] === "done"}
+              onRetry={() => setAttempt((n) => n + 1)}
+            />
           </>
         )}
       </section>
@@ -622,6 +617,45 @@ export default function Workstation({
         <button className="poste-reopen" onClick={() => setCollapsed(false)}>
           Ouvrir le panneau
         </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function AnalysisFeedback({
+  caseId,
+  jobs,
+  reachable,
+  ficheReady,
+  onRetry,
+}: {
+  caseId: string;
+  jobs: JobActivity[];
+  reachable: boolean;
+  ficheReady: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div id="poste-analysis-feedback">
+      {jobs.length > 0 ? <Progress jobs={jobs} reachable={reachable} /> : null}
+      {!reachable ? (
+        <section className="poste-section">
+          <p className="error" role="alert">
+            Impossible de joindre le serveur. L&apos;état affiché est le dernier connu
+            {jobs.length > 0 ? " et l'analyse est peut-être toujours en cours" : ""}.{" "}
+            <button className="poste-retry" onClick={onRetry}>
+              Réessayer
+            </button>
+          </p>
+        </section>
+      ) : null}
+      {ficheReady ? (
+        <section className="poste-section">
+          <p role="status">La fiche RCP provisoire est disponible.</p>
+          <Link href={`/cases/${caseId}/pps`} className="primary-link">
+            Voir la fiche RCP
+          </Link>
+        </section>
       ) : null}
     </div>
   );
