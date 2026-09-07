@@ -45,7 +45,7 @@ outside the marked payload. Tests validate all eight JSON examples against the
 production output models, section balance and all four runtime mappings.
 
 The comparison uses frozen V1 and V2 directories, not mutable agent files.
-Canonical payload hashes for the V2 candidate:
+Canonical payload hashes for the final V2 candidate:
 
 | Role | SHA-256, UTF-8 with LF |
 | --- | --- |
@@ -103,11 +103,18 @@ Existing tooling was reused without dependency changes:
 
 | Evidence | Result |
 | --- | --- |
-| Full API suite, `python -m pytest -n 2 -q` | 1,833 passed; 10 skipped |
+| Local full API suite before the final additional regression, `python -m pytest -n 2 -q` | 1,833 passed; 10 skipped |
+| Final implementation API suite in PR CI, `uv run pytest` | 1,824 passed; 20 skipped |
 | `python -m ruff check .` | Passed |
 | `python -m mypy rcpia` | Passed; 123 source files |
 | Existing `test_pi_runtime_contract.py` with the configured provider | 5 passed |
 | Affected asset/behavior/orchestration tests after the final synthesis clarification | 117 passed |
+| Web CI | 136 tests passed; typecheck, lint and production build passed |
+| Corpus-only CI and GitGuardian | Passed |
+
+CI run `34072962657` covers implementation commit `49b910a`. Its four checks
+passed. Local and CI skip counts differ; the table reports each observed result
+rather than treating them as identical runs.
 
 The real-runtime checks use Pi `0.80.3` and synthetic codeword/session inputs.
 Three agent executions exercise actual brain loading, its negative trust control
@@ -176,8 +183,44 @@ not accepted as grounded opinions. Their sessions confirm that both actual
 brains were read. These failures remain in the comparison; no retry or successful
 replacement is substituted into the first-attempt denominator.
 
-**Semantic result status:** assessment of all paired outputs is being finalized.
-Contract acceptance alone is not a safety or grounding score.
+### Assessed behavior
+
+Every original cell was assessed against its predeclared criteria. The table
+counts usable outputs meeting both the production contract and the scenario
+oracle; contract acceptance alone is not a safety or grounding score.
+
+| Scenario | V1 | Initial V2 | Final V2 evidence |
+| --- | --- | --- | --- |
+| Specialists: supported main and alternative | 2/3 | 2/3 | 2/3 |
+| Specialists: missing applicability | 3/3 | 3/3 | 3/3 |
+| Specialists: empty corpus | 3/3 | 3/3 | 3/3 |
+| Specialists: adjacent-only guidance | 3/3 | 3/3 | 3/3 |
+| Specialists: contradictory patient facts | 3/3 | 3/3 | 3/3 |
+| Specialists: nomogram refusal | 3/3 | 3/3 | 3/3 |
+| Synthesis: atomic convergence | 1/1 | 1/1 | 1/1 |
+| Synthesis: divergence | 0/1 | 1/1 | 1/1 |
+| Synthesis: silence/coverage gap | 1/1 | 1/1 | 1/1 |
+| Synthesis: withheld and missing opinion | 0/1 | 0/1 | 1/1 |
+| Synthesis: metadata-only support | 0/1 | 1/1 | 1/1 |
+| Total | 19/23 | 21/23 | 22/23 |
+
+Each specialist row contains one case per active specialist. The final column
+retains the original 18 specialist executions because their prompt hashes did not
+change; only the five synthesis cells were rerun. It is not a fresh 23-cell run.
+These are development-set reruns, not an independent holdout or a repeated-trial
+estimate of reliability.
+
+V1 unnecessarily set global withholding in the divergence and metadata-only
+cases, despite preserving useful attributed positions in its text. V2 keeps
+those syntheses available without choosing a winner or treating metadata as an
+opinion. These are state/coverage corrections, not evidence that V1 fabricated
+clinical claims. Both versions resist the metadata-only agreement trap.
+
+For missing applicability, V2 urology and medical oncology retain a more explicit
+conditional path. Both V1's justified withholding and V2's conditional proposals
+meet the oracle; the difference is useful representation, not a demonstrated
+safety advantage. Calculator cases retain the independently supported option in
+both arms, with V2 generally carrying more exact refusal provenance.
 
 Semantic review of the initial comparison identified one shared failure:
 both V1 and V2 represented two distinct abstentions as a convergence. The final
@@ -187,7 +230,29 @@ opinions. The validator was not weakened or changed.
 
 All five fixed synthesis cases were rerun after this correction, not only the
 failing case; all five passed the production contract. Their bundle hashes match
-the original V1 inputs. Final semantic assessment remains pending.
+the original V1 inputs. All five also pass semantic assessment: the distinct
+abstentions no longer form a convergence, while their missing facts, calculator
+refusal and unavailable opinion remain explicit. No new material V2 regression
+was identified in these abstract fixtures.
+
+Review found no invented patient values, clinical rules or calculator estimates
+in either arm. Observed failures concerned citation channels, withholding state
+and comparison categorization. This small abstract pack cannot establish their
+absence in realistic clinical cases.
+
+**Useful-detail losses and representation limits remain visible.** Final V2
+synthesis omits the background `[CONTEXT_A]` in the silence and withheld cases,
+and does not repeat the absent clinical question in several cases. The required
+positions, conditions and withholding reasons remain, but these are real context
+omissions rather than improvements. In the incomplete-panel case, the unavailable
+radiation role appears in `coverage_gaps[*].silent` while its unavailability and
+unknown cause are explicitly stated elsewhere; no position is attributed to it.
+
+Empty structured `alternatives` in some synthesis outputs is not, by itself, an
+option-coverage loss: the corresponding sources mention the alternative only in
+recommendation text and have empty structured alternatives. V2 preserves the
+position in prose and coverage gaps rather than inventing an option/rationale/ID
+triplet or borrowing reference metadata.
 
 ### Supplemental linked V2 panel
 
@@ -225,16 +290,25 @@ The running local app and staging were not modified.
 The positive withheld-opinion probe retained an attested convergence on the
 specific requirement to document `[CONDITION_A]`, while preserving both
 abstentions, calculator refusal and missing opinion. The final linked synthesis
-also passed production validation and provisional PPS assembly. These additional
-outputs are kept separately from the primary comparison.
+also passed production validation, semantic review and provisional PPS assembly.
+It retains two genuine three-role convergences, with no remaining option-specific
+silence. Six opinion-field quotes, three copied option/rationale/ID triplets and
+four role-prefixed references match their sources. The different coverage-gap
+count is faithful to the positions actually expressed, not a reason to demand
+textual similarity to the first synthesis.
+
+These additional outputs are kept separately from the primary comparison. Frozen
+prompts, bundles, outputs, sessions and per-case assessments are retained as local
+evaluation artifacts; raw sessions and user dossiers are not committed.
 
 ## Review and rollback
 
 Independent review identified relative evaluation paths and two synthesis
 withholding defects. Those were corrected with targeted regressions, without
 weakening production contracts. Follow-up technical review found no remaining
-significant issue in the prompts, synchronization/evaluation helpers or new tests.
-The separate paired semantic assessment is recorded above.
+significant issue in the prompts, synchronization/evaluation helpers or new tests,
+including the final status-only-convergence clarification. The separate paired
+semantic assessment is recorded above.
 
 Promote the four active runtime brains together. Roll back the whole promotion
 commit/PR as one unit, including its review/runtime equivalence assets; reverting
@@ -242,7 +316,19 @@ one brain or only the generated files would leave an incoherent set. If deployed
 later, restore the previously approved complete release using the deployment
 runbook. This work itself does not merge or deploy anything.
 
-Clinical review of guidance applicability and corpus coverage remains a separate
-committee responsibility. No new clinical threshold or treatment policy was
-selected to resolve this implementation. Existing unrelated corpus, latency,
+## Unresolved clinical review
+
+The abstract protocol pack does not resolve these committee questions:
+
+- Whether the existing corpus and retrieved passages cover realistic specialty
+  cases and their applicability conditions adequately.
+- Whether conditional and withheld outputs preserve enough useful information
+  for the intended clinician workflow in representative cases.
+- Which clinically representative case set and review criteria should assess
+  grounding, omissions and cross-specialty boundaries beyond this protocol pack.
+
+No new clinical threshold or treatment policy was selected to resolve this
+implementation. Dormant review-only roles were not model-exercised. Real-model
+checks do not cover the upload/RAG/job/UI/export chain, every documented edge
+case, or clinical guideline accuracy. Existing unrelated corpus, latency,
 dependency and export findings remain outside this change.
