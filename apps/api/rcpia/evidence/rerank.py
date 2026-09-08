@@ -28,6 +28,7 @@ from typing import Protocol
 import httpx
 
 from rcpia.core.config import Settings
+from rcpia.evidence.payload import MAX_EVIDENCE_CHARACTERS, prepare_evidence
 
 TIMEOUT_SECONDS = 90.0
 
@@ -36,10 +37,9 @@ TIMEOUT_SECONDS = 90.0
 MAX_ATTEMPTS = 5
 BASE_BACKOFF_SECONDS = 4.0
 
-# Cohere charges a search unit per call and accepts long passages, but a runaway
-# `contextual_text` should not become an unbounded request. Our longest chunk is 3,598
-# characters, so this truncates nothing today.
-MAX_DOCUMENT_CHARACTERS = 8000
+# An application limit, shared with delivery. Oversized whole units are compacted
+# only by the shared policy, or refused before HTTP; they are never clipped.
+MAX_DOCUMENT_CHARACTERS = MAX_EVIDENCE_CHARACTERS
 
 
 class RerankError(Exception):
@@ -123,7 +123,9 @@ class Reranker(Protocol):
     @property
     def fingerprint(self) -> str: ...
 
-    async def score(self, query: str, documents: list[str]) -> list[float]: ...
+    async def score(self, query: str, documents: list[str]) -> list[float]:
+        """Score prepare_evidence(document).text, refusing any unit that cannot fit."""
+        ...
 
 
 class AzureReranker:
@@ -180,7 +182,7 @@ class AzureReranker:
         payload = {
             "model": self._deployment,
             "query": query,
-            "documents": [document[:MAX_DOCUMENT_CHARACTERS] for document in documents],
+            "documents": [prepare_evidence(document).text for document in documents],
             "top_n": len(documents),
         }
 

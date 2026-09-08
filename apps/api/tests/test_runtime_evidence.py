@@ -34,6 +34,7 @@ from rcpia.evidence.embedding import EmbeddingError
 from rcpia.evidence.hashing import canonical_json, payload_sha256, text_identity
 from rcpia.evidence.ingestion import CorpusError
 from rcpia.evidence.models import EMBEDDING_DIMENSIONS, EvidenceChunk, EvidenceDocument
+from rcpia.evidence.payload import EvidencePreparationError, prepare_evidence
 from rcpia.evidence.rerank import MAX_DOCUMENT_CHARACTERS, RerankError
 from rcpia.query.questions import SUPPORTIVE_QUESTION, question_for
 
@@ -97,7 +98,7 @@ class FakeReranker:
         self.calls.append((query, list(documents)))
         scores = []
         for raw in documents:
-            text = raw[:MAX_DOCUMENT_CHARACTERS]
+            text = prepare_evidence(raw).text
             key = text.split("|")[0]
             if query == SUPPORTIVE_QUESTION:
                 score = {"s00": 0.99, "p00": 0.98, "s01": 0.97, "s02": 0.96}.get(key, 0.1)
@@ -121,10 +122,18 @@ async def seed(session: AsyncSession) -> None:
     for key in [f"p{i:02}" for i in range(10)] + ["s00", "s01", "s02", "keyword-only"]:
         text = f"{key} TVIM Traitement cancer vessie muscle invasive bladder cancer."
         if key == "s02":
-            text += " Table synthétique." * 300
-        contextual = f"{key}|Heading not delivered|" + text
-        if key == "s02":
-            contextual += " context" * 1000
+            rows = [
+                ("Header", "Fixture"),
+                ("---", "---"),
+                *[(f"Row {i}", "Fixture") for i in range(10)],
+                ("Final row", "Fixture"),
+            ]
+            text += "\n" + "\n".join(
+                "| " + left.ljust(650) + " | " + right.ljust(200) + " |"
+                for left, right in rows
+            )
+            text += "\nQualification outside the table."
+        contextual = f"{key}|Stored heading|\n\n" + text
         session.add(
             EvidenceChunk(
                 chunk_id=key,
@@ -132,7 +141,7 @@ async def seed(session: AsyncSession) -> None:
                 text=text,
                 contextual_text=contextual,
                 keyword_text=text,
-                section_path=["Heading not delivered"],
+                section_path=["Stored heading"],
                 cancer_types=["bladder"],
                 disease_setting="bladder_mibc_non_metastatic",
                 therapy_line="not_applicable",
@@ -144,7 +153,7 @@ async def seed(session: AsyncSession) -> None:
                 retrieval_eligible=True,
                 page_start=7,
                 citation_label="Synthetic table",
-                unit_type="decision_table" if key == "s02" else None,
+                unit_type="general_principle" if key == "s02" else None,
                 embedding=(
                     [1.0] + [0.0] * (EMBEDDING_DIMENSIONS - 1) if key != "keyword-only" else None
                 ),
@@ -231,17 +240,22 @@ async def test_tracing_preserves_production_calls_pack_and_notes(
     assert traced["primary"]["report"]["attempts"][0]["fusion_scores"]
     assert len(passages) == 13
     long = next(p for p in passages if p.id == "s02")
-    assert long.section is None and len(long.text) == MAX_TEXT
-    assert long.text.endswith(evidence.TRUNCATION_MARKER)
-    assert "Heading not delivered" not in long.text
-    assert any("tronqués" in note for note in notes)
+    assert long.section == "Stored heading" and len(long.text) < MAX_DOCUMENT_CHARACTERS
+    assert "Stored heading" in long.text
+    assert "|Final row|Fixture|" in long.text
+    assert long.text.endswith("Qualification outside the table.")
+    assert any("compactés" in note for note in notes)
     conversion = next(p for p in traced["converted"] if p["id"] == "s02")
-    assert conversion["clipped"]
+    assert not conversion["clipped"]
+    assert conversion["transformation"] == "markdown_cell_padding"
+    assert conversion["raw_text"]["characters"] > MAX_TEXT
     assert conversion["delivered_text"] == text_identity(long.text)
     call = measured["reranker_calls"][0]
     payload = call["documents"][call["candidate_ids"].index("s02")]
-    assert payload["clipped"]
-    assert payload["azure_payload_text"]["characters"] == MAX_DOCUMENT_CHARACTERS
+    assert not payload["clipped"]
+    assert payload["transformation"] == "markdown_cell_padding"
+    assert payload["contextual_text"] == conversion["contextual_text"]
+    assert payload["azure_payload_text"] == conversion["delivered_text"]
     assert measured["scores"] is None and measured["scoring"] == "unscored"
 
 
@@ -301,6 +315,7 @@ async def test_labelled_and_unlabelled_run_semantics(runtime_engine: AsyncEngine
     assert case["trace"]["primary"]["question"] != label().question
     assert labelled["corpus"]["release_ids"] == ["fixture-v1"]
     assert labelled["defaults"]["merged_pack_budget"] == 14
+    assert labelled["schema_version"] == "rcpia.runtime-evidence.v2"
     assert labelled["evidence_packs_sha256"] == unlabelled["evidence_packs_sha256"]
     assert "No extraction" in labelled["boundary"]
     assert '"embedding":' not in canonical_json(labelled["corpus"])
@@ -639,13 +654,25 @@ async def test_cli_input_failures_precede_settings_and_provider_construction(
     assert not args.output.exists()
 
 
-async def test_cli_provider_failure_leaves_only_incomplete_artifact(
+@pytest.mark.parametrize("failure", ["embedding", "oversized"])
+async def test_cli_provider_or_preservation_failure_leaves_only_incomplete_artifact(
     runtime_engine: AsyncEngine,
     artifact_directory: Path,
     monkeypatch,
+    failure: str,
 ) -> None:
     allow_synthetic_artifacts(monkeypatch)
     args = artifact_args(artifact_directory)
+    if failure == "oversized":
+        async with runtime_engine.begin() as connection:
+            await connection.execute(
+                sa.update(EvidenceChunk)
+                .where(EvidenceChunk.chunk_id == "keyword-only")
+                .values(
+                    text="x" * 8001,
+                    contextual_text="keyword-only|Stored heading|\n\n" + "x" * 8001,
+                )
+            )
     async with readonly_snapshot(runtime_engine) as session:
         record = input_record()
         record["expected_corpus_sha256"] = (await corpus_identity(session))["sha256"]
@@ -658,10 +685,11 @@ async def test_cli_provider_failure_leaves_only_incomplete_artifact(
         ),
     )
     bad = FakeEmbedder()
-    monkeypatch.setattr(bad, "embed", AsyncMock(side_effect=EmbeddingError("failure")))
+    if failure == "embedding":
+        monkeypatch.setattr(bad, "embed", AsyncMock(side_effect=EmbeddingError("failure")))
     monkeypatch.setattr(runtime, "build_embedder", lambda settings: bad)
     monkeypatch.setattr(runtime, "build_reranker", lambda settings: FakeReranker())
-    with pytest.raises(EmbeddingError):
+    with pytest.raises(EmbeddingError if failure == "embedding" else EvidencePreparationError):
         await runtime.execute(args)
     assert json.loads(args.output.read_text()) == {
         "schema_version": runtime.SCHEMA_VERSION,
@@ -705,7 +733,7 @@ async def test_non_snapshot_session_refused_before_provider_work(session: AsyncS
     assert embeddings.calls == [] and reranking.calls == []
 
 
-async def test_shared_runner_hashes_actual_conversion_not_discarded_headings(
+async def test_shared_runner_hashes_preserved_headings_and_final_qualifications(
     session: AsyncSession,
 ) -> None:
     await seed(session)
@@ -723,23 +751,29 @@ async def test_shared_runner_hashes_actual_conversion_not_discarded_headings(
     await session.execute(
         sa.update(EvidenceChunk)
         .where(EvidenceChunk.chunk_id == "p00")
-        .values(contextual_text="p00|A changed heading, not delivered")
+        .values(contextual_text="p00|A changed heading|\n\n" + EvidenceChunk.text)
     )
     headings = await measured()
-    assert headings["trace"]["evidence_pack_sha256"] == before["trace"]["evidence_pack_sha256"]
+    assert headings["trace"]["evidence_pack_sha256"] != before["trace"]["evidence_pack_sha256"]
     assert headings["reranker_calls"] != before["reranker_calls"]
     await session.execute(
         sa.update(EvidenceChunk)
         .where(EvidenceChunk.chunk_id == "s02")
-        .values(text=EvidenceChunk.text + " Changed clipped tail")
+        .values(
+            text=EvidenceChunk.text + " Changed final qualification.",
+            contextual_text=EvidenceChunk.contextual_text + " Changed final qualification.",
+        )
     )
     tail = await measured()
-    assert tail["trace"]["evidence_pack_sha256"] == headings["trace"]["evidence_pack_sha256"]
+    assert tail["trace"]["evidence_pack_sha256"] != headings["trace"]["evidence_pack_sha256"]
     assert tail["trace"]["converted"] != headings["trace"]["converted"]
     await session.execute(
         sa.update(EvidenceChunk)
         .where(EvidenceChunk.chunk_id == "p00")
-        .values(text="Changed delivered raw text")
+        .values(
+            text="Changed delivered raw text",
+            contextual_text="p00|Stored heading|\n\nChanged delivered raw text",
+        )
     )
     changed = await measured()
     assert changed["trace"]["evidence_pack_sha256"] != before["trace"]["evidence_pack_sha256"]

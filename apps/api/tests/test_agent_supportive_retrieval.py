@@ -48,6 +48,9 @@ def chunk(chunk_id: str, document_id: str, text: str = "texte") -> RetrievedChun
         chunk_id=chunk_id,
         document_id=document_id,
         text=text,
+        contextual_text=text,
+        section_path=(),
+        unit_type=None,
         citation_label=f"{document_id} — extrait",
         page_start=1,
         page_end=1,
@@ -214,11 +217,10 @@ async def test_the_supportive_search_can_be_switched_off(spy: list[dict]) -> Non
     assert not any("seconde recherche" in n for n in notes)
 
 
-async def test_truncation_is_counted_across_both_result_sets(
+async def test_a_long_supportive_unit_is_delivered_without_truncation(
     spy: list[dict], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The truncation warning used to count the treatment set only. A supportive passage cut
-    mid-table is just as quotable as a treatment one."""
+    """The dedicated guideline bound applies to supportive and primary units equally."""
     long_support = chunk("espen.nutrition-cancer.2021.long.01.0001", "espen.nutrition-cancer.2021",
                          text="x" * (MAX_TEXT + 500))
 
@@ -231,8 +233,8 @@ async def test_truncation_is_counted_across_both_result_sets(
     monkeypatch.setattr(agent_evidence, "search", with_a_long_supportive_passage)
     passages, notes = await run(spy)
 
-    assert any("tronqués" in n for n in notes)
-    assert any(p.text.endswith(agent_evidence.TRUNCATION_MARKER) for p in passages)
+    assert not any("tronqués" in n for n in notes)
+    assert passages[-1].text == long_support.contextual_text
 
 
 async def test_an_empty_result_from_both_questions_is_still_reported(

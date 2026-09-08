@@ -17,7 +17,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from rcpia.agents import evidence
-from rcpia.agents.schemas import MAX_TEXT
 from rcpia.core.config import get_settings
 from rcpia.evaluation.goldset import (
     Goldset,
@@ -39,6 +38,7 @@ from rcpia.evidence.embedding import Embedder, EmbeddingError, build_embedder
 from rcpia.evidence.hashing import canonical_json, payload_sha256, text_identity
 from rcpia.evidence.ingestion import CorpusError
 from rcpia.evidence.models import EMBEDDING_DIMENSIONS, EvidenceChunk
+from rcpia.evidence.payload import MAX_EVIDENCE_CHARACTERS, prepare_evidence
 from rcpia.evidence.rerank import (
     MAX_DOCUMENT_CHARACTERS,
     Reranker,
@@ -47,7 +47,7 @@ from rcpia.evidence.rerank import (
 )
 from rcpia.evidence.retrieval import CANDIDATE_LIMIT, RELEVANCE_FLOOR, RRF_K
 
-SCHEMA_VERSION = "rcpia.runtime-evidence.v1"
+SCHEMA_VERSION = "rcpia.runtime-evidence.v2"
 BOUNDARY = (
     "Evidence selection and delivery only, through guideline_passages_for. "
     "No extraction, full TaskBundle size gate, Pi execution, generation, synthesis, "
@@ -60,9 +60,12 @@ DEFAULTS = {
     "candidate_limit": CANDIDATE_LIMIT,
     "rrf_k": RRF_K,
     "relevance_floor": RELEVANCE_FLOOR,
-    "passage_text_cap": MAX_TEXT,
+    "passage_text_cap": MAX_EVIDENCE_CHARACTERS,
     "reranker_document_cap": MAX_DOCUMENT_CHARACTERS,
-    "conversion": "raw text with truncation marker; section=None; no heading repair",
+    "conversion": (
+        "whole stored contextual unit and section path; oversized-only Markdown cell-padding "
+        "compaction; refuse if still oversized; no clipping or missing-context reconstruction"
+    ),
     "safety_engine": "not supplied by guideline_passages_for",
 }
 
@@ -114,7 +117,7 @@ class CheckedEmbedder:
 
 
 class CheckedReranker:
-    """Record the production Azure clipping contract without modifying the call."""
+    """Record the same preparation used by Azure, never a separate tracing approximation."""
 
     def __init__(self, inner: Reranker) -> None:
         self.inner = inner
@@ -123,6 +126,7 @@ class CheckedReranker:
         self.calls: list[dict[str, object]] = []
 
     async def score(self, query: str, documents: list[str]) -> list[float]:
+        prepared = [prepare_evidence(text) for text in documents]
         scores = await self.inner.score(query, documents)
         if len(scores) != len(documents) or any(
             isinstance(s, bool) or not isinstance(s, int | float) or not math.isfinite(s)
@@ -135,10 +139,11 @@ class CheckedReranker:
                 "documents": [
                     {
                         "contextual_text": text_identity(text),
-                        "azure_payload_text": text_identity(text[:MAX_DOCUMENT_CHARACTERS]),
-                        "clipped": len(text) > MAX_DOCUMENT_CHARACTERS,
+                        "azure_payload_text": text_identity(item.text),
+                        "transformation": item.transformation,
+                        "clipped": False,
                     }
-                    for text in documents
+                    for text, item in zip(documents, prepared, strict=True)
                 ],
                 "scores": scores,
             }
@@ -327,7 +332,10 @@ async def evaluate_run(
                 "fingerprint": reranker.fingerprint,
             },
             "weight_revision": "not exposed or frozen by the provider API",
-            "reranker_payload_contract": "AzureReranker (fakes must implement the same cap)",
+            "reranker_payload_contract": (
+                "AzureReranker uses prepare_evidence; fakes must implement the same "
+                "whole-unit preparation and refusal, never clipping"
+            ),
         },
         "runtime": {
             "entry_point": "rcpia.agents.evidence.guideline_passages_for",

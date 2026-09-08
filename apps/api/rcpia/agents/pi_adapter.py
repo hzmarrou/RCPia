@@ -33,6 +33,7 @@ import anyio.to_thread
 
 from rcpia.agents.lifecycle import Phase, RunTimeline, TimeBudget, TimeoutLayer
 from rcpia.agents.schemas import TaskBundle
+from rcpia.agents.serialization import bundle_bytes
 
 # The design fixes ten minutes per agent run; the job lease is fifteen, so a timeout is
 # always recorded by the worker that owns the job rather than by a lease expiring.
@@ -644,10 +645,7 @@ class PiAdapter:
 
         # The bundle goes to a file, not an argument: it is large, and keeping it on disk
         # makes the exact input auditable alongside the session.
-        task_path.write_text(
-            json.dumps(bundle.model_dump(by_alias=True), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        task_path.write_bytes(bundle_bytes(bundle))
 
         command = self.build_command(
             settings=settings, session_path=session_path, task_path=task_path

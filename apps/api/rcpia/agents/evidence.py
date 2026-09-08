@@ -26,10 +26,11 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rcpia.agents.schemas import MAX_TEXT, GuidelinePassage
+from rcpia.agents.schemas import GuidelinePassage
 from rcpia.cases.ledger import LedgerEntry
 from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.hashing import payload_sha256, text_identity
+from rcpia.evidence.payload import EvidencePreparationError, PreparedEvidence, prepare_evidence
 from rcpia.evidence.rerank import Reranker
 from rcpia.evidence.retrieval import Concepts, Filter, RetrievalReport, RetrievedChunk, search
 from rcpia.query.builder import Fact, build_filter
@@ -52,11 +53,6 @@ PASSAGE_LIMIT = 10
 # number to cut first: losing supportive grounding degrades an opinion, losing treatment
 # passages changes it.
 SUPPORTIVE_PASSAGE_LIMIT = 4
-
-# What a truncated passage says about itself. The corpus holds decision tables that run past
-# the bundle's text cap, and a passage silently cut mid-table would be quoted in a fiche as
-# though it were whole. The marker is French because everything the agent reads is.
-TRUNCATION_MARKER = " […] (passage tronqué — consulter la source pour le texte intégral)"
 
 
 @dataclass
@@ -100,19 +96,29 @@ def to_passage(chunk: RetrievedChunk) -> GuidelinePassage:
     citation the agent emits should be resolvable straight back to the corpus, the gold set and
     the safety rules without a lookup table that can drift. The cap moved instead.
     """
-    text = chunk.text
-    if len(text) > MAX_TEXT:
-        text = text[: MAX_TEXT - len(TRUNCATION_MARKER)] + TRUNCATION_MARKER
+    return _to_passage(chunk, _prepare_chunk(chunk))
 
+
+def _prepare_chunk(chunk: RetrievedChunk) -> PreparedEvidence:
+    if not chunk.contextual_text.endswith(chunk.text):
+        raise EvidencePreparationError(
+            "Le contexte enregistré ne conserve pas le texte source intégral du passage : "
+            "analyse arrêtée, aucune reconstruction n'est autorisée."
+        )
+    return prepare_evidence(chunk.contextual_text)
+
+
+def _to_passage(chunk: RetrievedChunk, prepared: PreparedEvidence) -> GuidelinePassage:
     return GuidelinePassage(
         id=chunk.chunk_id,
-        text=text,
+        text=prepared.text,
         source=chunk.citation_label or chunk.document_id,
         document_id=chunk.document_id,
         clinical_status=chunk.clinical_status,
-        section=None,
+        section=" > ".join(chunk.section_path) or None,
         version=chunk.version_label,
         page=chunk.page_start,
+        page_end=chunk.page_end,
         recommendation_number=chunk.recommendation_number,
         locator_method=chunk.locator_method,
     )
@@ -239,13 +245,6 @@ async def guideline_passages_for(
             + "."
         )
 
-    truncated = sum(1 for chunk in chunks if len(chunk.text) > MAX_TEXT)
-    if truncated:
-        notes.append(
-            f"{truncated} passage(s) des recommandations ont été tronqués faute de place : "
-            "leur texte est incomplet et signalé comme tel. Ne citez pas un passage tronqué "
-            "comme s'il était complet."
-        )
     if not chunks:
         notes.append(
             "Aucun passage des recommandations n'a été retenu pour ce patient : "
@@ -257,18 +256,31 @@ async def guideline_passages_for(
             "les recommandations citées correspondent moins précisément à ce patient."
         )
 
-    passages = [to_passage(chunk) for chunk in chunks]
+    prepared = [_prepare_chunk(chunk) for chunk in chunks]
+    compacted = sum(item.transformation != "verbatim" for item in prepared)
+    if compacted:
+        notes.append(
+            f"{compacted} passage(s) ont été compactés uniquement par retrait des espaces "
+            "d'alignement des cellules Markdown. Le contenu de chaque unité source enregistrée "
+            "est conservé ; les en-têtes ou notes absents de cette unité ne sont pas reconstitués."
+        )
+    passages = [
+        _to_passage(chunk, item) for chunk, item in zip(chunks, prepared, strict=True)
+    ]
     if trace is not None:
         trace.converted = [
             {
                 "id": chunk.chunk_id,
                 "raw_text": text_identity(chunk.text),
+                "contextual_text": text_identity(chunk.contextual_text),
                 "delivered_text": text_identity(passage.text),
-                "clipped": len(chunk.text) > MAX_TEXT,
+                "transformation": item.transformation,
+                "clipped": False,
+                "unit_type": chunk.unit_type,
                 "section": passage.section,
                 "passage_sha256": payload_sha256(passage.model_dump(mode="json")),
             }
-            for chunk, passage in zip(chunks, passages, strict=True)
+            for chunk, item, passage in zip(chunks, prepared, passages, strict=True)
         ]
         trace.notes = list(notes)
         trace.evidence_pack_sha256 = payload_sha256({
