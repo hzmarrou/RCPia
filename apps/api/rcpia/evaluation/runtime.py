@@ -3,13 +3,12 @@
 import argparse
 import asyncio
 import hashlib
-import json
 import math
 import sys
 from dataclasses import asdict
 from pathlib import Path
 from subprocess import SubprocessError
-from typing import Any
+from typing import Any, Literal
 
 import sqlalchemy as sa
 from httpx import HTTPError
@@ -18,6 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from rcpia.agents import evidence
 from rcpia.core.config import get_settings
+from rcpia.core.jsonio import load_json
+from rcpia.evaluation.approval import (
+    ApprovalRegistry,
+    ScoringPermit,
+    SplitManifest,
+    authorize,
+    require_question_approval,
+    verify_permit_corpus,
+)
 from rcpia.evaluation.goldset import (
     Goldset,
     GoldsetError,
@@ -26,6 +34,13 @@ from rcpia.evaluation.goldset import (
     verify_against_corpus,
 )
 from rcpia.evaluation.metrics import aggregate, score_question
+from rcpia.evaluation.review import (
+    CandidatePool,
+    PoolCase,
+    ReviewDraft,
+    verify_review_sources,
+    write_new,
+)
 from rcpia.evaluation.runtime_inputs import RuntimeInput, RuntimeSnapshot, selected_labels
 from rcpia.evaluation.runtime_provenance import (
     check_output,
@@ -46,6 +61,7 @@ from rcpia.evidence.rerank import (
     build_reranker,
 )
 from rcpia.evidence.retrieval import CANDIDATE_LIMIT, RELEVANCE_FLOOR, RRF_K
+from rcpia.query.decision import FACT_PROJECTION_CONTRACT, RETRIEVAL_CONTRACT
 
 SCHEMA_VERSION = "rcpia.runtime-evidence.v2"
 BOUNDARY = (
@@ -71,16 +87,19 @@ DEFAULTS = {
 
 
 def load_inputs(raw: bytes) -> RuntimeInput:
-    def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError("Duplicate JSON input key.")
-            result[key] = value
-        return result
+    return RuntimeInput.model_validate(load_json(raw))
 
-    decoded = json.loads(raw, object_pairs_hook=unique)
-    return RuntimeInput.model_validate(decoded)
+
+QueryMode = Literal["baseline", "decision_targeted_v1"]
+
+
+def preflight_queries(inputs: RuntimeInput, query_mode: QueryMode) -> None:
+    if query_mode not in {"baseline", "decision_targeted_v1"}:
+        raise ValueError("Unknown retrieval query mode.")
+    if query_mode == "decision_targeted_v1" and any(
+        s.retrieval_query is None for s in inputs.snapshots
+    ):
+        raise ValueError("Every targeted snapshot requires a pinned decision context.")
 
 
 class CheckedEmbedder:
@@ -158,8 +177,18 @@ async def evaluate_snapshot(
     embedder: Embedder,
     reranker: Reranker,
     label: Question | None = None,
+    query_mode: QueryMode = "baseline",
+    permit: ScoringPermit | None = None,
 ) -> dict[str, Any]:
     """The shared runner/test seam calls the exact function used by build_bundle."""
+    if query_mode not in {"baseline", "decision_targeted_v1"}:
+        raise ValueError("Unknown retrieval query mode.")
+    if query_mode == "decision_targeted_v1" and snapshot.retrieval_query is None:
+        raise ValueError("Targeted retrieval requires a pinned decision context.")
+    if label is not None:
+        require_question_approval(label, permit, snapshot)
+        if permit is not None:
+            await verify_permit_corpus(session, permit)
     traced = evidence.EvidenceTrace()
     embeddings, reranking = CheckedEmbedder(embedder), CheckedReranker(reranker)
     passages, notes = await evidence.guideline_passages_for(
@@ -171,6 +200,7 @@ async def evaluate_snapshot(
         embedder=embeddings,
         reranker=reranking,
         trace=traced,
+        retrieval_query=snapshot.retrieval_query if query_mode == "decision_targeted_v1" else None,
     )
     if not traced.complete or traced.primary is None or traced.supportive is None:
         raise ValueError("Missing/incomplete production evidence trace.")
@@ -218,11 +248,18 @@ async def evaluate_snapshot(
         "question_state": (
             "operator"
             if snapshot.operator_question
+            else "decision_targeted"
+            if query_mode == "decision_targeted_v1"
             else "derived_empty"
             if snapshot.operator_question == ""
             else "derived_null"
         ),
-        "scoring": "labelled" if label is not None else "unscored",
+        "query_mode": query_mode,
+        "retrieval_contract": RETRIEVAL_CONTRACT,
+        "fact_projection_contract": FACT_PROJECTION_CONTRACT,
+        "scoring": (
+            "approved_labels" if permit else "legacy_pilot_diagnostic"
+        ) if label is not None else "unscored",
         "scores": scores,
         "trace": asdict(traced),
         "evidence_pack": pack,
@@ -263,14 +300,29 @@ async def evaluate_run(
     reranker: Reranker,
     goldset: Goldset | None = None,
     split: str | None = None,
+    query_mode: QueryMode = "baseline",
+    manifest: SplitManifest | None = None,
+    registry: ApprovalRegistry | None = None,
+    review_pack: ReviewDraft | None = None,
 ) -> dict[str, Any]:
+    preflight_queries(inputs, query_mode)
     labels = selected_labels(inputs, goldset, split)
+    permit = None
+    if goldset is not None and split is not None:
+        permit = authorize(
+            goldset=goldset, inputs=inputs, split=split, manifest=manifest,
+            registry=registry, review_pack=review_pack,
+        )
+    elif manifest is not None or registry is not None or review_pack is not None:
+        raise ValueError("Scoring governance files require labels and an explicit split.")
     isolation = (await session.execute(sa.text("SHOW transaction_isolation"))).scalar_one()
     readonly = (await session.execute(sa.text("SHOW transaction_read_only"))).scalar_one()
     if isolation != "repeatable read" or readonly != "on":
         raise ValueError("Runtime runs require a read-only REPEATABLE READ snapshot.")
     corpus = await corpus_identity(session)
     await preflight_corpus(session, inputs, labels, corpus, embedder=embedder)
+    if review_pack is not None:
+        await verify_review_sources(session, review_pack)
     embedding_fingerprint = getattr(embedder, "fingerprint", None)
     if (
         not isinstance(embedding_fingerprint, str)
@@ -286,6 +338,7 @@ async def evaluate_run(
             embedder=embedder,
             reranker=reranker,
             label=labels.get(snapshot.snapshot_id),
+            query_mode=query_mode, permit=permit,
         )
         for snapshot in inputs.snapshots
     ]
@@ -315,11 +368,22 @@ async def evaluate_run(
         "boundary": BOUNDARY,
         "status": "complete",
         "mode": "actual-runtime-evidence",
-        "scoring": "labelled" if labels else "unscored",
+        "query_mode": query_mode,
+        "retrieval_contract": RETRIEVAL_CONTRACT,
+        "fact_projection_contract": FACT_PROJECTION_CONTRACT,
+        "scoring": (
+            "approved_labels" if permit else "legacy_pilot_diagnostic"
+        ) if labels else "unscored",
+        "review": {
+            "approval": permit.approval.model_dump(mode="json") if permit else None,
+            "split_manifest_sha256": manifest.sha256 if manifest else None,
+            "trust_boundary": "independent operator-supplied attestation; not IAM verification",
+        },
         "split": split,
         "defaults": DEFAULTS,
         "corpus": corpus,
         "input_sha256": payload_sha256(inputs.model_dump(mode="json")),
+        "clinical_inputs_sha256": inputs.clinical_inputs_sha256,
         "query_to_snapshot": inputs.query_to_snapshot,
         "models": {
             "embedding": {
@@ -360,10 +424,37 @@ async def evaluate_run(
 
 async def execute(args: argparse.Namespace) -> Path:
     output = check_output(args.artifacts_root, args.output)
+    pool_output = (
+        check_output(args.artifacts_root, args.pool_output)
+        if getattr(args, "pool_output", None) is not None else None
+    )
+    if pool_output == output:
+        raise ValueError("Pool export must have a distinct output path.")
     source = source_identity(args.source_commit)
+    query_mode = getattr(args, "query_mode", "baseline")
+    manifest = (
+        SplitManifest.model_validate(load_json(
+            restricted_input(args.split_manifest, args.artifacts_root),
+        ))
+        if getattr(args, "split_manifest", None) else None
+    )
+    registry = (
+        ApprovalRegistry.model_validate(load_json(args.approvals.read_bytes()))
+        if getattr(args, "approvals", None) else None
+    )
+    review_pack = (
+        ReviewDraft.model_validate(load_json(
+            restricted_input(args.review_pack, args.artifacts_root),
+        ))
+        if getattr(args, "review_pack", None) else None
+    )
     if args.corpus_only:
         if args.input is not None or args.goldset is not None or args.split is not None:
             raise ValueError("--corpus-only cannot be combined with run/label inputs.")
+        if (
+            query_mode != "baseline" or manifest or registry or review_pack or pool_output
+        ):
+            raise ValueError("--corpus-only cannot use query/review/pool options.")
         inputs, raw, goldset, goldset_raw = None, None, None, None
     else:
         if args.input is None:
@@ -377,6 +468,14 @@ async def execute(args: argparse.Namespace) -> Path:
             else None
         )
         selected_labels(inputs, goldset, args.split)
+        preflight_queries(inputs, query_mode)
+        if goldset is not None:
+            authorize(
+                goldset=goldset, inputs=inputs, split=args.split, manifest=manifest,
+                registry=registry, review_pack=review_pack,
+            )
+        elif manifest or registry or review_pack:
+            raise ValueError("Review/approval options require labels.")
     goldset_hash = hashlib.sha256(goldset_raw).hexdigest() if goldset_raw is not None else None
     # Reserve before settings, DB, or providers. A failure leaves an explicit incomplete run.
     with output.open("x", encoding="utf-8") as handle:
@@ -404,6 +503,8 @@ async def execute(args: argparse.Namespace) -> Path:
                         reranker=build_reranker(settings),
                         goldset=goldset,
                         split=args.split,
+                        query_mode=query_mode, manifest=manifest,
+                        registry=registry, review_pack=review_pack,
                     )
         finally:
             await engine.dispose()
@@ -416,6 +517,25 @@ async def execute(args: argparse.Namespace) -> Path:
         handle.seek(0)
         handle.write(canonical_json(result) + "\n")
         handle.truncate()
+    if pool_output is not None:
+        pool = CandidatePool(
+            schema_version="rcpia.review-pool.v1",
+            runtime_artifact_sha256=result["manifest_sha256"],
+            source_identity_sha256=payload_sha256(source),
+            corpus_sha256=result["corpus"]["sha256"], input_sha256=result["input_sha256"],
+            clinical_inputs_sha256=result["clinical_inputs_sha256"],
+            cases=[
+                PoolCase(
+                    snapshot_id=case["snapshot_id"], snapshot_sha256=case["snapshot_sha256"],
+                    candidate_ids=sorted({
+                        cid for channel in ("primary", "supportive")
+                        for attempt in case["trace"][channel]["report"]["attempts"]
+                        for cid in attempt["candidate_ids"]
+                    }),
+                ) for case in result["cases"]
+            ],
+        )
+        write_new(pool_output, pool.model_dump(mode="json"))
     return output
 
 
@@ -424,6 +544,15 @@ def main() -> None:
     parser.add_argument("--input", type=Path)
     parser.add_argument("--goldset", type=Path)
     parser.add_argument("--split", choices=("pilot", "dev", "test"))
+    parser.add_argument(
+        "--query-mode", choices=("baseline", "decision_targeted_v1"), default="baseline",
+    )
+    parser.add_argument("--split-manifest", type=Path)
+    parser.add_argument("--approvals", type=Path, help="Independent operator-controlled registry.")
+    parser.add_argument("--review-pack", type=Path)
+    parser.add_argument(
+        "--pool-output", type=Path, help="Private, rank/arm/score-free candidate export.",
+    )
     parser.add_argument("--source-commit", required=True, help="Exact full clean checkout HEAD.")
     parser.add_argument(
         "--artifacts-root",

@@ -98,6 +98,19 @@ def parse_stage(text: str | None) -> Stage | None:
     )
 
 
+def has_competing_stage_components(text: str) -> bool:
+    """Reject competing readings without changing the inherited TNM interpretation."""
+    return any(
+        len(
+            {
+                tuple((part or "").lower() for part in match.groups())
+                for match in pattern.finditer(text)
+            }
+        ) > 1
+        for pattern in (_T, _N, _M)
+    )
+
+
 def parse_number(text: str | None) -> float | None:
     if not text:
         return None

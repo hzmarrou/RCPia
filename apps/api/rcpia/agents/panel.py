@@ -40,6 +40,13 @@ from rcpia.core.models import (
 )
 from rcpia.jobs.models import LIVE_JOB_STATUSES, JobType
 from rcpia.jobs.service import enqueue
+from rcpia.query.decision import (
+    RETRIEVAL_CONTRACT,
+    RetrievalQuery,
+    decision_search,
+    pin_query,
+    query_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +93,10 @@ def normalised_question(question: str | None) -> str:
     return " ".join((question or "").split()).casefold()
 
 
-def job_is_compatible(job: AnalysisJob, *, ledger_version: int, question: str | None) -> bool:
+def job_is_compatible(
+    job: AnalysisJob, *, ledger_version: int, question: str | None,
+    retrieval_query: RetrievalQuery | None = None,
+) -> bool:
     """Whether this live job is already answering the panel's question.
 
     The dedupe key names only the case and the role, which is the right identity for "do not
@@ -95,8 +105,16 @@ def job_is_compatible(job: AnalysisJob, *, ledger_version: int, question: str | 
     one did not analyse the patient the new panel is describing.
     """
     payload = job.payload or {}
+    if payload.get("retrieval_contract") != RETRIEVAL_CONTRACT:
+        return False
     if payload.get("ledger_version") != ledger_version:
         return False
+    raw_query = payload.get("retrieval_query")
+    stored_query = RetrievalQuery.model_validate(raw_query) if raw_query is not None else None
+    if query_identity(stored_query) != query_identity(retrieval_query):
+        return False
+    if retrieval_query is not None:
+        return payload.get("clinical_question") == question
     return normalised_question(payload.get("clinical_question")) == normalised_question(question)
 
 
@@ -137,6 +155,7 @@ async def start_panel(
     ledger_version: int,
     clinical_question: str | None,
     requested_by_user_id: uuid.UUID | None = None,
+    retrieval_query: RetrievalQuery | None = None,
 ) -> PanelStart:
     """Record the panel and enqueue its specialists, in one transaction.
 
@@ -152,6 +171,26 @@ async def start_panel(
         raise ValueError(
             f"{SYNTHESIS_ROLE} is not a specialist: it reads the panel and cannot run beside it."
         )
+    if retrieval_query is not None and len(roles) != len(set(roles)):
+        raise ValueError("Duplicate targeted specialist roles.")
+    case = await session.scalar(sa.select(Case).where(
+        Case.id == case_id, Case.organization_id == organization_id,
+    ))
+    version = await session.scalar(sa.select(CaseLedgerVersion).where(
+        CaseLedgerVersion.case_id == case_id,
+        CaseLedgerVersion.version == ledger_version,
+    ))
+    if case is None or version is None:
+        raise ValueError("Retrieval requires the requested case and ledger version.")
+    retrieval_query = pin_query(
+        retrieval_query, cancer_type=str(case.cancer_type), case_question=case.clinical_question,
+    )
+    for role in roles:
+        decision_search(
+            cancer_type=str(case.cancer_type), agent_role=role,
+            entries=entries_from_version(version), request=retrieval_query,
+            operator_question=clinical_question,
+        )
 
     # A finishing panel and a new request must not race to describe this case's status.
     await session.execute(
@@ -161,17 +200,21 @@ async def start_panel(
     incompatible = [
         role
         for role, job in live.items()
-        if not job_is_compatible(job, ledger_version=ledger_version, question=clinical_question)
+        if not job_is_compatible(
+            job, ledger_version=ledger_version, question=clinical_question,
+            retrieval_query=retrieval_query,
+        )
     ]
     if incompatible:
         versions = ", ".join(
-            f"{role} (version {(live[role].payload or {}).get('ledger_version')})"
+            f"{role} (version {(live[role].payload or {}).get('ledger_version')}, "
+            f"contrat {(live[role].payload or {}).get('retrieval_contract') or 'non versionné'})"
             for role in sorted(incompatible)
         )
         raise PanelConflict(
             sorted(incompatible),
-            "Une analyse est déjà en cours pour ces spécialités sur une autre version du "
-            f"tableau de données : {versions}. Le panel demandé porte sur la version "
+            "Une analyse est déjà en cours pour ces spécialités sur une autre version, "
+            f"question ou contrat de recherche : {versions}. Le panel demandé porte sur la version "
             f"{ledger_version} ; attendez la fin de ces analyses avant de le relancer.",
         )
 
@@ -202,7 +245,10 @@ async def start_panel(
                 payload={
                     "agent_role": role,
                     "clinical_question": clinical_question,
+                    "retrieval_contract": RETRIEVAL_CONTRACT,
                     "ledger_version": ledger_version,
+                    **({"retrieval_query": retrieval_query.model_dump(mode="json")}
+                       if retrieval_query else {}),
                 },
                 dedupe_key=f"{JobType.RUN_AGENT}:{case_id}:{role}",
             )

@@ -13,6 +13,7 @@ from rcpia.core.models import CancerType, FactOrigin, FactStatus
 from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.evaluation.goldset import Goldset, Question
 from rcpia.evidence.hashing import payload_sha256
+from rcpia.query.decision import RetrievalQuery, decision_search, query_identity
 
 LEDGER_ADAPTER = TypeAdapter(list[LedgerEntry])
 
@@ -30,6 +31,7 @@ class RuntimeSnapshot(FrozenInput):
     # Required even when null: the operator-question state must be explicit.
     operator_question: str | None = Field(max_length=MAX_TEXT)
     entries: list[LedgerEntry] = Field(min_length=1)
+    retrieval_query: RetrievalQuery | None = None
 
     @field_validator("snapshot_id", "case_id")
     @classmethod
@@ -89,6 +91,11 @@ class RuntimeSnapshot(FrozenInput):
                 raise ValueError(f"Invalid ledger highlight for {entry.key}.")
             if not entry.label.strip() or not entry.category.strip():
                 raise ValueError("Ledger labels and categories must not be blank.")
+        if self.retrieval_query is not None:
+            decision_search(
+                cancer_type=self.cancer_type, agent_role=self.agent_role, entries=self.entries,
+                request=self.retrieval_query, operator_question=self.operator_question,
+            )
         return self
 
     @property
@@ -101,18 +108,28 @@ class RuntimeSnapshot(FrozenInput):
 
 
 class RuntimeInput(FrozenInput):
-    schema_version: Literal["rcpia.runtime-input.v1"]
+    schema_version: Literal["rcpia.runtime-input.v1", "rcpia.runtime-input.v2"]
     expected_corpus_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     snapshots: list[RuntimeSnapshot] = Field(min_length=1)
     # An exact bijection over the selected split and all snapshots, when scored.
     query_to_snapshot: dict[str, str] = Field(default_factory=dict)
 
+    @property
+    def clinical_inputs_sha256(self) -> str:
+        """Label association is assigned from the frozen manifest, not a patient input."""
+        return payload_sha256(self.model_dump(mode="json", exclude={"query_to_snapshot"}))
+
     @model_validator(mode="after")
     def unique_snapshots(self) -> Self:
         ids = [s.snapshot_id for s in self.snapshots]
         identities = [
-            (s.case_id, s.ledger_version, s.agent_role, s.operator_question) for s in self.snapshots
+            (s.case_id, s.ledger_version, s.agent_role, s.operator_question,
+             query_identity(s.retrieval_query)) for s in self.snapshots
         ]
+        if self.schema_version == "rcpia.runtime-input.v1" and any(
+            s.retrieval_query is not None for s in self.snapshots
+        ):
+            raise ValueError("Decision contexts require runtime-input.v2.")
         if len(ids) != len(set(ids)) or len(identities) != len(set(identities)):
             raise ValueError("Duplicate snapshot id or case/version/role/question input.")
         versions: dict[tuple[str, int], str] = {}

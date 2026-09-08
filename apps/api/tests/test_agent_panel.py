@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from rcpia.agents import panel as panel_service
 from rcpia.agents.opinions import prior_opinions
 from rcpia.agents.schemas import SYNTHESIS_ROLE
-from rcpia.cases.ledger import latest_version
+from rcpia.cases.ledger import latest_version, record_version
 from rcpia.core.db import get_session
 from rcpia.core.models import (
     AgentRun,
@@ -158,6 +158,10 @@ async def test_a_live_job_on_an_older_version_is_not_reused(
         version = await _version(session, stored)
 
     await _start(session_factory, case, ledger_version=version)
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        await record_version(session, case=stored, change_reason="Synthetic next version")
+        await session.commit()
 
     with pytest.raises(panel_service.PanelConflict) as conflict:
         await _start(session_factory, case, ledger_version=version + 1)
@@ -783,6 +787,8 @@ async def test_the_synthesis_reads_its_own_panel_and_not_the_cases_history(
         stored = await session.get(Case, case.id)
         assert stored is not None
         version = await _version(session, stored)
+        await record_version(session, case=stored, change_reason="Synthetic next version")
+        await session.commit()
     second_panel, second_jobs, _ = await _start(
         session_factory, case, roles=("urology_oncology",), ledger_version=version + 1
     )

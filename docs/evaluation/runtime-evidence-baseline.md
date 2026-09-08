@@ -1,5 +1,12 @@
 # Actual-runtime evidence-selection baseline (v2)
 
+Protected baseline remains the default: both modes now exclude unresolved facts and
+veto ambiguous staging narrowing. Usable-confirmed baseline queries/filters/concepts
+remain compatible with C; unresolved C controls intentionally change.
+See [Milestone D](decision-targeted-retrieval.md) for
+explicit API/evaluation opt-in, frozen family manifests, blinded review preparation,
+and independent content-bound dev/test approval. No approved dev/test labels ship here.
+
 This runner measures **evidence selection and delivery only**. It calls the exact
 `rcpia.agents.evidence.guideline_passages_for` used by `build_bundle`, with validated
 frozen `LedgerEntry` inputs. That function derives the filter, concepts and primary
@@ -107,8 +114,10 @@ are rejected. Missing facts remain missing; no gold-derived patient facts are in
 
 ## Optional labelled scoring
 
-Supply `--goldset <path> --split pilot` (or an actually populated, independently labelled
-`dev`/`test` split), and add an exact `query_to_snapshot` object to the input:
+Supply `--goldset <path> --split pilot` for **legacy pilot diagnostics**, and add an exact
+`query_to_snapshot` object to the input. Dev/test scoring additionally requires the
+content-bound `--split-manifest`, `--review-pack`, and independent `--approvals` artifacts
+described in Milestone D; merely populating a split is not authorization:
 
 ```json
 {"query_to_snapshot": {"existing-gold-query-id": "synthetic-bladder-medical-01"}}
@@ -135,7 +144,8 @@ Existing `score_question` and `aggregate` compute separate primary and merged-pa
 ## Output and provenance
 
 One `rcpia.runtime-evidence.v2` JSON artifact contains the manifest and per-case traces.
-The frozen input remains `rcpia.runtime-input.v1`; corpus identity remains
+Baseline accepts `rcpia.runtime-input.v1`; D decision contexts use `rcpia.runtime-input.v2`.
+Corpus identity remains
 `rcpia.loaded-corpus.v1`. Historical evidence v1 artifacts retain their original semantics
 (raw-text delivery, missing sections, 4,000-character delivery clipping and 8,000-character
 reranker clipping). They must not be relabelled as v2 or compared by assuming equal pack hashes.

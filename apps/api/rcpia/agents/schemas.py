@@ -17,10 +17,19 @@ import re
 import unicodedata
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.evidence.payload import MAX_EVIDENCE_CHARACTERS
+from rcpia.query.decision import QueryProvenance
 
 # One A4 page, the limit the design fixes for each agent's rationale.
 MAX_RATIONALE_CHARACTERS = 3000
@@ -217,6 +226,7 @@ class BundleInputs(Strict):
     # one in — so a bundle carrying a custom question is not an independent first pass
     # and says so here rather than pretending otherwise.
     clinical_question: str | None = Field(default=None, max_length=MAX_TEXT)
+    retrieval_query: QueryProvenance | None = None
     first_pass: bool = True
     ledger_version: int
     case_ledger: list[LedgerField] = Field(default_factory=list)
@@ -238,6 +248,13 @@ class BundleInputs(Strict):
     # opposite things from a tumour board: chase the missing opinion, or do not go looking for
     # an opinion that was never sought.
     missing_opinions: list[str] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def omit_unused_retrieval_query(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        if self.retrieval_query is None:
+            data.pop("retrieval_query", None)
+        return data
 
     @model_validator(mode="after")
     def citable_ids_are_unique(self) -> "BundleInputs":
@@ -282,11 +299,15 @@ class BundleInputs(Strict):
         the check doing its job — the premise that a question was the *only* way to lose
         independence had quietly stopped being true.
         """
-        derived = not self.clinical_question and not self.agent_opinions
+        derived = (
+            not self.clinical_question and not self.agent_opinions
+            and (self.retrieval_query is None or self.retrieval_query.request is None)
+        )
         if "first_pass" in self.model_fields_set and self.first_pass != derived:
             raise ValueError(
-                "first_pass is derived from what the bundle carries (a clinical_question or "
-                f"another agent's opinions), so it cannot be declared {self.first_pass} here"
+                "first_pass is derived from what the bundle carries (a clinical_question, "
+                "a recorded retrieval decision, or another agent's opinions), so it cannot "
+                f"be declared {self.first_pass} here"
             )
         self.first_pass = derived
         return self

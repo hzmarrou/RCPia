@@ -53,6 +53,7 @@ from rcpia.evidence.payload import EvidencePreparationError
 from rcpia.evidence.rerank import Reranker
 from rcpia.nomograms import evaluate_all
 from rcpia.nomograms.record import Tristate
+from rcpia.query.decision import RetrievalQuery, decision_search
 
 MAX_SNIPPET_CHARACTERS = 4000
 
@@ -246,6 +247,7 @@ async def build_bundle(
     reranker: Reranker | None = None,
     panel_id: uuid.UUID | None = None,
     missing_roles: Sequence[str] = (),
+    retrieval_query: RetrievalQuery | None = None,
 ) -> BuiltBundle:
     """Turn a stored ledger version into the file Pi is given.
 
@@ -260,13 +262,23 @@ async def build_bundle(
         )
 
     report = completeness.assess(entries, cancer_type=case.cancer_type)
+    if retrieval_query is not None and agent_role == SYNTHESIS_ROLE:
+        raise BundleError("Decision-targeted retrieval is only available to specialists.")
+    try:
+        planned = decision_search(
+            cancer_type=str(case.cancer_type), agent_role=agent_role, entries=entries,
+            request=retrieval_query, operator_question=clinical_question,
+        ) if agent_role != SYNTHESIS_ROLE else None
+    except ValueError as exc:
+        raise BundleError(str(exc)) from exc
+    query_provenance = planned.provenance if planned else None
 
     # The synthesis reads opinions, not the corpus. Its evidence is whatever the specialists
     # already cited, gathered below, so that it can quote their grounds without being handed a
     # separate search that might ground a *different* claim than the one it is reconciling.
     opinions: list[AgentOpinion] = []
     passages: list[GuidelinePassage] = []
-    evidence_notes: list[str] = []
+    evidence_notes: list[str] = list(planned.notes) if planned else []
     if agent_role == SYNTHESIS_ROLE:
         opinions, passages, synthesis_notes = await prior_opinions(
             session, case_id=case.id, panel_id=panel_id, missing_roles=missing_roles
@@ -282,9 +294,12 @@ async def build_bundle(
                 question=clinical_question,
                 embedder=embedder,
                 reranker=reranker,
+                retrieval_query=retrieval_query,
             )
         except EvidencePreparationError as exc:
             raise BundleError(str(exc)) from exc
+        if query_provenance is not None:
+            query_provenance = query_provenance.model_copy(update={"execution": "complete"})
 
     # Every chunk any reading was assembled from, not only the one it is filed under. A
     # multi-chunk imaging report needs all of them resolved, or the snippet below can only
@@ -419,6 +434,7 @@ async def build_bundle(
         agent_role=agent_role,
         cancer_type=str(case.cancer_type),
         clinical_question=clinical_question,
+        retrieval_query=query_provenance,
         # Free text can carry another agent's opinion, so a bundle carrying a question is
         # not an independent first pass and must not claim to be.
         ledger_version=version.version,
@@ -488,7 +504,7 @@ async def build_bundle(
             f"faute de place ({', '.join(sorted(dropped))}). Traitez ces champs comme "
             "non sourcés et signalez-le."
         )
-    if clinical_question:
+    if clinical_question or retrieval_query is not None:
         constraints.append(
             "Une question a été posée par un opérateur : cet avis n'est donc pas un "
             "premier passage indépendant."

@@ -51,6 +51,7 @@ from rcpia.core.models import (
 from rcpia.jobs.milestones import MilestoneWriter, no_milestones
 from rcpia.jobs.models import AGENT_STEPS, JobType, RunStep
 from rcpia.main import app
+from rcpia.query.decision import RETRIEVAL_CONTRACT
 from rcpia.storage.base import StorageError
 from rcpia.storage.keys import pi_session_key
 from rcpia.storage.local import LocalBlobStore
@@ -205,7 +206,11 @@ async def agent_job(
             case_id=case.id,
             organization_id=case.organization_id,
             job_type=JobType.RUN_AGENT,
-            payload={"agent_role": "urology_oncology", **payload},
+            payload={
+                "agent_role": "urology_oncology",
+                "retrieval_contract": RETRIEVAL_CONTRACT,
+                **payload,
+            },
             dedupe_key=dedupe_key_for(case.id, role),
             status=JobStatus.running,
         )
@@ -1197,3 +1202,152 @@ async def _latest_version(session: AsyncSession, case: Case) -> CaseLedgerVersio
     version = await latest_version(session, case_id=case.id)
     assert version is not None
     return version
+
+
+async def test_targeted_api_pins_case_decision_and_refuses_incompatible_reuse(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    user, case = await seed_case(session_factory)
+    await sign_in(client, user)
+    async with session_factory() as session:
+        stored = await session.get(Case, case.id)
+        stored.clinical_question = "Synthetic recorded decision"
+        await session.commit()
+    query = {
+        "mode": "decision_targeted_v1", "decision_source": "case",
+        "selected_fact_keys": ["egfr"],
+    }
+    url = f"/cases/{case.id}/analysis"
+    first = await client.post(url, json={"retrieval_query": query})
+    assert first.status_code == 202
+    same = await client.post(url, json={"retrieval_query": query})
+    assert same.json()["job_id"] == first.json()["job_id"]
+    assert (await client.post(url, json={})).status_code == 409
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, uuid.UUID(first.json()["job_id"]))
+        assert job.payload["retrieval_query"]["decision"] == "Synthetic recorded decision"
+        assert job.payload["clinical_question"] is None
+        stored = await session.get(Case, case.id)
+        stored.clinical_question = "Changed case decision"
+        await session.commit()
+    assert (await client.post(url, json={"retrieval_query": query})).status_code == 409
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, uuid.UUID(first.json()["job_id"]))
+        assert job.payload["retrieval_query"]["decision"] == "Synthetic recorded decision"
+
+
+@pytest.mark.parametrize("query", [
+    {"mode": "unknown", "decision": "Synthetic", "selected_fact_keys": ["egfr"]},
+    {"mode": "decision_targeted_v1", "selected_fact_keys": ["egfr"]},
+    {"mode": "decision_targeted_v1", "decision": "Synthetic", "selected_fact_keys": ["bad"]},
+    {
+        "mode": "decision_targeted_v1", "decision": "Synthetic",
+        "selected_fact_keys": ["egfr", "egfr"],
+    },
+    {
+        "mode": "decision_targeted_v1", "decision": "Synthetic",
+        "selected_fact_keys": ["egfr"], "extra": 1,
+    },
+])
+async def test_invalid_targeted_api_request_queues_nothing(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], query: dict,
+) -> None:
+    user, case = await seed_case(session_factory)
+    await sign_in(client, user)
+    response = await client.post(f"/cases/{case.id}/analysis", json={"retrieval_query": query})
+    assert response.status_code == 422
+    async with session_factory() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(AnalysisJob).where(
+            AnalysisJob.case_id == case.id, AnalysisJob.job_type == JobType.RUN_AGENT,
+        )) == 0
+
+
+async def test_duplicate_json_keys_never_dispatch_an_analysis(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    user, case = await seed_case(session_factory)
+    await sign_in(client, user)
+    response = await client.post(
+        f"/cases/{case.id}/analysis",
+        content='{"clinical_question":"one","clinical_question":"two"}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+
+
+async def test_targeted_panel_pins_contract_on_every_job_and_rejects_changed_keys(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    user, case = await seed_case(session_factory)
+    await sign_in(client, user)
+    query = {
+        "mode": "decision_targeted_v1", "decision": "Synthetic decision",
+        "selected_fact_keys": ["egfr"],
+    }
+    body = {"roles": ["urology_oncology", "medical_oncology"], "retrieval_query": query}
+    url = f"/cases/{case.id}/analysis/panel"
+    first = await client.post(url, json=body)
+    assert first.status_code == 202, first.text
+    async with session_factory() as session:
+        for item in first.json()["jobs"]:
+            job = await session.get(AnalysisJob, uuid.UUID(item["job_id"]))
+            assert job.payload["retrieval_query"]["decision"] == "Synthetic decision"
+    again = await client.post(url, json=body)
+    assert again.status_code == 202
+    assert all(item["reused"] for item in again.json()["jobs"])
+    query["selected_fact_keys"] = ["ctnm"]
+    assert (await client.post(url, json=body)).status_code == 409
+
+
+async def test_worker_service_consumes_the_pinned_targeted_contract(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from rcpia.agents import service
+    from rcpia.agents.bundle import BundleError
+
+    user, case = await seed_case(session_factory)
+    await sign_in(client, user)
+    query = {
+        "mode": "decision_targeted_v1", "decision": "Synthetic pinned decision",
+        "selected_fact_keys": ["egfr"],
+    }
+    response = await client.post(
+        f"/cases/{case.id}/analysis", json={"retrieval_query": query},
+    )
+    assert response.status_code == 202
+    build = AsyncMock(side_effect=BundleError("Synthetic stop before any provider."))
+    monkeypatch.setattr(service, "build_bundle", build)
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, uuid.UUID(response.json()["job_id"]))
+        outcome = await service.run_agent(session, job, adapter=None, blobs=None)
+    assert outcome.status is JobStatus.failed
+    assert build.call_args.kwargs["retrieval_query"].decision == "Synthetic pinned decision"
+
+
+async def test_baseline_api_and_panel_refuse_legacy_contract_reuse(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    user, case = await seed_case(session_factory)
+    await sign_in(client, user)
+    old_id = await agent_job(
+        session_factory, case, ledger_version=1, retrieval_contract=None,
+    )
+    url = f"/cases/{case.id}/analysis"
+    assert (await client.post(url, json={})).status_code == 409
+    panel_response = await client.post(url + "/panel", json={"roles": ["urology_oncology"]})
+    assert panel_response.status_code == 409
+    async with session_factory() as session:
+        old = await session.get(AnalysisJob, old_id)
+        assert old.payload.get("retrieval_contract") is None
+        old.status = JobStatus.cancelled
+        await session.commit()
+    current = await client.post(url, json={})
+    assert current.status_code == 202
+    assert current.json()["job_id"] != str(old_id)
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, uuid.UUID(current.json()["job_id"]))
+        assert job.payload["retrieval_contract"] == RETRIEVAL_CONTRACT
+        assert job.payload.get("retrieval_query") is None

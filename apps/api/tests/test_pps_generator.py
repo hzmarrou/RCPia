@@ -75,6 +75,7 @@ from rcpia.pps.schemas import (
     Treatments,
     TreatmentStep,
 )
+from rcpia.query.decision import RETRIEVAL_CONTRACT
 from rcpia.rules.approval import SUGGESTION_CAVEAT, Authority
 from rcpia.rules.referrals import (
     G8_THRESHOLD,
@@ -238,7 +239,9 @@ async def run_the_agent(
             case_id=case.id,
             organization_id=case.organization_id,
             job_type=JobType.RUN_AGENT,
-            payload={"agent_role": "urology_oncology"},
+            payload={
+                "agent_role": "urology_oncology", "retrieval_contract": RETRIEVAL_CONTRACT,
+            },
             dedupe_key=dedupe_key_for(case.id, "urology_oncology"),
             status=JobStatus.running,
         )
