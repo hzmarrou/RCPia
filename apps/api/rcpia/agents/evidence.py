@@ -33,8 +33,9 @@ from rcpia.evidence.hashing import payload_sha256, text_identity
 from rcpia.evidence.payload import EvidencePreparationError, PreparedEvidence, prepare_evidence
 from rcpia.evidence.rerank import Reranker
 from rcpia.evidence.retrieval import Concepts, Filter, RetrievalReport, RetrievedChunk, search
-from rcpia.query.builder import Fact, build_filter
-from rcpia.query.questions import SUPPORTIVE_QUESTION, question_for
+from rcpia.query.builder import Fact
+from rcpia.query.decision import RetrievalQuery, decision_search, usable_facts
+from rcpia.query.questions import SUPPORTIVE_QUESTION
 
 # How many passages an agent is given for its own question. Ten is the production `search`
 # default; more would dilute a prompt that already carries the whole ledger.
@@ -81,11 +82,12 @@ class EvidenceTrace:
     notes: list[str] = field(default_factory=list)
     evidence_pack_sha256: str | None = None
     complete: bool = False
+    query_provenance: dict[str, object] | None = None
 
 
 def facts_from(entries: Sequence[LedgerEntry]) -> list[Fact]:
-    """The ledger as the query builder reads it."""
-    return [Fact(key=entry.key, value=entry.value) for entry in entries]
+    """The shared, status-aware ledger projection (not clinical approval)."""
+    return usable_facts(entries)
 
 
 def to_passage(chunk: RetrievedChunk) -> GuidelinePassage:
@@ -136,6 +138,7 @@ async def guideline_passages_for(
     limit: int = PASSAGE_LIMIT,
     supportive_limit: int = SUPPORTIVE_PASSAGE_LIMIT,
     trace: EvidenceTrace | None = None,
+    retrieval_query: RetrievalQuery | None = None,
 ) -> tuple[list[GuidelinePassage], list[str]]:
     """Retrieve the guidance this agent may see for this patient.
 
@@ -152,20 +155,18 @@ async def guideline_passages_for(
     """
     if trace is not None and (trace.primary is not None or trace.complete):
         raise ValueError("EvidenceTrace collectors are single-use.")
-    query = build_filter(
-        cancer_type,
-        facts_from(entries),
-        agent_role=agent_role,
+    planned = decision_search(
+        cancer_type=cancer_type, agent_role=agent_role, entries=entries,
+        request=retrieval_query, operator_question=question,
     )
+    query = planned.built
     # An operator's own question always wins. Otherwise the patient's derived setting *and* the
     # asking specialist pick it, falling back to the setting alone and then to the organ's
     # generic question. The role matters here for the same reason it matters in the filter: two
     # specialists reading the same ten passages are not two opinions.
-    search_question = question or question_for(
-        cancer_type, query.decision.setting, agent_role
-    )
+    search_question = planned.question
 
-    notes: list[str] = []
+    notes: list[str] = list(planned.notes)
     if not query.decision.determined:
         notes.append(
             "Le stade de la maladie n'a pas pu être déduit du dossier "
@@ -287,4 +288,7 @@ async def guideline_passages_for(
             "passages": [p.model_dump(mode="json") for p in passages], "notes": notes,
         })
         trace.complete = True
+        trace.query_provenance = planned.provenance.model_copy(
+            update={"execution": "complete"},
+        ).model_dump(mode="json")
     return passages, notes

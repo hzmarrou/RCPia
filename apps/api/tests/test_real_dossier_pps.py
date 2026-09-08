@@ -45,6 +45,7 @@ from rcpia.core.models import (
 from rcpia.jobs.models import JobType
 from rcpia.pps import generator
 from rcpia.pps.render import render_markdown
+from rcpia.query.decision import RETRIEVAL_CONTRACT
 from rcpia.storage.local import LocalBlobStore
 
 FAKE_PI = Path(__file__).parent / "fake_pi.py"
@@ -181,7 +182,7 @@ async def test_a_real_dossier_produces_a_rendered_fiche(
             case_id=case_id,
             organization_id=stored.organization_id,
             job_type=JobType.RUN_AGENT,
-            payload={"agent_role": role},
+            payload={"agent_role": role, "retrieval_contract": RETRIEVAL_CONTRACT},
             dedupe_key=dedupe_key_for(case_id, role),
             status=JobStatus.running,
         )

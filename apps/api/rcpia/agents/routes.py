@@ -9,11 +9,12 @@ import uuid
 from datetime import datetime
 
 import sqlalchemy as sa
-from fastapi import HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 
 from rcpia.agents import panel as panel_service
+from rcpia.agents.bundle import entries_from_version
 from rcpia.agents.pi_adapter import SAFE_AGENT_NAME
 from rcpia.agents.schemas import SYNTHESIS_ROLE
 from rcpia.agents.service import DEFAULT_AGENT_ROLE
@@ -21,11 +22,13 @@ from rcpia.auth.dependencies import CurrentUser, SessionDep, protected_router
 from rcpia.cases import completeness
 from rcpia.cases import ledger as ledger_service
 from rcpia.cases import service as case_service
+from rcpia.core.jsonio import load_json
 from rcpia.core.models import AgentRun, AnalysisJob, AuditEvent, JobStatus, UserRole
 from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.jobs import service as job_service
 from rcpia.jobs.models import LIVE_JOB_STATUSES, JobType
 from rcpia.jobs.service import enqueue
+from rcpia.query.decision import RETRIEVAL_CONTRACT, RetrievalQuery, decision_search, pin_query
 
 router = protected_router(
     UserRole.admin, UserRole.uploader, prefix="/cases/{case_id}/analysis", tags=["analysis"]
@@ -34,11 +37,13 @@ router = protected_router(
 
 
 class AnalysisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     # `agent_role` becomes a directory name, so it is constrained at the edge as well as
     # in the adapter. Two checks, because this value crosses a process boundary in a job
     # payload and the second reader cannot assume the first one ran.
     agent_role: str = Field(default=DEFAULT_AGENT_ROLE, pattern=SAFE_AGENT_NAME.pattern)
     clinical_question: str | None = Field(default=None, max_length=2000)
+    retrieval_query: RetrievalQuery | None = None
 
 
 def dedupe_key_for(case_id: uuid.UUID, agent_role: str) -> str:
@@ -61,8 +66,26 @@ class PanelRequest(BaseModel):
     is, which is worth saying rather than silently correcting.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     roles: list[str] = Field(min_length=1, max_length=12)
     clinical_question: str | None = Field(default=None, max_length=2000)
+    retrieval_query: RetrievalQuery | None = None
+
+    @model_validator(mode="after")
+    def unique_targeted_roles(self):
+        if self.retrieval_query is not None and len(self.roles) != len(set(self.roles)):
+            raise ValueError("Duplicate targeted specialist roles.")
+        return self
+
+
+async def unique_request_json(request: Request) -> None:
+    try:
+        load_json(await request.body())
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid or duplicate JSON.",
+        ) from exc
 
 
 class PanelJobRead(BaseModel):
@@ -94,7 +117,10 @@ class AgentRunRead(BaseModel):
     created_at: datetime
 
 
-@router.post("", response_model=AnalysisJobRead, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "", response_model=AnalysisJobRead, status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(unique_request_json)],
+)
 async def start_analysis(
     case_id: uuid.UUID,
     payload: AnalysisRequest,
@@ -123,6 +149,32 @@ async def start_analysis(
             status.HTTP_409_CONFLICT,
             "Aucune version du tableau de données : l'extraction n'a pas encore abouti.",
         )
+    try:
+        retrieval_query = pin_query(
+            payload.retrieval_query, cancer_type=str(case.cancer_type),
+            case_question=case.clinical_question,
+        )
+        if retrieval_query is not None:
+            if payload.agent_role not in AGENT_ROLES or payload.agent_role == SYNTHESIS_ROLE:
+                raise ValueError("Targeted retrieval requires a known specialist.")
+        if payload.agent_role != SYNTHESIS_ROLE:
+            decision_search(
+                cancer_type=str(case.cancer_type), agent_role=payload.agent_role,
+                entries=entries_from_version(version), request=retrieval_query,
+                operator_question=payload.clinical_question,
+            )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+
+    def compatible(existing: AnalysisJob) -> bool:
+        if existing.payload.get("retrieval_contract") != RETRIEVAL_CONTRACT:
+            return False
+        if retrieval_query is None and existing.payload.get("retrieval_query") is None:
+            return True  # Existing baseline resume semantics are unchanged.
+        return panel_service.job_is_compatible(
+            existing, ledger_version=version.version, question=payload.clinical_question,
+            retrieval_query=retrieval_query,
+        )
 
     # One live run per agent and case. The lookup below is a fast path only; the
     # guarantee is the partial unique index on `dedupe_key`, because between this SELECT
@@ -131,6 +183,8 @@ async def start_analysis(
     dedupe_key = dedupe_key_for(case.id, payload.agent_role)
     existing = await _live_job(session, dedupe_key)
     if existing is not None:
+        if not compatible(existing):
+            raise HTTPException(status.HTTP_409_CONFLICT, "A different retrieval request is live.")
         if existing.status is JobStatus.waiting_for_user:
             # The job was parked for a missing field, and the checks above have just
             # established the field is no longer missing. Nothing else would ever return
@@ -154,6 +208,8 @@ async def start_analysis(
                     payload={
                         "agent_role": payload.agent_role,
                         "ledger_version": version.version,
+                        **({"retrieval_query": retrieval_query.model_dump(mode="json")}
+                           if retrieval_query else {}),
                     },
                 )
             )
@@ -175,9 +231,12 @@ async def start_analysis(
             payload={
                 "agent_role": payload.agent_role,
                 "clinical_question": payload.clinical_question,
+                "retrieval_contract": RETRIEVAL_CONTRACT,
                 # Pinned, so a correction made while the job waits does not silently
                 # change the question the agent was asked.
                 "ledger_version": version.version,
+                **({"retrieval_query": retrieval_query.model_dump(mode="json")}
+                   if retrieval_query else {}),
             },
             dedupe_key=dedupe_key,
         )
@@ -207,6 +266,10 @@ async def start_analysis(
                 status.HTTP_409_CONFLICT,
                 "Une analyse est déjà en cours pour ce dossier.",
             ) from None
+        if not compatible(concurrent):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "A different retrieval request is live.",
+            ) from None
         return AnalysisJobRead(
             job_id=concurrent.id,
             status=str(concurrent.status),
@@ -225,7 +288,10 @@ async def start_analysis(
     )
 
 
-@router.post("/panel", response_model=PanelRead, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/panel", response_model=PanelRead, status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(unique_request_json)],
+)
 async def start_panel(
     case_id: uuid.UUID,
     payload: PanelRequest,
@@ -282,7 +348,10 @@ async def start_panel(
             ledger_version=version.version,
             clinical_question=payload.clinical_question,
             requested_by_user_id=user.id,
+            retrieval_query=payload.retrieval_query,
         )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     except panel_service.PanelConflict as conflict:
         await session.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, conflict.detail) from conflict

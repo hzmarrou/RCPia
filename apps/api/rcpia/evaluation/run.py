@@ -25,20 +25,33 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from rcpia.core.config import get_settings
+from rcpia.core.jsonio import load_json
+from rcpia.evaluation.approval import (
+    ApprovalRegistry,
+    ScoringPermit,
+    SplitManifest,
+    authorize,
+    require_question_approval,
+    verify_permit_corpus,
+)
 from rcpia.evaluation.arms import ABLATIONS, ARMS, Arm, concepts_for, filter_for, filter_for_arm
 from rcpia.evaluation.goldset import (
     GOLDSET_FILENAME,
     Goldset,
+    GoldsetError,
     Question,
     load_goldset,
     verify_against_corpus,
 )
 from rcpia.evaluation.ledgers import facts_for, ledger_for
 from rcpia.evaluation.metrics import ArmScore, QuestionScore, aggregate, score_question
+from rcpia.evaluation.review import ReviewDraft, verify_review_sources
+from rcpia.evaluation.runtime_inputs import RuntimeInput
+from rcpia.evaluation.runtime_provenance import corpus_identity, readonly_snapshot
 from rcpia.evidence.embedding import Embedder, build_embedder
 from rcpia.evidence.models import EvidenceChunk
 from rcpia.evidence.rerank import Reranker, build_reranker
@@ -143,6 +156,7 @@ class Report:
     limit: int
     questions: int
     arms: tuple[ArmRun, ...] = field(default_factory=tuple)
+    approval: dict[str, object] | None = None
 
 
 def _declared_purposes(question: Question) -> list[str]:
@@ -238,7 +252,13 @@ async def run_question(
     limit: int = DEFAULT_LIMIT,
     engine: SafetyEngine | None = None,
     built_queries: bool = False,
+    permit: ScoringPermit | None = None,
 ) -> QuestionRun:
+    require_question_approval(question, permit)
+    if built_queries and question.split != "pilot":
+        raise GoldsetError("Historical inferred ledgers are pilot diagnostics only; use runtime.")
+    if permit is not None:
+        await verify_permit_corpus(session, permit)
     # **`built` is the measurement the whole harness exists to enable.** Every score reported
     # so far used the gold set's hand-written filter and concepts, which makes them a ceiling:
     # what retrieval can do when a person has already solved the query. `built` derives both
@@ -337,6 +357,7 @@ async def run_arm(
     limit: int = DEFAULT_LIMIT,
     engine: SafetyEngine | None = None,
     built_queries: bool = False,
+    permit: ScoringPermit | None = None,
 ) -> ArmRun:
     runs = [
         await run_question(
@@ -349,6 +370,7 @@ async def run_arm(
             limit=limit,
             engine=engine,
             built_queries=built_queries,
+            permit=permit,
         )
         for question in questions
     ]
@@ -370,9 +392,36 @@ async def run_evaluation(
     limit: int = DEFAULT_LIMIT,
     engine: SafetyEngine | None = None,
     built_queries: bool = False,
+    inputs: RuntimeInput | None = None,
+    manifest: SplitManifest | None = None,
+    registry: ApprovalRegistry | None = None,
+    review_pack: ReviewDraft | None = None,
 ) -> Report:
     """Every arm over one split, after refusing a gold set the corpus cannot support."""
     questions = goldset.split(split)
+    permit = None
+    if split != "pilot" or any(
+        item is not None for item in (inputs, manifest, registry, review_pack)
+    ):
+        if inputs is None:
+            raise GoldsetError("Dev/test scoring requires frozen runtime inputs.")
+        permit = authorize(
+            goldset=goldset, inputs=inputs, split=split, manifest=manifest,
+            registry=registry, review_pack=review_pack,
+        )
+    if built_queries and split != "pilot":
+        raise GoldsetError("Historical inferred ledgers are pilot diagnostics only; use runtime.")
+    if permit is not None:
+        if (
+            (await session.execute(text("SHOW transaction_isolation"))).scalar_one()
+            != "repeatable read"
+            or (await session.execute(text("SHOW transaction_read_only"))).scalar_one() != "on"
+        ):
+            raise GoldsetError("Approved runs require a read-only REPEATABLE READ snapshot.")
+        if (await corpus_identity(session))["sha256"] != permit.approval.corpus_sha256:
+            raise GoldsetError("Actual corpus differs from the approved corpus.")
+        if review_pack is not None:
+            await verify_review_sources(session, review_pack)
     verify_against_corpus(goldset, await present_chunk_ids(session))
     embeddings = await embed_questions(embedder, questions)
     releases = {q.corpus_release for q in questions if q.corpus_release}
@@ -388,6 +437,7 @@ async def run_evaluation(
             limit=limit,
             engine=engine,
             built_queries=built_queries,
+            permit=permit,
         )
         for arm in arms
     ]
@@ -397,6 +447,7 @@ async def run_evaluation(
         limit=limit,
         questions=len(questions),
         arms=tuple(results),
+        approval=permit.approval.model_dump(mode="json") if permit else None,
     )
 
 
@@ -415,6 +466,8 @@ def format_report(report: Report) -> str:
     """
     lines = [
         f"# Retrieval evaluation -- {report.split} split",
+        "Approved labels; declared-query ceiling, not actual runtime."
+        if report.approval else "Legacy pilot diagnostic; no clinician-approved truth.",
         "",
         f"{report.questions} questions, top {report.limit}, corpus "
         f"{report.corpus_release or 'unrecorded'}.",
@@ -464,6 +517,8 @@ def format_report(report: Report) -> str:
 
 def report_as_dict(report: Report) -> dict:
     return {
+        "scoring": "approved_labels" if report.approval else "legacy_pilot_diagnostic",
+        "approval": report.approval,
         "corpus_release": report.corpus_release,
         "split": report.split,
         "limit": report.limit,
@@ -513,13 +568,39 @@ def arms_for(names: Sequence[str] | None, *, ablations: bool) -> tuple[Arm, ...]
 async def _run(args: argparse.Namespace) -> int:  # pragma: no cover - process entrypoint
     goldset = load_goldset(args.goldset)
     goldset.split(args.split)
+    inputs = (
+        RuntimeInput.model_validate(load_json(args.runtime_input.read_bytes()))
+        if getattr(args, "runtime_input", None) else None
+    )
+    manifest = (
+        SplitManifest.model_validate(load_json(args.split_manifest.read_bytes()))
+        if getattr(args, "split_manifest", None) else None
+    )
+    registry = (
+        ApprovalRegistry.model_validate(load_json(args.approvals.read_bytes()))
+        if getattr(args, "approvals", None) else None
+    )
+    review_pack = (
+        ReviewDraft.model_validate(load_json(args.review_pack.read_bytes()))
+        if getattr(args, "review_pack", None) else None
+    )
+    if args.split != "pilot" or any(
+        item is not None for item in (inputs, manifest, registry, review_pack)
+    ):
+        if inputs is None:
+            raise GoldsetError("Dev/test scoring requires frozen runtime inputs.")
+        authorize(
+            goldset=goldset, inputs=inputs, split=args.split, manifest=manifest,
+            registry=registry, review_pack=review_pack,
+        )
+    if args.queries == "built" and args.split != "pilot":
+        raise GoldsetError("Historical inferred ledgers are pilot diagnostics only; use runtime.")
     settings = get_settings()
     embedder = build_embedder(settings)
     reranker = build_reranker(settings)
     engine = create_async_engine(settings.database_url)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
-        async with factory() as session:
+        async with readonly_snapshot(engine) as session:
             report = await run_evaluation(
                 session,
                 goldset=goldset,
@@ -530,6 +611,7 @@ async def _run(args: argparse.Namespace) -> int:  # pragma: no cover - process e
                 limit=args.limit,
                 engine=SafetyEngine() if args.safety else None,
                 built_queries=args.queries == "built",
+                inputs=inputs, manifest=manifest, registry=registry, review_pack=review_pack,
             )
     finally:
         await engine.dispose()
@@ -546,6 +628,10 @@ def main() -> int:  # pragma: no cover - process entrypoint
     parser = argparse.ArgumentParser(description="Score the gold set against the live corpus.")
     parser.add_argument("--goldset", type=Path, default=DEFAULT_GOLDSET)
     parser.add_argument("--split", default="pilot")
+    parser.add_argument("--runtime-input", type=Path)
+    parser.add_argument("--split-manifest", type=Path)
+    parser.add_argument("--approvals", type=Path)
+    parser.add_argument("--review-pack", type=Path)
     parser.add_argument("--arm", action="append", help="run only these arms; repeatable")
     parser.add_argument("--ablations", action="store_true", help="include the per-dimension arms")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)

@@ -11,9 +11,10 @@ that no longer exist is this project's recurring failure in a new place: a misma
 quietly. The loader names the missing ids instead.
 """
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from rcpia.core.jsonio import load_json
 
 GOLDSET_FILENAME = "goldset-v1.jsonl"
 SPLITS = frozenset({"pilot", "dev", "test"})
@@ -52,6 +53,9 @@ class Question:
     source: str = ""
     notes: str = ""
     corpus_release: str = ""
+    # Historical attribution is descriptive, never a clinical scoring authorization.
+    labelled_by: str = ""
+    labelled_on: str = ""
 
     @property
     def required_groups(self) -> tuple[EvidenceGroup, ...]:
@@ -97,18 +101,61 @@ def _require(record: dict, key: str, where: str) -> object:
 
 
 def parse_question(record: dict, *, where: str) -> Question:
+    if not isinstance(record, dict):
+        raise GoldsetError(f"{where} must be a gold question object, not a review draft.")
+    if set(record) - Question.__dataclass_fields__.keys():
+        raise GoldsetError(f"{where} has unknown fields; draft/review metadata is not gold.")
+    for name in (
+        "query_id", "question", "cancer_type", "source", "notes", "corpus_release",
+        "labelled_by", "labelled_on",
+    ):
+        if name in record and not isinstance(record[name], str):
+            raise GoldsetError(f"{where}: {name} must be a string.")
+    if record.get("cancer_type") not in {"prostate", "bladder"}:
+        raise GoldsetError(f"{where}: unknown cancer_type.")
+    if not record.get("question", "").strip():
+        raise GoldsetError(f"{where}: question must be nonblank.")
+    if not isinstance(record.get("unanswerable", False), bool):
+        raise GoldsetError(f"{where}: unanswerable must be a boolean.")
+    concepts = record.get("concepts", {})
+    filters = record.get("filter", {})
+    if not isinstance(concepts, dict) or set(concepts) - {"french", "english", "neutral"}:
+        raise GoldsetError(f"{where}: invalid concepts.")
+    if not isinstance(filters, dict) or set(filters) - {
+        "disease_setting", "therapy_line", "clinical_purpose", "agent_role",
+    }:
+        raise GoldsetError(f"{where}: invalid filter.")
+    for key, value in filters.items():
+        if key == "clinical_purpose":
+            _strings(value, where)
+        elif value is not None and (not isinstance(value, str) or not value.strip()):
+            raise GoldsetError(f"{where}: invalid filter value.")
+    for value in concepts.values():
+        _strings(value, where)
+    _strings(record.get("forbidden_chunk_ids", []), where)
+    raw_groups = record.get("relevant_groups", [])
+    if not isinstance(raw_groups, list):
+        raise GoldsetError(f"{where}: relevant_groups must be a list.")
     query_id = _require(record, "query_id", where)
     if not isinstance(query_id, str) or not query_id.strip():
         raise GoldsetError(f"{where} needs a non-empty query_id")
     where = f"{where}: {query_id}"
 
     split = record.get("split", "pilot")
-    if split not in SPLITS:
+    if not isinstance(split, str) or split not in SPLITS:
         raise GoldsetError(f"{where} is in split {split!r}, which is not one of {sorted(SPLITS)}")
 
     groups = []
-    for index, raw in enumerate(record.get("relevant_groups") or []):
-        ids = raw.get("acceptable_chunk_ids") or []
+    for index, raw in enumerate(raw_groups):
+        if not isinstance(raw, dict) or set(raw) - EvidenceGroup.__dataclass_fields__.keys():
+            raise GoldsetError(f"{where}: unknown or malformed evidence group.")
+        for key in ("claim", "source_family"):
+            if key in raw and not isinstance(raw[key], str):
+                raise GoldsetError(f"{where}: group {key} must be a string.")
+        if not isinstance(raw.get("required", True), bool):
+            raise GoldsetError(f"{where}: group required must be a boolean.")
+        ids = raw.get("acceptable_chunk_ids", [])
+        _strings(ids, where)
         if not ids:
             raise GoldsetError(
                 f"{where}: group {index} lists no acceptable passage. A claim nothing can "
@@ -148,7 +195,18 @@ def parse_question(record: dict, *, where: str) -> Question:
         source=str(record.get("source") or ""),
         notes=str(record.get("notes") or ""),
         corpus_release=str(record.get("corpus_release") or ""),
+        labelled_by=record.get("labelled_by", ""),
+        labelled_on=record.get("labelled_on", ""),
     )
+
+
+def _strings(value: object, where: str) -> None:
+    if (
+        not isinstance(value, list)
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+        or len(value) != len(set(value))
+    ):
+        raise GoldsetError(f"{where}: expected a list of unique nonblank strings.")
 
 
 def parse_goldset(lines: list[str], *, source: str = GOLDSET_FILENAME) -> Goldset:
@@ -158,9 +216,11 @@ def parse_goldset(lines: list[str], *, source: str = GOLDSET_FILENAME) -> Goldse
         if not line.strip():
             continue
         try:
-            record = json.loads(line)
-        except json.JSONDecodeError as exc:
+            record = load_json(line)
+        except ValueError as exc:
             raise GoldsetError(f"{source} line {number} is not valid JSON: {exc}") from exc
+        if not isinstance(record, dict):
+            raise GoldsetError(f"{source} line {number} must be an object.")
         question = parse_question(record, where=f"{source} line {number}")
         if question.query_id in seen:
             raise GoldsetError(f"{source}: {question.query_id} appears more than once")

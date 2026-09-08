@@ -34,6 +34,7 @@ from rcpia.agents.pi_adapter import (
     PiRunResult,
 )
 from rcpia.agents.schemas import (
+    SYNTHESIS_ROLE,
     AgentOutput,
     CitationInWrongChannel,
     SynthesisOutput,
@@ -59,6 +60,7 @@ from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.rerank import Reranker
 from rcpia.jobs.milestones import MilestoneWriter, no_milestones
 from rcpia.jobs.models import JobOutcome, RunStep
+from rcpia.query.decision import FACT_PROJECTION_CONTRACT, RETRIEVAL_CONTRACT, RetrievalQuery
 from rcpia.storage.base import BlobStore, StorageError
 from rcpia.storage.keys import pi_session_key
 
@@ -111,7 +113,22 @@ async def run_agent(
     it is ungrounded, not fail to produce a fiche at all.
     """
     agent_role = str(job.payload.get("agent_role") or DEFAULT_AGENT_ROLE)
+    if (
+        agent_role != SYNTHESIS_ROLE
+        and job.payload.get("retrieval_contract") != RETRIEVAL_CONTRACT
+    ):
+        return _terminal(
+            "Contrat de recherche absent ou obsolète : demandez une nouvelle analyse. "
+            "Une ancienne tâche ne peut pas être réutilisée sous le nouveau contrat."
+        )
     clinical_question = job.payload.get("clinical_question") or None
+    raw_query = job.payload.get("retrieval_query")
+    try:
+        retrieval_query = (
+            RetrievalQuery.model_validate(raw_query) if raw_query is not None else None
+        )
+    except ValidationError:
+        return _terminal("Invalid pinned retrieval query.")
     # Written by the panel dispatcher, absent for a single-agent run. Read here rather than
     # looked up, so the run analyses the panel it was dispatched for even if the case has
     # since acquired another.
@@ -130,6 +147,24 @@ async def run_agent(
         )
     )
     if already:
+        if agent_role != SYNTHESIS_ROLE:
+            contracts = (await session.execute(
+                sa.select(
+                    AgentRun.bundle["inputs"]["retrieval_query"]["contract"].astext,
+                    AgentRun.bundle["inputs"]["retrieval_query"]["fact_projection_contract"].astext,
+                ).where(
+                    AgentRun.job_id == job.id,
+                    AgentRun.status == AgentRunStatus.succeeded,
+                )
+            )).all()
+            if not contracts or any(
+                contract != RETRIEVAL_CONTRACT or projection != FACT_PROJECTION_CONTRACT
+                for contract, projection in contracts
+            ):
+                return _terminal(
+                    "L'avis existant utilise un ancien contrat de recherche : "
+                    "demandez une nouvelle analyse, sans réutiliser cet avis historique."
+                )
         return None
 
     case = await session.scalar(
@@ -163,6 +198,7 @@ async def run_agent(
             missing_roles=missing_roles,
             embedder=embedder,
             reranker=reranker,
+            retrieval_query=retrieval_query,
         )
     except BundleError as exc:
         return _terminal(str(exc))

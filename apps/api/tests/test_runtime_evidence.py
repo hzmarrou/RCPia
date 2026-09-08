@@ -311,6 +311,7 @@ async def test_labelled_and_unlabelled_run_semantics(runtime_engine: AsyncEngine
     assert labelled["scores"]["merged_pack"]["precision_at_10"] == 0
     assert labelled["scores"]["merged_pack"]["ndcg_at_10"] == 0
     case = labelled["cases"][0]
+    assert case["scoring"] == "legacy_pilot_diagnostic"
     assert case["scores"]["merged_pack"]["returned"] == 13
     assert case["trace"]["primary"]["question"] != label().question
     assert labelled["corpus"]["release_ids"] == ["fixture-v1"]
