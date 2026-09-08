@@ -14,7 +14,7 @@ from subprocess import SubprocessError
 from typing import Literal, Self
 
 import sqlalchemy as sa
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -347,11 +347,11 @@ def candidate_from_source(chunk: EvidenceChunk, document: EvidenceDocument) -> R
         "clinical_status": chunk.clinical_status,
         "contextual_text": chunk.contextual_text,
     }
-    return ReviewCandidate(
+    return ReviewCandidate.model_validate({
         **data,
-        contextual_sha256=text_identity(chunk.contextual_text)["sha256"],
-        source_unit_sha256=payload_sha256(data),
-    )
+        "contextual_sha256": text_identity(chunk.contextual_text)["sha256"],
+        "source_unit_sha256": payload_sha256(data),
+    })
 
 
 async def verify_review_sources(session: AsyncSession, draft: ReviewDraft) -> None:
@@ -410,7 +410,7 @@ async def execute(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    schemas = {
+    schemas: dict[str, type[BaseModel]] = {
         "selection": ReviewSelection,
         "splits": SplitManifest,
         "draft": ReviewDraft,

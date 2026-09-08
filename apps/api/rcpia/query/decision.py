@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Literal, Self
+from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -16,8 +16,8 @@ from rcpia.query.questions import question_for
 from rcpia.query.staging import SettingDecision, has_competing_stage_components, parse_stage
 
 MAX_QUERY_CHARACTERS = 4000
-RETRIEVAL_CONTRACT = "rcpia.retrieval-query.v2"
-FACT_PROJECTION_CONTRACT = "rcpia.fact-projection.v1"
+RETRIEVAL_CONTRACT: Final = "rcpia.retrieval-query.v2"
+FACT_PROJECTION_CONTRACT: Final = "rcpia.fact-projection.v1"
 
 
 class QueryModel(BaseModel):
@@ -246,15 +246,18 @@ def decision_search(
         )
         notes.append(f"Valeur non utilisée par la recherche documentaire : {entry.key} — {reason}.")
     for key in request.selected_fact_keys if request is not None else ():
-        entry = by_key.get(key)
-        reason = exclusion(entry) if entry else "missing"
+        selected_entry = by_key.get(key)
+        reason = exclusion(selected_entry) if selected_entry else "missing"
         used = reason is None
-        neutral = list(neutral_terms([entry.value])) if used and entry is not None else []
+        neutral = (
+            list(neutral_terms([selected_entry.value]))
+            if used and selected_entry is not None else []
+        )
         selected.append(
             FactUse(
                 key=key,
-                status=entry.status if entry else "missing",
-                origin=entry.origin if entry else None,
+                status=selected_entry.status if selected_entry else "missing",
+                origin=selected_entry.origin if selected_entry else None,
                 reason=reason
                 or (
                     "operator_override" if operator_question and not neutral else "status_confirmed"
@@ -262,24 +265,27 @@ def decision_search(
                 used=used and (not operator_question or bool(neutral)),
                 included_in_question=used and not operator_question,
                 neutral_terms=neutral,
-                value_sha256=payload_sha256(entry.value) if entry else None,
-                fact_id=entry.fact_id if entry else None,
-                source_document_id=entry.source_document_id if entry else None,
+                value_sha256=payload_sha256(selected_entry.value) if selected_entry else None,
+                fact_id=selected_entry.fact_id if selected_entry else None,
+                source_document_id=selected_entry.source_document_id if selected_entry else None,
                 source_chunk_ids=list(
                     dict.fromkeys(
-                        cid for cid in (entry.source_chunk_id, *entry.source_chunk_ids) if cid
+                        cid for cid in (
+                            selected_entry.source_chunk_id, *selected_entry.source_chunk_ids
+                        ) if cid
                     )
                 )
-                if entry
+                if selected_entry
                 else [],
             )
         )
-        if used and entry is not None:
+        if used and selected_entry is not None:
             lines.append(
-                f"{entry.key} ({entry.label}; unité du champ : {entry.unit or 'non précisée'})"
-                f" : {entry.value}"
+                f"{selected_entry.key} ({selected_entry.label}; "
+                f"unité du champ : {selected_entry.unit or 'non précisée'})"
+                f" : {selected_entry.value}"
             )
-            values.append(entry.value)
+            values.append(selected_entry.value)
         else:
             notes.append(f"Champ sélectionné non utilisé : {key} — {reason}.")
     question = operator_question or (

@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 import sqlalchemy as sa
 from httpx import HTTPError
+from pydantic import TypeAdapter
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -431,7 +432,9 @@ async def execute(args: argparse.Namespace) -> Path:
     if pool_output == output:
         raise ValueError("Pool export must have a distinct output path.")
     source = source_identity(args.source_commit)
-    query_mode = getattr(args, "query_mode", "baseline")
+    query_mode = TypeAdapter[QueryMode](QueryMode).validate_python(
+        getattr(args, "query_mode", "baseline"), strict=True,
+    )
     manifest = (
         SplitManifest.model_validate(load_json(
             restricted_input(args.split_manifest, args.artifacts_root),
