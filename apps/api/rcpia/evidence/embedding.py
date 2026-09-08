@@ -15,6 +15,7 @@ Two things are recorded rather than assumed:
 
 import asyncio
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -154,6 +155,12 @@ class AzureEmbedder:
     @property
     def dimensions(self) -> int:
         return self._dimensions
+
+    @property
+    def fingerprint(self) -> str:
+        """Endpoint/deployment identity, not a claim about immutable provider weights."""
+        endpoint = urlsplit(self._base_url)
+        return f"azure-embedding:{endpoint.hostname}:{endpoint.port}:{self._deployment}"
 
     async def _post_with_retries(self, texts: list[str]) -> httpx.Response:
         """Send one batch, waiting out rate limits.
