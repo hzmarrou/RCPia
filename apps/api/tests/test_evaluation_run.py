@@ -8,11 +8,17 @@ names the wrong one costs the whole afternoon before it is noticed.
 So each test here loses a passage at exactly one stage and asserts the harness says so.
 """
 
+from argparse import Namespace
+from dataclasses import replace
+from pathlib import Path
+from unittest.mock import AsyncMock
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rcpia.evaluation.arms import ARMS, Arm
-from rcpia.evaluation.goldset import EvidenceGroup, Goldset, Question
+from rcpia.evaluation import run as evaluation
+from rcpia.evaluation.arms import ABLATIONS, ARMS, Arm
+from rcpia.evaluation.goldset import EvidenceGroup, Goldset, GoldsetError, Question
 from rcpia.evaluation.run import (
     STAGE_CANDIDATES,
     STAGE_FILTER,
@@ -29,6 +35,8 @@ from rcpia.evaluation.run import (
 )
 from rcpia.evidence.models import EMBEDDING_DIMENSIONS, EvidenceChunk, EvidenceDocument
 from rcpia.evidence.rerank import Reranker
+from rcpia.evidence.retrieval import RetrievalReport
+from rcpia.query.builder import Fact, build_filter
 
 MODEL = "text-embedding-3-large"
 SETTING = "prostate_metastatic_hormone_sensitive"
@@ -400,6 +408,86 @@ async def test_an_unrouted_arm_still_refuses_the_other_cancer(session: AsyncSess
     assert "invariant" in run.losses[0].detail
 
 
+@pytest.mark.parametrize(
+    "dimension,overrides",
+    [
+        ("disease_setting", {"disease_setting": "prostate_localized_low_risk"}),
+        ("therapy_line", {"therapy_line": "second_line"}),
+        ("clinical_purpose", {"clinical_purpose": ("diagnosis",)}),
+        ("agent_role", {"agent_roles": ("pathology",)}),
+    ],
+)
+async def test_built_query_ablations_change_the_executed_filter(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch, dimension: str, overrides: dict,
+) -> None:
+    await add_document(session)
+    await add_chunk(session, "baseline")
+    await add_chunk(session, "target", **overrides)
+    built = build_filter(
+        "prostate", [Fact("ctnm", "M1b")], agent_role="urology_oncology",
+        clinical_purpose=["therapy_indication"], therapy_line="first_line",
+    )
+    monkeypatch.setattr(evaluation, "build_filter", lambda *args, **kwargs: built)
+    q = question(groups=(group("target"),))
+    control = await run_question(
+        session, question=q, arm=ROUTED, embedding=vector(1), embedding_model=MODEL,
+        reranker=FakeReranker({}), built_queries=True,
+    )
+    assert control.returned == ("baseline",)
+    arm = next(arm for arm in ABLATIONS if arm.drop_dimension == dimension)
+    ablated = await run_question(
+        session, question=q, arm=arm, embedding=vector(1), embedding_model=MODEL,
+        reranker=FakeReranker({}), built_queries=True,
+    )
+    assert set(ablated.returned) == {"baseline", "target"}
+
+
+@pytest.mark.parametrize(
+    "setting,stage",
+    [("prostate_localized_low_risk", STAGE_FILTER), (SETTING, STAGE_CANDIDATES)],
+)
+async def test_built_query_losses_use_the_executed_setting(
+    session: AsyncSession, setting: str, stage: str,
+) -> None:
+    await add_document(session)
+    await add_chunk(session, "target", text="Unmatched fixture.", disease_setting=setting,
+                    embedding_index=None)
+    q = replace(
+        question(groups=(group("target"),), filter={
+            "disease_setting": "prostate_localized_low_risk",
+        }),
+        source="dossier-6",
+    )
+    result = await run_question(
+        session, question=q, arm=ROUTED, embedding=vector(1), embedding_model=MODEL,
+        reranker=FakeReranker({}), built_queries=True,
+    )
+    assert result.returned == ()
+    assert result.losses[0].stage == stage
+
+
+async def test_loss_attribution_uses_the_widened_filter(session: AsyncSession) -> None:
+    await add_document(session)
+    await add_chunk(session, "target", text="Unmatched fixture.",
+                    therapy_line="second_line", embedding_index=None)
+    result = await run_question(
+        session, question=question(groups=(group("target"),), filter={
+            "disease_setting": SETTING, "therapy_line": "first_line",
+        }),
+        arm=ROUTED, embedding=vector(1), embedding_model=MODEL, reranker=FakeReranker({}),
+    )
+    assert result.returned == ()
+    assert result.losses[0].stage == STAGE_CANDIDATES
+
+
+async def test_loss_attribution_refuses_a_missing_trace() -> None:
+    with pytest.raises(ValueError, match="requires recorded search attempts"):
+        await evaluation._attribute(
+            None, question=question(groups=(group("target"),)), arm=ROUTED,
+            report=RetrievalReport(), returned=[],
+        )
+
+
 # --------------------------------------------------------------------------------------
 # The run as a whole
 # --------------------------------------------------------------------------------------
@@ -437,6 +525,33 @@ async def test_the_evaluation_refuses_a_gold_set_the_corpus_cannot_support(
             embedder=FakeEmbedder([vector(1)]),
             reranker=FakeReranker({}),
         )
+
+
+@pytest.mark.parametrize("split", ["dev", "test"])
+async def test_empty_splits_fail_before_database_or_provider_access(
+    monkeypatch: pytest.MonkeyPatch, split: str,
+) -> None:
+    present = AsyncMock()
+    monkeypatch.setattr(evaluation, "present_chunk_ids", present)
+    embedder = FakeEmbedder([])
+    with pytest.raises(GoldsetError, match=f"split '{split}' contains no questions"):
+        await run_evaluation(
+            None, goldset=Goldset((question(groups=(group("alpha"),)),)), split=split,
+            arms=ARMS, embedder=embedder, reranker=FakeReranker({}),
+        )
+    present.assert_not_awaited()
+    assert embedder.texts == []
+
+
+async def test_cli_rejects_an_empty_split_before_initializing_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = Path(__file__).resolve().parents[3] / "docs" / "evaluation" / "goldset-v1.jsonl"
+    def unexpected_settings():
+        pytest.fail("An empty evaluation must not initialize dependencies.")
+    monkeypatch.setattr(evaluation, "get_settings", unexpected_settings)
+    with pytest.raises(GoldsetError, match="split 'dev' contains no questions"):
+        await evaluation._run(Namespace(goldset=path, split="dev"))
 
 
 async def test_a_full_run_scores_every_arm_and_renders(session: AsyncSession) -> None:

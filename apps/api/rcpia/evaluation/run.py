@@ -22,14 +22,14 @@ import asyncio
 import json
 import sys
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from rcpia.core.config import get_settings
-from rcpia.evaluation.arms import ABLATIONS, ARMS, Arm, concepts_for, filter_for
+from rcpia.evaluation.arms import ABLATIONS, ARMS, Arm, concepts_for, filter_for, filter_for_arm
 from rcpia.evaluation.goldset import (
     GOLDSET_FILENAME,
     Goldset,
@@ -44,7 +44,6 @@ from rcpia.evidence.models import EvidenceChunk
 from rcpia.evidence.rerank import Reranker, build_reranker
 from rcpia.evidence.retrieval import (
     Concepts,
-    Filter,
     RetrievalReport,
     SafetyContext,
     filter_admits,
@@ -177,21 +176,25 @@ async def _attribute(
     if not unmet:
         return ()
 
+    if not report.attempts:
+        raise ValueError("Retrieval loss attribution requires recorded search attempts.")
+    # The final attempt may use a built or widened filter, not the gold set's declaration.
+    attempt = report.attempts[-1]
     wanted = sorted(frozenset().union(*(g.acceptable_chunk_ids for g in unmet)))
-    decision = await filter_admits(session, filter=filter_for(question, arm), chunk_ids=wanted)
+    decision = await filter_admits(
+        session, filter=attempt.filter_requested, chunk_ids=wanted
+    )
     by_id = {p.chunk_id: p for p in decision.passages}
 
-    # The attempt that produced the result -- the last one, per `RetrievalReport`'s contract.
-    attempt = report.attempts[-1] if report.attempts else None
     # **`fused_ids`, not `candidate_ids`.** "Reached the candidate set" means a leg surfaced
     # it, and `fused_ids` is exactly the union of the two legs on both paths. `candidate_ids`
     # is the reranked path's `fused[:CANDIDATE_LIMIT]` and is left empty when no cross-encoder
     # ran -- so an unreranked arm would have attributed every one of its misses to the legs,
     # including the ones the legs found and the ranking then dropped.
-    candidates = set(attempt.fused_ids) if attempt else set()
+    candidates = set(attempt.fused_ids)
     removed_by_rule = report.safety.excluded if report.safety else frozenset()
-    scored = dict(attempt.relevances) if attempt else {}
-    above = set(attempt.above_floor) if attempt else set()
+    scored = dict(attempt.relevances)
+    above = set(attempt.above_floor)
 
     def stage_of(chunk_id: str) -> tuple[int, str, str]:
         passage = by_id.get(chunk_id)
@@ -247,9 +250,7 @@ async def run_question(
             agent_role=str(question.filter.get("agent_role") or "") or None,
             clinical_purpose=_declared_purposes(question),
         )
-        filter = query.filter if arm.routed else replace(
-            Filter(cancer_type=question.cancer_type), admit_parent_setting=arm.admit_parent
-        )
+        filter = filter_for_arm(query.filter, arm)
         built_concepts = query.concepts
     else:
         filter = filter_for(question, arm)
@@ -371,8 +372,8 @@ async def run_evaluation(
     built_queries: bool = False,
 ) -> Report:
     """Every arm over one split, after refusing a gold set the corpus cannot support."""
-    verify_against_corpus(goldset, await present_chunk_ids(session))
     questions = goldset.split(split)
+    verify_against_corpus(goldset, await present_chunk_ids(session))
     embeddings = await embed_questions(embedder, questions)
     releases = {q.corpus_release for q in questions if q.corpus_release}
 
@@ -510,6 +511,8 @@ def arms_for(names: Sequence[str] | None, *, ablations: bool) -> tuple[Arm, ...]
 
 
 async def _run(args: argparse.Namespace) -> int:  # pragma: no cover - process entrypoint
+    goldset = load_goldset(args.goldset)
+    goldset.split(args.split)
     settings = get_settings()
     embedder = build_embedder(settings)
     reranker = build_reranker(settings)
@@ -519,7 +522,7 @@ async def _run(args: argparse.Namespace) -> int:  # pragma: no cover - process e
         async with factory() as session:
             report = await run_evaluation(
                 session,
-                goldset=load_goldset(args.goldset),
+                goldset=goldset,
                 split=args.split,
                 arms=arms_for(args.arm, ablations=args.ablations),
                 embedder=embedder,

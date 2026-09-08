@@ -75,12 +75,19 @@ class Goldset:
             raise GoldsetError(
                 f"unknown split {name!r}; expected one of {', '.join(sorted(SPLITS))}"
             )
-        return tuple(q for q in self.questions if q.split == name)
+        questions = tuple(q for q in self.questions if q.split == name)
+        if not questions:
+            raise GoldsetError(
+                f"split {name!r} contains no questions; refusing an empty evaluation"
+            )
+        return questions
 
     @property
     def labelled_ids(self) -> frozenset[str]:
-        return frozenset().union(*(q.relevant_ids for q in self.questions)) \
-            if self.questions else frozenset()
+        """All labelled passages, including evidence that must not be returned."""
+        return frozenset().union(
+            *(q.relevant_ids | q.forbidden_chunk_ids for q in self.questions)
+        )
 
 
 def _require(record: dict, key: str, where: str) -> object:

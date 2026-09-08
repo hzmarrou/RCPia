@@ -19,7 +19,14 @@ from pathlib import Path
 
 import pytest
 
-from rcpia.evaluation.arms import ABLATIONS, ARMS, Arm, concepts_for, filter_for
+from rcpia.evaluation.arms import (
+    ABLATIONS,
+    ARMS,
+    Arm,
+    concepts_for,
+    filter_for,
+    filter_for_arm,
+)
 from rcpia.evaluation.goldset import (
     EvidenceGroup,
     Goldset,
@@ -39,6 +46,7 @@ from rcpia.evaluation.metrics import (
     reciprocal_rank,
     score_question,
 )
+from rcpia.evidence.retrieval import Filter
 
 
 def question(
@@ -122,7 +130,21 @@ def test_a_split_that_does_not_exist_is_named_rather_than_returned_empty() -> No
     goldset = parse_goldset([record()])
     with pytest.raises(GoldsetError, match="unknown split"):
         goldset.split("nope")
-    assert len(goldset.split("dev")) == 0
+    with pytest.raises(GoldsetError, match="split 'dev' contains no questions"):
+        goldset.split("dev")
+
+
+@pytest.mark.parametrize("unanswerable", [False, True])
+def test_missing_forbidden_labels_are_refused(unanswerable: bool) -> None:
+    goldset = parse_goldset([record(
+        unanswerable=unanswerable,
+        relevant_groups=[] if unanswerable else [{"claim": "c", "acceptable_chunk_ids": ["a"]}],
+        forbidden_chunk_ids=["missing-forbidden"],
+    )])
+    assert "missing-forbidden" in goldset.labelled_ids
+    with pytest.raises(GoldsetError, match="missing-forbidden"):
+        verify_against_corpus(goldset, frozenset({"a"}))
+    verify_against_corpus(goldset, frozenset({"a", "missing-forbidden"}))
 
 
 # --------------------------------------------------------------------------------------
@@ -308,6 +330,24 @@ def test_each_ablation_drops_exactly_the_dimension_it_names(dimension: str) -> N
     for other in ("disease_setting", "therapy_line", "clinical_purpose", "agent_role"):
         if other != dimension:
             assert getattr(ablated, other) == getattr(full, other)
+
+
+@pytest.mark.parametrize("arm", (*ARMS, *ABLATIONS), ids=lambda arm: arm.name)
+def test_declared_and_built_filters_share_arm_configuration(arm: Arm) -> None:
+    fields = {
+        "disease_setting": "prostate_localized_low_risk",
+        "therapy_line": "first_line",
+        "clinical_purpose": ["therapy_indication"],
+        "agent_role": "urology_oncology",
+    }
+    built = Filter(
+        cancer_type="prostate",
+        disease_setting=fields["disease_setting"],
+        therapy_line=fields["therapy_line"],
+        clinical_purpose=tuple(fields["clinical_purpose"]),
+        agent_role=fields["agent_role"],
+    )
+    assert filter_for_arm(built, arm) == filter_for(question(filter=fields), arm)
 
 
 def test_the_relevance_floor_exists_only_where_a_reranker_ran() -> None:

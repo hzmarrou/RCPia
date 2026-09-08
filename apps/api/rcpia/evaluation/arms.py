@@ -93,16 +93,29 @@ def concepts_for(question: Question) -> Concepts:
     )
 
 
-def filter_for(question: Question, arm: Arm) -> Filter:
-    """The filter this arm asks under.
+def filter_for_arm(filter: Filter, arm: Arm) -> Filter:
+    """Apply the same arm configuration to declared and machine-built filters.
 
     An unrouted arm keeps the cancer type, because that is an invariant: a prostate question
     reaching a bladder document is not a routing subtlety, it is a different disease.
     """
-    invariants = Filter(cancer_type=question.cancer_type, admit_parent_setting=arm.admit_parent)
     if not arm.routed:
-        return invariants
+        return Filter(cancer_type=filter.cancer_type, admit_parent_setting=arm.admit_parent)
 
+    return replace(
+        filter,
+        admit_parent_setting=arm.admit_parent,
+        disease_setting=None if arm.drop_dimension == "disease_setting" else filter.disease_setting,
+        therapy_line=None if arm.drop_dimension == "therapy_line" else filter.therapy_line,
+        clinical_purpose=(
+            () if arm.drop_dimension == "clinical_purpose" else filter.clinical_purpose
+        ),
+        agent_role=None if arm.drop_dimension == "agent_role" else filter.agent_role,
+    )
+
+
+def filter_for(question: Question, arm: Arm) -> Filter:
+    """The declared filter, configured for this arm."""
     declared = question.filter
     setting = declared.get("disease_setting")
     line = declared.get("therapy_line")
@@ -112,22 +125,13 @@ def filter_for(question: Question, arm: Arm) -> Filter:
     )
     role = declared.get("agent_role")
 
-    # Written out per dimension rather than through a mapping, so the types stay checkable:
-    # three of the four are `str | None` and the fourth is a tuple.
-    if arm.drop_dimension == "disease_setting":
-        setting = None
-    elif arm.drop_dimension == "therapy_line":
-        line = None
-    elif arm.drop_dimension == "clinical_purpose":
-        purposes = ()
-    elif arm.drop_dimension == "agent_role":
-        role = None
-
-    return replace(
-        invariants,
-        admit_parent_setting=arm.admit_parent,
-        disease_setting=str(setting) if setting else None,
-        therapy_line=str(line) if line else None,
-        clinical_purpose=purposes,
-        agent_role=str(role) if role else None,
+    return filter_for_arm(
+        Filter(
+            cancer_type=question.cancer_type,
+            disease_setting=str(setting) if setting else None,
+            therapy_line=str(line) if line else None,
+            clinical_purpose=purposes,
+            agent_role=str(role) if role else None,
+        ),
+        arm,
     )
