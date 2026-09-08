@@ -130,3 +130,19 @@ where settings are tuned, and `test` (~35) is locked and run once per release.
 Every id here belongs to corpus release **v5.1**. Chunk ids are stable within a corpus line but
 not across a re-chunking, and the loader refuses a gold set whose ids are not all present rather
 than scoring 0.0 against ids that no longer exist.
+
+## Harness integrity
+
+An empty selected split is an error, even when its name is valid. It is rejected
+before database or provider initialization, not reported as a zero-question run.
+Corpus membership checks include both relevant and forbidden passage IDs.
+
+Declared and built-query modes apply the same arm configuration, including
+dimension ablations and parent-setting admission. Loss attribution uses the
+recorded final search attempt's filter, including any widening, rather than
+substituting the question's declared filter.
+
+`--queries built` still derives only filter and concepts; it retains the authored
+question text and does not reproduce the application's complete primary/supportive
+evidence selection. These harness corrections do not change production retrieval
+policy or establish clinical performance.
