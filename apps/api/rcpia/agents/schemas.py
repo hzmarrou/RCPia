@@ -20,6 +20,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from rcpia.corpus.vocabulary import AGENT_ROLES
+from rcpia.evidence.payload import MAX_EVIDENCE_CHARACTERS
 
 # One A4 page, the limit the design fixes for each agent's rationale.
 MAX_RATIONALE_CHARACTERS = 3000
@@ -98,6 +99,9 @@ class GuidelinePassage(Strict):
 
     `version` matters for the same reason `page` does: an opinion cited against AFU 2024-2026
     has to stay checkable after the 2027 edition lands.
+
+    New deliveries preserve the stored contextual unit under the dedicated evidence bound.
+    Older stored bundles remain readable as written; no missing text or context is repaired.
     """
 
     # **128, not 64, and the reason is traceability.** A corpus chunk id runs to 120
@@ -105,7 +109,7 @@ class GuidelinePassage(Strict):
     # mapping it back. A citation an agent emits should resolve straight to the corpus, the
     # gold set and the safety rules with no table in between that can drift.
     id: str = Field(min_length=1, max_length=128)
-    text: str = Field(min_length=1, max_length=MAX_TEXT)
+    text: str = Field(min_length=1, max_length=MAX_EVIDENCE_CHARACTERS)
     source: str
     # The document the passage came from, kept apart from `source`, which carries the full
     # citation down to the section and page. Section 6 of the fiche answers "which guidelines
@@ -119,6 +123,7 @@ class GuidelinePassage(Strict):
     # Where to look in the source. `recommendation_number` is what a clinician quotes to a
     # colleague; a page alone is harder to argue with.
     page: int | None = None
+    page_end: int | None = None
     recommendation_number: int | None = None
     # How the page was derived: `source_html_block` is exact, `pdf_text_alignment` inferred.
     locator_method: str | None = None

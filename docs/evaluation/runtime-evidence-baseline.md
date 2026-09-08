@@ -1,4 +1,4 @@
-# Actual-runtime evidence-selection baseline (v1)
+# Actual-runtime evidence-selection baseline (v2)
 
 This runner measures **evidence selection and delivery only**. It calls the exact
 `rcpia.agents.evidence.guideline_passages_for` used by `build_bundle`, with validated
@@ -134,7 +134,11 @@ Existing `score_question` and `aggregate` compute separate primary and merged-pa
 
 ## Output and provenance
 
-One `rcpia.runtime-evidence.v1` JSON artifact contains the manifest and per-case traces.
+One `rcpia.runtime-evidence.v2` JSON artifact contains the manifest and per-case traces.
+The frozen input remains `rcpia.runtime-input.v1`; corpus identity remains
+`rcpia.loaded-corpus.v1`. Historical evidence v1 artifacts retain their original semantics
+(raw-text delivery, missing sections, 4,000-character delivery clipping and 8,000-character
+reranker clipping). They must not be relabelled as v2 or compared by assuming equal pack hashes.
 Canonical hashes use sorted JSON keys, compact separators, UTF-8 and finite numbers only.
 `manifest_sha256` hashes the entire artifact **excluding that field**. No wall-clock
 timestamp or random run ID affects canonical identity. Distinct filenames preserve runs.
@@ -164,8 +168,13 @@ Recorded identity includes:
   Keyword/dense numeric leg scores are not supplied by the existing production report;
   their ordered IDs are ranks, not invented scores.
 * Primary/supportive selections and duplicates; actual delivered passages and notes;
-  raw/delivered text lengths and hashes, clipping flags, per-passage/pack hashes, and the
-  contextual versus capped Azure reranker payload identities in candidate order.
+  original raw/contextual and delivered text lengths and hashes for returned units,
+  transformation kind, source unit type, section, and per-passage/pack hashes.
+* Original contextual versus actual Azure payload identities in candidate order. Both
+  the real client and checked wrapper use `rcpia.evidence.payload.prepare_evidence`.
+  `transformation` is `verbatim` or `markdown_cell_padding`; `clipped` is always false
+  in successful v2 output. A compacted string differs from its source bytes, but preserves
+  every cell's content. Its actual payload hash matches the delivered text hash if selected.
 
 Production tracing is opt-in (`trace=EvidenceTrace()`); its return contract remains
 `(passages, notes)`. No detailed collector is allocated by normal `build_bundle` callers.
@@ -181,10 +190,90 @@ a sanitized CLI message and nonzero exit, omitting potentially sensitive excepti
 Unexpected programming failures propagate rather than being swallowed; their tracebacks are
 diagnostic output, not sanitized artifacts, and must be kept restricted.
 
-## Remaining boundary: milestone C
+## Milestone C: bounded whole-source-unit preservation
 
-Today reranking reads `contextual_text` (Azure caps it at 8,000 characters), while
-`to_passage` supplies raw text, sets `section=None`, and clips at `MAX_TEXT=4000` with
-the existing marker. Long decision tables can still be incomplete and headings are still
-dropped. This baseline faithfully records those effects; it does not repair them or claim
-model/clinical performance improvement.
+Reranking and delivery now use the same preparation of the stored `contextual_text`.
+Delivery also carries the ordered section path and existing page span, with the same
+source citation ID, label, edition, recommendation number, locator method and
+`clinical_status`. The raw source must remain an exact suffix of the original contextual
+text; a mismatch refuses conversion rather than inventing a replacement context.
+
+The application reranker ceiling remains **8,000 characters, including context**.
+Only guideline text receives a dedicated matching ceiling; global `MAX_TEXT=4000`
+continues to bound dossier snippets, questions and output fields. Candidate limits,
+10+4 passage budgets, filters, RRF, widening, relevance floors and clinical rules are unchanged.
+
+Preparation follows these rules:
+
+1. A contextual unit at or below 8,000 characters is passed through byte-for-byte.
+2. An oversized unit may lose only ASCII alignment spaces at the edges of cells in
+   narrowly recognized Markdown tables: explicit outer pipes, consistent column counts,
+   and a valid separator row. Rows, cell contents, internal spaces, alignment markers,
+   inline `<br/>` breaks, context, surrounding prose and line endings are retained.
+3. Code/backtick/escape ambiguity, tilde fences, reference-definition markers, or HTML
+   other than simple inline breaks disables compaction for the entire unit. Multiline
+   reference titles can contain pipe-shaped lines that are not tables.
+   Unsupported table shapes are not repaired.
+   In particular, HTML tables and their whitespace/colspan attributes are never normalized.
+4. If the complete result still exceeds 8,000, `EvidencePreparationError` stops the
+   search before its reranker HTTP request. It is not a relevance-floor rejection.
+   **Even a candidate that would not ultimately be selected can stop the analysis.**
+   No partial candidate list, synthetic score, fragment citation, or empty-pack fallback
+   is substituted. Bundle assembly translates this specific refusal to `BundleError`;
+   the runtime CLI leaves its reserved artifact incomplete.
+
+This protects tables inside `general_principle` units as well as `decision_table` units;
+unit type does not control compaction. It preserves **the complete stored unit**, not
+necessarily an entire table from the publication. A source heading such as “Table 11.
+Continued” remains exactly that. Missing headers, adjoining footnotes and qualifications
+outside the stored unit are not fetched, inferred or certified. This is not a clinical
+quality measurement or a new assertion of source completeness.
+
+### Separate full-bundle gate and fixture acceptance
+
+`build_bundle` still refuses bundles larger than **223,232 bytes**, with no extra
+evidence trimming. It now measures `rcpia.agents.serialization.bundle_bytes`, exactly
+the indented UTF-8 JSON bytes the Pi adapter writes, without platform newline translation.
+The output schema, ledger, snippets, evidence, notes and constraints all contribute.
+Some inputs formerly admitted by the compact-JSON estimate can therefore be refused.
+Older stored passages remain readable as written; they are never silently repaired.
+
+`tests\test_evidence_preservation.py` separately exercises full `build_bundle` assembly
+with synthetic ledger/snippet inputs, real retrieval over an isolated fixture database,
+keyword-only and mixed table units, citation resolution, old stored passages, exact
+byte boundaries and aggregate Unicode overflow. `tests\test_pi_adapter.py` checks
+physical attachment bytes using the existing fake Pi executable. Neither calls providers.
+These tests are **not** part of the evidence-only runtime measurement boundary.
+
+For a private, no-application-write acceptance probe, construct `RetrievedChunk` objects
+from audited source units and supply at most ten primary and four supportive units.
+The following fixture-only seam runs conversion and the full assembly/gate without a DB
+session, provider, or Pi invocation:
+
+```python
+from unittest.mock import patch
+
+from rcpia.agents import evidence
+from rcpia.agents.serialization import bundle_bytes
+from rcpia.evidence.retrieval import RetrievalReport
+from rcpia.query.questions import SUPPORTIVE_QUESTION
+from tests.test_evidence_preservation import full_bundle
+
+# primary_units / supportive_units: original audited RetrievedChunk objects.
+assert len(primary_units) <= 10 and len(supportive_units) <= 4
+
+async def selected_units(session, **kwargs):
+    assert session is None
+    supportive = kwargs["question"] == SUPPORTIVE_QUESTION
+    assert kwargs["limit"] == (4 if supportive else 10)
+    return RetrievalReport(chunks=supportive_units if supportive else primary_units)
+
+with patch.object(evidence, "search", selected_units):
+    built = await full_bundle(None)
+    attachment = bundle_bytes(built.bundle)
+```
+
+This uses synthetic, unpersisted case/version objects and fixture embeddings. It does
+**not** test candidate retrieval or provider ranking; test those separately. The fixture
+seam is covered by `test_full_bundle_no_database_acceptance_seam_preserves_all_fourteen_units`.
+Keep any artifacts containing audited source text private and outside Git.

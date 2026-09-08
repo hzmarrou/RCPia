@@ -36,6 +36,7 @@ from rcpia.agents.schemas import (
     TaskBundle,
     agent_output_json_schema,
 )
+from rcpia.agents.serialization import bundle_bytes
 from rcpia.cases import completeness
 from rcpia.cases.completeness import BLOCKING_FIELDS
 from rcpia.cases.fact_schema import required_fields_for
@@ -48,6 +49,7 @@ from rcpia.cases.ledger import (
 )
 from rcpia.core.models import CancerType, Case, CaseLedgerVersion, DocumentChunk
 from rcpia.evidence.embedding import Embedder
+from rcpia.evidence.payload import EvidencePreparationError
 from rcpia.evidence.rerank import Reranker
 from rcpia.nomograms import evaluate_all
 from rcpia.nomograms.record import Tristate
@@ -271,15 +273,18 @@ async def build_bundle(
         )
         evidence_notes.extend(synthesis_notes)
     elif embedder is not None and reranker is not None:
-        passages, evidence_notes = await guideline_passages_for(
-            session,
-            cancer_type=str(case.cancer_type),
-            agent_role=agent_role,
-            entries=entries,
-            question=clinical_question,
-            embedder=embedder,
-            reranker=reranker,
-        )
+        try:
+            passages, evidence_notes = await guideline_passages_for(
+                session,
+                cancer_type=str(case.cancer_type),
+                agent_role=agent_role,
+                entries=entries,
+                question=clinical_question,
+                embedder=embedder,
+                reranker=reranker,
+            )
+        except EvidencePreparationError as exc:
+            raise BundleError(str(exc)) from exc
 
     # Every chunk any reading was assembled from, not only the one it is filed under. A
     # multi-chunk imaging report needs all of them resolved, or the snippet below can only
@@ -501,7 +506,7 @@ async def build_bundle(
 
     # Refused, not silently trimmed further. A case this large is a situation a person
     # has to look at, and a provider error would tell them nothing about why.
-    size = len(bundle.model_dump_json(by_alias=True).encode("utf-8"))
+    size = len(bundle_bytes(bundle))
     if size > MAX_BUNDLE_BYTES:
         raise BundleTooLarge(
             f"Le dossier dépasse la taille transmissible à un agent "

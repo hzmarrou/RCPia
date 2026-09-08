@@ -29,6 +29,7 @@ from rcpia.agents.schemas import (
     TaskBundle,
     agent_output_json_schema,
 )
+from rcpia.agents.serialization import bundle_bytes
 
 FAKE_PI = Path(__file__).resolve().parent / "fake_pi.py"
 CASE_ID = uuid.UUID("11111111-2222-4333-8444-555555555555")
@@ -88,6 +89,25 @@ def bundle() -> TaskBundle:
 async def run(adapter: PiAdapter, monkeypatch: pytest.MonkeyPatch, mode: str = "ok"):
     monkeypatch.setenv("RCPIA_FAKE_PI_MODE", mode)
     return await adapter.run(bundle=bundle(), agent_name="urology_oncology", case_id=CASE_ID)
+
+
+async def test_attachment_bytes_are_exactly_the_bytes_measured_by_the_bundle_gate(
+    adapter: PiAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RCPIA_FAKE_PI_MODE", "ok")
+    task = bundle()
+    task.inputs.source_snippets[0].text = "Unicode é\u202f\u221e\r\nCRLF\nLF\rCR"
+    expected = bundle_bytes(task)
+    run_id = uuid.uuid4()
+    await adapter.run(
+        bundle=task, agent_name="urology_oncology", case_id=CASE_ID, run_id=run_id
+    )
+    actual = adapter.task_path(CASE_ID, "urology_oncology", run_id).read_bytes()
+    assert actual == expected
+    assert b"\r" not in actual
+    assert json.loads(actual)["inputs"]["source_snippets"][0]["text"] == (
+        task.inputs.source_snippets[0].text
+    )
 
 
 # --------------------------------------------------------------------------------------

@@ -328,6 +328,9 @@ class RetrievedChunk:
     chunk_id: str
     document_id: str
     text: str
+    contextual_text: str
+    section_path: tuple[str, ...]
+    unit_type: str | None
     citation_label: str | None
     page_start: int | None
     page_end: int | None
@@ -600,6 +603,9 @@ def _to_chunk(
         chunk_id=row.chunk_id,
         document_id=row.document_id,
         text=row.text,
+        contextual_text=row.contextual_text,
+        section_path=tuple(row.section_path),
+        unit_type=row.unit_type,
         citation_label=row.citation_label,
         page_start=row.page_start,
         page_end=row.page_end,
@@ -628,9 +634,10 @@ _COLUMNS = (
     EvidenceChunk.chunk_id,
     EvidenceChunk.document_id,
     EvidenceChunk.text,
-    # What the cross-encoder reads. Not shown to a clinician — `text` is the passage as the
-    # guideline printed it — but see `_search` for why the reranker must not be given that.
+    # Reranking and delivery preserve this same stored context and whole source unit.
     EvidenceChunk.contextual_text,
+    EvidenceChunk.section_path,
+    EvidenceChunk.unit_type,
     EvidenceChunk.citation_label,
     EvidenceChunk.page_start,
     EvidenceChunk.page_end,
@@ -842,7 +849,7 @@ async def _search(
             # point of reranking is that fusion's order is not the final word.
             #
             # **`contextual_text`, not `text`** — the same string the dense leg embedded.
-            # It prefixes the source and the section path, and the section path is where a
+            # It retains the stored context prefix, and the section path is where a
             # guideline states who the passage is about: "6.3.5.f Adjuvant treatment in pN1
             # disease > 6.3.5.f.1 Adjuvant androgen ablation" against "6.4.4 The role of
             # imaging in PSA-only recurrence". Given the bare passage, a cross-encoder is
