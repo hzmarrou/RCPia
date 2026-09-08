@@ -12,6 +12,13 @@ uv run uvicorn rcpia.main:app --reload   # dev server on :8000
 
 Health check: `GET /health` -> `{"status":"ok"}`.
 
+## Runtime evidence baseline
+
+`python -m rcpia.evaluation.runtime` evaluates the production evidence-selection function
+against explicit frozen ledgers, with opt-in traces and versioned provenance. It does not
+execute generation or evaluate the full bundle size gate. See
+[input format, restricted artifacts, CLI and score boundaries](../../docs/evaluation/runtime-evidence-baseline.md).
+
 ## Database
 
 PostgreSQL is the clinical source of truth. Schema changes go through Alembic:

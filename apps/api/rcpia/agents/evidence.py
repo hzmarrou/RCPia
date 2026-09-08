@@ -22,14 +22,16 @@ clinician's page looking like one that has been.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.agents.schemas import MAX_TEXT, GuidelinePassage
 from rcpia.cases.ledger import LedgerEntry
 from rcpia.evidence.embedding import Embedder
+from rcpia.evidence.hashing import payload_sha256, text_identity
 from rcpia.evidence.rerank import Reranker
-from rcpia.evidence.retrieval import Concepts, RetrievedChunk, search
+from rcpia.evidence.retrieval import Concepts, Filter, RetrievalReport, RetrievedChunk, search
 from rcpia.query.builder import Fact, build_filter
 from rcpia.query.questions import SUPPORTIVE_QUESTION, question_for
 
@@ -55,6 +57,34 @@ SUPPORTIVE_PASSAGE_LIMIT = 4
 # the bundle's text cap, and a passage silently cut mid-table would be quoted in a fiche as
 # though it were whole. The marker is French because everything the agent reads is.
 TRUNCATION_MARKER = " […] (passage tronqué — consulter la source pour le texte intégral)"
+
+
+@dataclass
+class EvidenceSearchTrace:
+    question: str
+    concepts: Concepts
+    filter: Filter
+    limit: int
+    report: RetrievalReport
+
+
+@dataclass
+class EvidenceTrace:
+    """Explicit, single-use collector. Never allocated by ordinary bundle callers.
+
+    A failed retrieval leaves ``complete=False`` and still raises its original exception.
+    This is evidence selection/delivery, not a TaskBundle or a generation trace.
+    """
+
+    primary: EvidenceSearchTrace | None = None
+    supportive: EvidenceSearchTrace | None = None
+    primary_ids: list[str] = field(default_factory=list)
+    supportive_ids: list[str] = field(default_factory=list)
+    supportive_duplicate_ids: list[str] = field(default_factory=list)
+    converted: list[dict[str, object]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    evidence_pack_sha256: str | None = None
+    complete: bool = False
 
 
 def facts_from(entries: Sequence[LedgerEntry]) -> list[Fact]:
@@ -99,6 +129,7 @@ async def guideline_passages_for(
     reranker: Reranker,
     limit: int = PASSAGE_LIMIT,
     supportive_limit: int = SUPPORTIVE_PASSAGE_LIMIT,
+    trace: EvidenceTrace | None = None,
 ) -> tuple[list[GuidelinePassage], list[str]]:
     """Retrieve the guidance this agent may see for this patient.
 
@@ -113,6 +144,8 @@ async def guideline_passages_for(
     retrieved once across fourteen dossiers. The setting was already being derived here to build
     the filter; it now names the question as well. See `rcpia.query.questions`.
     """
+    if trace is not None and (trace.primary is not None or trace.complete):
+        raise ValueError("EvidenceTrace collectors are single-use.")
     query = build_filter(
         cancer_type,
         facts_from(entries),
@@ -150,7 +183,13 @@ async def guideline_passages_for(
         filter=query.filter,
         reranker=reranker,
         limit=limit,
+        trace=trace is not None,
     )
+    if trace is not None:
+        trace.primary = EvidenceSearchTrace(
+            search_question, query.concepts, query.filter, limit, report
+        )
+        trace.primary_ids = [c.chunk_id for c in report.chunks]
 
     # The second search: what this patient needs before any treatment, rather than which
     # treatment. It runs under the *same* filter, so each specialist gets what it is permitted
@@ -171,11 +210,20 @@ async def guideline_passages_for(
             filter=query.filter,
             reranker=reranker,
             limit=supportive_limit,
+            trace=trace is not None,
         )
         # A passage both questions found is kept once, in the primary set. Handing the agent the
         # same text twice under two headings would misrepresent how much evidence it has.
         already = {chunk.chunk_id for chunk in report.chunks}
         supportive = [c for c in support_report.chunks if c.chunk_id not in already]
+        if trace is not None:
+            trace.supportive = EvidenceSearchTrace(
+                SUPPORTIVE_QUESTION, Concepts(), query.filter, supportive_limit, support_report
+            )
+            trace.supportive_ids = [c.chunk_id for c in supportive]
+            trace.supportive_duplicate_ids = [
+                c.chunk_id for c in support_report.chunks if c.chunk_id in already
+            ]
 
     chunks = list(report.chunks) + supportive
 
@@ -209,4 +257,22 @@ async def guideline_passages_for(
             "les recommandations citées correspondent moins précisément à ce patient."
         )
 
-    return [to_passage(chunk) for chunk in chunks], notes
+    passages = [to_passage(chunk) for chunk in chunks]
+    if trace is not None:
+        trace.converted = [
+            {
+                "id": chunk.chunk_id,
+                "raw_text": text_identity(chunk.text),
+                "delivered_text": text_identity(passage.text),
+                "clipped": len(chunk.text) > MAX_TEXT,
+                "section": passage.section,
+                "passage_sha256": payload_sha256(passage.model_dump(mode="json")),
+            }
+            for chunk, passage in zip(chunks, passages, strict=True)
+        ]
+        trace.notes = list(notes)
+        trace.evidence_pack_sha256 = payload_sha256({
+            "passages": [p.model_dump(mode="json") for p in passages], "notes": notes,
+        })
+        trace.complete = True
+    return passages, notes

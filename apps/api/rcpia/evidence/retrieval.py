@@ -528,6 +528,7 @@ class AttemptTrace:
     keyword_ids: list[str] = field(default_factory=list)
     dense_ids: list[str] = field(default_factory=list)
     fused_ids: list[str] = field(default_factory=list)
+    fusion_scores: dict[str, float] = field(default_factory=dict)
     candidate_ids: list[str] = field(default_factory=list)
     relevances: dict[str, float] = field(default_factory=dict)
     above_floor: list[str] = field(default_factory=list)
@@ -812,6 +813,7 @@ async def _search(
                 attempt.keyword_ids = list(keyword_order)
                 attempt.dense_ids = list(dense_order)
                 attempt.fused_ids = [chunk_id for chunk_id, _ in fused]
+                attempt.fusion_scores = dict(fused)
 
             if reranker is None:
                 # No cross-encoder means no floor, so this attempt returns whatever it fused
