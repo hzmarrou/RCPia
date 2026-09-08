@@ -206,10 +206,10 @@ def require_question_approval(
     permit: ScoringPermit | None,
     snapshot: RuntimeSnapshot | None = None,
 ) -> None:
-    if question.split != "pilot":
-        if permit is None:
-            raise GoldsetError("Dev/test scoring requires independent content-bound approval.")
+    if permit is not None:
         permit.check(question, snapshot)
+    elif question.split != "pilot":
+        raise GoldsetError("Dev/test scoring requires independent content-bound approval.")
 
 
 def authorize(

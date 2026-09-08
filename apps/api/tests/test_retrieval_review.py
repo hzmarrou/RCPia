@@ -412,6 +412,45 @@ async def test_low_level_runtime_and_historic_entrypoints_cannot_bypass_approval
     session.execute.assert_not_called()
 
 
+@pytest.mark.parametrize("split", ["pilot", "dev", "test"])
+async def test_supplied_permit_cannot_approve_an_unrelated_question(split):
+    parts = approved_fixture()
+    gold, inputs, _, _, _ = parts
+    permit = authorization(parts)
+    assert permit is not None
+    question = replace(
+        gold.questions[0],
+        split=split,
+        query_id="NEVER-APPROVED-SYNTHETIC",
+        question="Unapproved synthetic target",
+    )
+    session = SimpleNamespace(
+        execute=AsyncMock(side_effect=AssertionError("Approval must precede database access."))
+    )
+    embedder = FakeEmbedder()
+    with pytest.raises(GoldsetError, match="does not cover"):
+        await evaluate_snapshot(
+            session,
+            inputs.snapshots[0],
+            embedder=embedder,
+            reranker=FakeReranker(),
+            label=question,
+            permit=permit,
+        )
+    with pytest.raises(GoldsetError, match="does not cover"):
+        await run_question(
+            session,
+            question=question,
+            arm=None,
+            embedding=None,
+            embedding_model="fixture",
+            reranker=FakeReranker(),
+            permit=permit,
+        )
+    session.execute.assert_not_called()
+    assert embedder.calls == []
+
+
 async def test_targeted_mode_needs_context_before_any_database_or_provider_call():
     inputs = parsed()
     session = SimpleNamespace(execute=AsyncMock())
