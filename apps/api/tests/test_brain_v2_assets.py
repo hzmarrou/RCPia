@@ -121,8 +121,9 @@ def test_recorded_synthesis_availability_evidence_has_matching_inputs_and_output
         })
         assert bundle == case.bundle
         assert record["expected"] == case.expected
+        # Hash recorded fields, including explicit nulls, without materializing newer defaults.
         assert record["bundle_sha256"] == hashlib.sha256(
-            bundle.model_dump_json(by_alias=True).encode("utf-8")
+            bundle.model_dump_json(by_alias=True, exclude_unset=True).encode("utf-8")
         ).hexdigest()
         output = SynthesisOutput.model_validate(record["output"])
         assert output.case_id == bundle.inputs.case_id

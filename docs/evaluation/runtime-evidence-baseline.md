@@ -210,8 +210,10 @@ Preparation follows these rules:
    narrowly recognized Markdown tables: explicit outer pipes, consistent column counts,
    and a valid separator row. Rows, cell contents, internal spaces, alignment markers,
    inline `<br/>` breaks, context, surrounding prose and line endings are retained.
-3. Code/backtick/escape ambiguity, tilde fences, or HTML other than simple inline breaks
-   disables compaction for the entire unit. Unsupported table shapes are not repaired.
+3. Code/backtick/escape ambiguity, tilde fences, reference-definition markers, or HTML
+   other than simple inline breaks disables compaction for the entire unit. Multiline
+   reference titles can contain pipe-shaped lines that are not tables.
+   Unsupported table shapes are not repaired.
    In particular, HTML tables and their whitespace/colspan attributes are never normalized.
 4. If the complete result still exceeds 8,000, `EvidencePreparationError` stops the
    search before its reranker HTTP request. It is not a relevance-floor rejection.

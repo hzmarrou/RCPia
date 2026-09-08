@@ -107,9 +107,15 @@ def test_units_that_fit_are_byte_identical(text: str) -> None:
         ("An escaped \\| elsewhere\n", ""),
         ("<PRE>\n", "\n</PRE>"),
         ("<br data-extra=\"unsafe\">\n", ""),
+        ('[ref]: /source "\n', '\n"'),
+        ("[ref]: /source '\n", "\n'"),
+        ("[ref]: /source (\n", "\n)"),
+        ('   [ref]: /source "\n', '\n"'),
+        ('[multi\nline]: /source "\n', '\n"'),
+        ('> [ref]: /source "\n', '\n"'),
     ],
 )
-def test_ambiguous_code_or_html_unit_is_refused_without_partial_compaction(
+def test_ambiguous_code_html_or_reference_unit_is_refused_without_partial_compaction(
     before: str, after: str
 ) -> None:
     with pytest.raises(EvidencePreparationError, match="aucune troncature"):

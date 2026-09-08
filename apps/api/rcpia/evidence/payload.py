@@ -13,6 +13,7 @@ MAX_EVIDENCE_CHARACTERS = 8000
 _DELIMITER = re.compile(r":?-{3,}:?")
 _BREAK = re.compile(r"<br */?>", re.IGNORECASE)
 _HTML = re.compile(r"<[/!?a-z]", re.IGNORECASE)
+_REFERENCE_DEFINITION = re.compile(r"\[[^\[\]]+\]:")
 
 
 class EvidencePreparationError(ValueError):
@@ -34,13 +35,14 @@ def _line_parts(line: str) -> tuple[str, str]:
 
 def _compact_padding(text: str) -> str:
     # A partial Markdown/HTML parser cannot safely decide where multiline code ends.
-    # Refuse to transform the entire unit when that ambiguity exists, even if another
-    # part resembles a simple table. Only inline HTML breaks are explicitly supported.
+    # Reference titles can also span pipe-shaped lines without creating a table.
+    # Refuse whole-unit ambiguity; only inline HTML breaks are explicitly supported.
     if (
         "`" in text
         or "\\" in text
         or "~~~" in text
         or _HTML.search(_BREAK.sub("", text))
+        or _REFERENCE_DEFINITION.search(text)
     ):
         return text
 
