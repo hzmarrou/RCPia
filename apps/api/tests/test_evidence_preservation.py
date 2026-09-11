@@ -299,8 +299,14 @@ async def test_full_bundle_gate_uses_exact_attachment_bytes(
     await seed(session)
     task = (await full_bundle(session)).bundle
     actual = bundle_bytes(task)
-    compact = task.model_dump_json(by_alias=True).encode("utf-8")
-    assert len(actual) > len(compact)
+    previous = json.dumps(
+        task.model_dump(mode="json", by_alias=True),
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    ).encode("utf-8")
+    assert json.loads(actual) == json.loads(previous)
+    assert len(actual) < len(previous)
     assert len(actual) > len(actual.decode("utf-8"))
     monkeypatch.setattr(bundles, "MAX_BUNDLE_BYTES", len(actual))
     accepted = (await full_bundle(session)).bundle
@@ -313,7 +319,7 @@ async def test_full_bundle_gate_uses_exact_attachment_bytes(
     )
     physical = adapter.task_path(case_id, "medical_oncology", run_id).read_bytes()
     assert physical == actual and len(physical) == bundles.MAX_BUNDLE_BYTES
-    for limit in (len(actual) - 1, len(compact)):
+    for limit in (len(actual) - 1, len(actual.decode("utf-8"))):
         monkeypatch.setattr(bundles, "MAX_BUNDLE_BYTES", limit)
         with pytest.raises(bundles.BundleTooLarge):
             await full_bundle(session)
