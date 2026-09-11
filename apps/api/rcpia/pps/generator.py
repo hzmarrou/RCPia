@@ -24,8 +24,9 @@ from rcpia.agents.bundle import entries_from_version
 from rcpia.agents.schemas import (
     SYNTHESIS_ROLE,
     AgentOutput,
+    DecisionLedSynthesisOutput,
     SynthesisOutput,
-    output_model_for,
+    output_model_from_schema,
 )
 from rcpia.cases import completeness
 from rcpia.cases.ledger import (
@@ -39,6 +40,7 @@ from rcpia.core.models import AgentRun, AgentRunStatus, Case, CaseLedgerVersion
 from rcpia.nomograms import evaluate_all
 from rcpia.nomograms.record import Tristate
 from rcpia.pps import gap_policy
+from rcpia.pps.proposal import apply_proposal
 from rcpia.pps.schemas import (
     CareFramework,
     Decision,
@@ -715,7 +717,12 @@ async def latest_runs(
         seen.add(run.agent_role)
         # By role: a synthesis carries convergences and divergences that `AgentOutput` forbids,
         # and validating it as one would drop the only run entitled to present a single plan.
-        runs.append((run, output_model_for(run.agent_role).model_validate(run.output)))
+        schema = (run.bundle or {}).get("output_format", {}).get("schema", {})
+        try:
+            model = output_model_from_schema(run.agent_role, schema)
+        except ValueError as exc:
+            raise PpsError(str(exc)) from exc
+        runs.append((run, model.model_validate(run.output)))
     return runs
 
 
@@ -806,7 +813,7 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
     roles = [run.agent_role for run, _ in runs]
     models = [run.model or "" for run, _ in runs]
 
-    return PpsDocument(
+    document = PpsDocument(
         case_id=str(case.id),
         case_reference=case.reference,
         cancer_type=str(case.cancer_type),
@@ -857,3 +864,26 @@ async def generate(session: AsyncSession, *, case: Case) -> PpsDocument:
             for run, output in runs
         ],
     )
+    if isinstance(lead_output, DecisionLedSynthesisOutput):
+        pinned_question = (lead_run.bundle or {}).get("inputs", {}).get("clinical_question")
+        if pinned_question is not None and not isinstance(pinned_question, str):
+            raise PpsError("La question enregistrée avec l'avis est invalide.")
+        if not pinned_question:
+            document.synthesis.question = (
+                "Stratégie thérapeutique proposée — "
+                + ("tumeur de vessie." if str(case.cancer_type) == "bladder"
+                   else "cancer de la prostate.")
+            )
+        sources = _guideline_sources(lead_run)
+        document.framework.reference_standard = (
+            "Référentiels fournis : " + ", ".join(sources)
+            if sources else "Aucun référentiel fourni ; proposition non étayée par un guide."
+        )
+        document.framework.participants = ", ".join(
+            agent_label(role) for role in roles if role != SYNTHESIS_ROLE
+        )
+        result = apply_proposal(document, lead_output)
+        if pinned_question:
+            result.synthesis.question = pinned_question
+        return result
+    return document

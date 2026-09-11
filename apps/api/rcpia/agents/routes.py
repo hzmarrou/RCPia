@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from rcpia.agents import panel as panel_service
 from rcpia.agents.bundle import entries_from_version
 from rcpia.agents.pi_adapter import SAFE_AGENT_NAME
+from rcpia.agents.pps_fiche import CURRENT_SYNTHESIS_CONTRACT
 from rcpia.agents.schemas import SYNTHESIS_ROLE
 from rcpia.agents.service import DEFAULT_AGENT_ROLE
 from rcpia.auth.dependencies import CurrentUser, SessionDep, protected_router
@@ -167,6 +168,11 @@ async def start_analysis(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
     def compatible(existing: AnalysisJob) -> bool:
+        if (
+            payload.agent_role == SYNTHESIS_ROLE
+            and existing.payload.get("pps_proposal_contract") != CURRENT_SYNTHESIS_CONTRACT
+        ):
+            return False
         if existing.payload.get("retrieval_contract") != RETRIEVAL_CONTRACT:
             return False
         if retrieval_query is None and existing.payload.get("retrieval_query") is None:
@@ -232,6 +238,8 @@ async def start_analysis(
                 "agent_role": payload.agent_role,
                 "clinical_question": payload.clinical_question,
                 "retrieval_contract": RETRIEVAL_CONTRACT,
+                **({"pps_proposal_contract": CURRENT_SYNTHESIS_CONTRACT}
+                   if payload.agent_role == SYNTHESIS_ROLE else {}),
                 # Pinned, so a correction made while the job waits does not silently
                 # change the question the agent was asked.
                 "ledger_version": version.version,

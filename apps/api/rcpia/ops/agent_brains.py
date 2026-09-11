@@ -13,7 +13,7 @@ PROMOTIONS = {
     "urology_oncology": "agent-urology-oncology-brain-v2.md",
     "medical_oncology": "agent-medical-oncology-brain-v2.md",
     "radiation_oncology": "agent-radiation-oncology-brain-v2.md",
-    "rcp_synthesis": "agent-rcp-synthesis-brain-v2.md",
+    "rcp_synthesis": "agent-rcp-synthesis-brain-v3.md",
 }
 BEGIN = "<!-- BEGIN RUNTIME PROMPT -->"
 END = "<!-- END RUNTIME PROMPT -->"

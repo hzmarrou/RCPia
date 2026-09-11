@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.agents.bundle import entries_from_version
+from rcpia.agents.pps_fiche import CURRENT_SYNTHESIS_CONTRACT
 from rcpia.agents.schemas import SYNTHESIS_ROLE
 from rcpia.cases import completeness
 from rcpia.cases.lifecycle import refresh_analysis_status
@@ -492,7 +493,8 @@ async def _synthesis_dedupe_key(
         sa.select(AnalysisPanelJob.job_id).where(AnalysisPanelJob.panel_id == panel_id)
     )
     fingerprint = hashlib.sha256(
-        ",".join(sorted(str(job_id) for job_id in rows.scalars().all())).encode()
+        (CURRENT_SYNTHESIS_CONTRACT + ":" +
+         ",".join(sorted(str(job_id) for job_id in rows.scalars().all()))).encode()
     ).hexdigest()[:16]
     return f"{JobType.RUN_AGENT}:{case_id}:{SYNTHESIS_ROLE}:{fingerprint}"
 
@@ -609,6 +611,7 @@ async def dispatch_synthesis_if_ready(
                 job_type=JobType.RUN_AGENT,
                 payload={
                     "agent_role": SYNTHESIS_ROLE,
+                    "pps_proposal_contract": CURRENT_SYNTHESIS_CONTRACT,
                     "clinical_question": panel.clinical_question,
                     "ledger_version": panel.ledger_version,
                     "panel_id": str(panel_id),

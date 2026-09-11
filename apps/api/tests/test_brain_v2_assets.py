@@ -38,7 +38,9 @@ SECTIONS = (
 )
 
 
-@pytest.mark.parametrize("role,document", {**PROMOTIONS, **REVIEW_ONLY}.items())
+@pytest.mark.parametrize("role,document", {
+    **PROMOTIONS, "rcp_synthesis": "agent-rcp-synthesis-brain-v2.md", **REVIEW_ONLY,
+}.items())
 def test_all_eight_review_payloads_have_balanced_sections_and_valid_examples(
     role: str, document: str,
 ) -> None:

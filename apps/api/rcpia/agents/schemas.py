@@ -27,6 +27,8 @@ from pydantic import (
     model_validator,
 )
 
+from rcpia.agents.pps_fiche import ConciseFiche, InstitutionalFiche
+from rcpia.agents.pps_proposal import PpsProposal
 from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.evidence.payload import MAX_EVIDENCE_CHARACTERS
 from rcpia.query.decision import QueryProvenance
@@ -727,6 +729,31 @@ class SynthesisOutput(AgentOutput):
         return self
 
 
+class DecisionLedSynthesisOutput(SynthesisOutput):
+    """Required for newly dispatched syntheses; historical outputs remain readable."""
+
+    pps_proposal: PpsProposal
+    recommendation_withheld: Literal[False] = False
+
+
+class ConciseSynthesisOutput(DecisionLedSynthesisOutput):
+    pps_fiche: ConciseFiche
+
+    @model_validator(mode="after")
+    def fiche_covers_the_detailed_plan(self) -> "ConciseSynthesisOutput":
+        self.pps_fiche.validate_for(self.pps_proposal)
+        return self
+
+
+class InstitutionalSynthesisOutput(DecisionLedSynthesisOutput):
+    pps_fiche: InstitutionalFiche
+
+    @model_validator(mode="after")
+    def fiche_covers_the_detailed_plan(self) -> "InstitutionalSynthesisOutput":
+        self.pps_fiche.validate_for(self.pps_proposal)
+        return self
+
+
 class UncitedEvidence(ValueError):
     """The agent cited an id it was never given."""
 
@@ -753,6 +780,10 @@ class CitationInWrongChannel(ValueError):
 def _prose_of(output: AgentOutput) -> list[str]:
     """Every free-text field an agent could write a citation into."""
     return [
+        *(output.pps_fiche.prose() if isinstance(
+            output, (ConciseSynthesisOutput, InstitutionalSynthesisOutput)
+        ) else []),
+        *(output.pps_proposal.prose() if isinstance(output, DecisionLedSynthesisOutput) else []),
         output.recommendation,
         output.rationale,
         *output.key_facts_used,
@@ -849,18 +880,50 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
         )
 
 
-def output_model_for(agent_role: str) -> type[AgentOutput]:
+def output_model_for(
+    agent_role: str, *, decision_led: bool = False, concise: bool = False,
+    institutional: bool = False,
+) -> type[AgentOutput]:
     """Which output schema this role answers under.
 
     One place decides it, so the schema an agent is *given* and the schema its answer is
     *checked against* cannot drift apart — they are the same call.
     """
+    if institutional and agent_role == SYNTHESIS_ROLE:
+        return InstitutionalSynthesisOutput
+    if concise and agent_role == SYNTHESIS_ROLE:
+        return ConciseSynthesisOutput
+    if decision_led and agent_role == SYNTHESIS_ROLE:
+        return DecisionLedSynthesisOutput
     return SynthesisOutput if agent_role == SYNTHESIS_ROLE else AgentOutput
 
 
-def agent_output_json_schema(agent_role: str = "") -> dict[str, Any]:
+def agent_output_json_schema(
+    agent_role: str = "", *, decision_led: bool = False, concise: bool = False,
+    institutional: bool = False,
+) -> dict[str, Any]:
     """The schema embedded in the bundle, so the agent is told exactly what to return."""
-    return output_model_for(agent_role).model_json_schema()
+    model = output_model_for(
+        agent_role, decision_led=decision_led, concise=concise, institutional=institutional,
+    )
+    return model.model_json_schema()
+
+
+def output_model_from_schema(agent_role: str, schema: dict[str, Any]) -> type[AgentOutput]:
+    required = schema.get("required", [])
+    contract = None
+    if "pps_fiche" in required:
+        definition = schema.get("properties", {}).get("pps_fiche", {})
+        reference = definition.get("$ref", "")
+        if reference.startswith("#/$defs/"):
+            definition = schema.get("$defs", {}).get(reference.removeprefix("#/$defs/"), {})
+        contract = definition.get("properties", {}).get("contract", {}).get("const")
+        if contract not in {"rcpia.pps-fiche.v1", "rcpia.pps-fiche.v2"}:
+            raise ValueError("Contrat de fiche absent ou inconnu dans le schéma enregistré.")
+    return output_model_for(
+        agent_role, decision_led="pps_proposal" in required,
+        concise=contract == "rcpia.pps-fiche.v1", institutional=contract == "rcpia.pps-fiche.v2",
+    )
 
 
 class UnattestedAgreement(ValueError):
@@ -877,6 +940,18 @@ def check_synthesis(output: "SynthesisOutput", bundle: TaskBundle) -> None:
     This is the mechanical half of the fix for fabricated attribution. The brain asks for one
     claim per point; this refuses the claim that cannot be shown.
     """
+    if isinstance(output, DecisionLedSynthesisOutput):
+        allowed = {identifier.casefold() for identifier in bundle.citable_ids()}
+        used = {identifier.casefold() for identifier in output.pps_proposal.cited_ids()}
+        if used - allowed:
+            raise UnattestedAgreement(
+                "La proposition PPS cite des identifiants absents du dossier fourni."
+            )
+        main = {reference.id.casefold() for reference in output.evidence_references}
+        if not used <= main:
+            raise UnattestedAgreement(
+                "Chaque source de la proposition PPS doit figurer dans evidence_references."
+            )
     opinions = {
         normalise_role(opinion.agent_role): _searchable(opinion)
         for opinion in bundle.inputs.agent_opinions

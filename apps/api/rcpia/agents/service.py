@@ -33,6 +33,7 @@ from rcpia.agents.pi_adapter import (
     PiRunFailed,
     PiRunResult,
 )
+from rcpia.agents.pps_fiche import CURRENT_SYNTHESIS_CONTRACT
 from rcpia.agents.schemas import (
     SYNTHESIS_ROLE,
     AgentOutput,
@@ -44,7 +45,7 @@ from rcpia.agents.schemas import (
     UngroundedRecommendation,
     check_citations,
     check_synthesis,
-    output_model_for,
+    output_model_from_schema,
 )
 from rcpia.cases.ledger import latest_version
 from rcpia.core.models import (
@@ -113,6 +114,14 @@ async def run_agent(
     it is ungrounded, not fail to produce a fiche at all.
     """
     agent_role = str(job.payload.get("agent_role") or DEFAULT_AGENT_ROLE)
+    if (
+        agent_role == SYNTHESIS_ROLE
+        and job.payload.get("pps_proposal_contract") != CURRENT_SYNTHESIS_CONTRACT
+    ):
+        return _terminal(
+            "Contrat PPS absent ou obsolète : demandez une nouvelle synthèse. "
+            "Les avis historiques restent consultables."
+        )
     if (
         agent_role != SYNTHESIS_ROLE
         and job.payload.get("retrieval_contract") != RETRIEVAL_CONTRACT
@@ -353,7 +362,11 @@ def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
     # call decides both, so a synthesis is not rejected for returning the fields it was told
     # to return.
     try:
-        output = output_model_for(bundle.inputs.agent_role).model_validate(payload)
+        model = output_model_from_schema(bundle.inputs.agent_role, bundle.output_format.schema_)
+    except ValueError as exc:
+        raise PiOutputInvalid(str(exc)) from exc
+    try:
+        output = model.model_validate(payload)
     except ValidationError as exc:
         raise PiOutputInvalid(
             f"La réponse de {result.agent_name} ne respecte pas le schéma demandé : "
