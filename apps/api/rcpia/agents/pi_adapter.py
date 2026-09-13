@@ -191,7 +191,9 @@ class PiRunResult:
         if not isinstance(parsed, dict):
             raise PiOutputInvalid(
                 f"L'agent {self.agent_name} a renvoyé {type(parsed).__name__}, pas un objet JSON",
-                feedback=("La réponse doit être un objet JSON, pas une liste ou une valeur simple.",),
+                feedback=(
+                    "La réponse doit être un objet JSON, pas une liste ou une valeur simple.",
+                ),
             )
         return parsed
 
