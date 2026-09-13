@@ -2,6 +2,95 @@ import { API_BASE_URL } from "@/lib/api";
 
 export type Answer = "oui" | "non" | "a_determiner";
 
+export const AI_ORIGIN_TITLE =
+  "FICHE RCP — CREATED BY AN AI AGENT — PROPOSITION DE PRISE EN CHARGE (PPS)";
+
+export type ConciseFiche = {
+  contract: "rcpia.pps-fiche.v1";
+  decision: string;
+  oncogenetics: string;
+  oncogeriatrics: string;
+  fertility: string;
+  steps: { title: string; detail: string }[];
+  alternatives: { rank: number; detail: string }[];
+  precisions: string;
+  palliative_care: string;
+  treatment_status: string;
+  support: { title: string; detail: string }[];
+  carers: string;
+  location: string;
+  support_status: string;
+  social: string;
+  family: string;
+  discharge: string;
+  comment: string;
+  references: string;
+  clinical_trial: string;
+  review: string;
+  covered_option_ranks: number[];
+};
+
+export type InstitutionalFiche = Omit<
+  ConciseFiche, "contract" | "steps" | "alternatives" | "support"
+> & {
+  contract: "rcpia.pps-fiche.v2";
+  diagnosis: string;
+  comorbidities: string;
+  question: string;
+  steps: { title: string; items: string[] }[];
+  alternatives: { rank: number; title: string; items: string[] }[];
+  support: { title: string; items: string[] }[];
+  discharge_destination: "domicile" | "hospitalisation" | "autre";
+  reference_scope: "national" | "international" | "non_documente";
+};
+
+export type ProposedAction = {
+  action: string;
+  timing: string;
+  responsible: string;
+  conditions: string[];
+  evidence_ids: string[];
+};
+
+export type ProposedAnswer = {
+  answer: "oui" | "non";
+  rationale: string;
+  conditions: string[];
+  evidence_ids: string[];
+};
+
+export type PpsProposal = {
+  contract: "rcpia.pps-proposal.v1";
+  decision: string;
+  intent: "traitement" | "bilan_prealable" | "surveillance" | "soins_de_support";
+  rationale: string;
+  evidence_ids: string[];
+  referrals: {
+    oncogenetics: ProposedAnswer;
+    oncogeriatrics: ProposedAnswer;
+    fertility: ProposedAnswer;
+  };
+  options: {
+    rank: number;
+    title: string;
+    rationale: string;
+    conditions: string[];
+    steps: ProposedAction[];
+    evidence_ids: string[];
+  }[];
+  palliative_care: ProposedAnswer;
+  supportive_care: ProposedAction[];
+  support_location: string;
+  support_timing: string;
+  social_plan: string;
+  carers_plan: string;
+  discharge_plan: string;
+  clinical_trial: ProposedAnswer;
+  follow_up: ProposedAction;
+  missing_information: string[];
+  uncertainties: string[];
+};
+
 export type Referral = {
   label: string;
   answer: Answer;
@@ -65,6 +154,9 @@ export type Pps = {
   agent_run_ids: string[];
   generator_version: string;
   banner: string;
+  /** Absent on historical syntheses; never backfilled with invented decisions. */
+  proposal?: PpsProposal | null;
+  fiche?: ConciseFiche | InstitutionalFiche | null;
   synthesis: {
     patient: string;
     diagnosis: string | null;

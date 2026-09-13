@@ -12,12 +12,14 @@ sentence.
 import re
 
 from rcpia.pps.schemas import (
+    AI_ORIGIN_TITLE,
     Answer,
     PpsDocument,
     Referral,
     SupportItem,
     TreatmentStep,
 )
+from rcpia.pps.sections import SECTION_TITLES, proposal_sections
 from rcpia.rules.approval import SUGGESTION_CAVEAT
 
 CHECKED, UNCHECKED = "[X]", "[ ]"
@@ -31,15 +33,6 @@ SUGGESTION_LABELS = {"oui": "plutôt oui", "non": "plutôt non", "a_determiner":
 # indistinguishable from the real thing. Agent text is rendered inside a document whose
 # structure a reader trusts, so it must never be able to create any of them.
 STRUCTURAL_LINE = re.compile(r"^(\s*)([#>|]|-{3,}|={3,}|\[[ xX]\])")
-
-SECTION_TITLES = (
-    "SYNTHÈSE ET QUESTION POSÉE",
-    "DÉCISION RCP",
-    "PROPOSITIONS DE TRAITEMENTS",
-    "PROPOSITION D'ACCOMPAGNEMENT / SOINS DE SUPPORT",
-    "ÉVALUATION SOCIALE ET FAMILIALE",
-    "CADRE DE LA PRISE EN CHARGE",
-)
 
 HIGHLIGHT_MARK = {"red": "🔴", "amber": "🟠"}
 
@@ -272,6 +265,8 @@ def _panel(document: PpsDocument) -> list[str]:
 
 def render_markdown(document: PpsDocument) -> str:
     """The whole document. French throughout, because the readers are the RCP."""
+    if document.proposal is not None:
+        return _render_proposal_markdown(document)
     out: list[str] = ["# FICHE RCP — PROPOSITION DE PRISE EN CHARGE (PPS)", ""]
 
     # The banner comes before everything, including the header table: a reader who stops
@@ -442,6 +437,39 @@ def render_markdown(document: PpsDocument) -> str:
     out += _evidence_register(document)
     out += _appendices(document)
 
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _render_proposal_markdown(document: PpsDocument) -> str:
+    out = [f"# {AI_ORIGIN_TITLE}", "", f"> {_inline(document.banner)}", ""]
+    if document.fiche is None:
+        out += _table([
+        ("Dossier", document.case_reference),
+        ("Version des données", str(document.ledger_version)),
+        ("Avis analysés", ", ".join(document.agent_run_ids)),
+        ("Version du générateur", document.generator_version),
+        ])
+    if document.superseded_by is not None:
+        out += ["", "> Données modifiées depuis cette analyse : réanalyse requise.", ""]
+    for index, section in enumerate(proposal_sections(document), 1):
+        out += ["", f"# {index} — {section.title}", ""]
+        for block in section.blocks:
+            if block.kind == "table":
+                out += _table(block.rows)
+            elif block.kind == "heading":
+                out += [f"### {_inline(block.text)}"]
+            elif block.kind == "bullet":
+                out += [f"* {_inline(block.text)}"]
+            else:
+                out += _block(block.text)
+            out.append("")
+    if document.fiche is not None:
+        return "\n".join(out).rstrip() + "\n"
+    out += _missing_report(document)
+    out += _nomograms(document)
+    out += _panel(document)
+    out += _evidence_register(document)
+    out += _appendices(document)
     return "\n".join(out).rstrip() + "\n"
 
 

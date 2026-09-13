@@ -477,9 +477,12 @@ async def build_bundle(
             )
     if agent_role == SYNTHESIS_ROLE:
         constraints.append(
-            "Vous recevez les avis déjà rendus par les spécialistes. Rapportez leurs "
-            "convergences et leurs divergences ; n'arbitrez pas un désaccord et ne "
-            "choisissez pas entre deux spécialités — exposez le désaccord à la RCP."
+            "Produisez une proposition PPS complète : une stratégie retenue, des options "
+            "classées et des étapes concrètes. Appuyez votre choix sur les faits et preuves "
+            "fournis ; conservez les désaccords sans inventer un consensus. Les choix "
+            "proposés ne sont ni une validation clinique ni des faits patient. Si un "
+            "traitement dépend d'une donnée absente, donnez la condition et la conduite "
+            "alternative ; précisez le bilan immédiat, sans reporter tout le PPS."
         )
         if not opinions:
             constraints.append(
@@ -516,12 +519,18 @@ async def build_bundle(
         inputs=inputs,
         # By field name, not by the `schema` alias: `schema_` avoids shadowing
         # pydantic's own attribute, and the alias is what serialization emits.
-        output_format=OutputFormat(schema_=agent_output_json_schema(agent_role)),
+        output_format=OutputFormat(schema_=agent_output_json_schema(
+            agent_role, decision_led=True, institutional=True,
+        )),
         constraints=constraints,
     )
 
-    # Refused, not silently trimmed further. A case this large is a situation a person
-    # has to look at, and a provider error would tell them nothing about why.
+    check_bundle_size(bundle)
+    return BuiltBundle(bundle=bundle, ledger_version=version, report=report)
+
+
+def check_bundle_size(bundle: TaskBundle) -> None:
+    """Include retry diagnostics in the same unchanged transmission ceiling."""
     size = len(bundle_bytes(bundle))
     if size > MAX_BUNDLE_BYTES:
         raise BundleTooLarge(
@@ -529,9 +538,6 @@ async def build_bundle(
             f"({size // 1024} Ko pour un maximum de {MAX_BUNDLE_BYTES // 1024} Ko). "
             "Réduisez le nombre de documents ou scindez l'analyse."
         )
-
-    return BuiltBundle(bundle=bundle, ledger_version=version, report=report)
-
 
 def _priority(entry: LedgerEntry, cancer_type: CancerType) -> tuple[int, str]:
     """Rank a field by how badly its sources are needed, lowest first.

@@ -39,12 +39,14 @@ from rcpia.pps.render import (
     SUGGESTION_LABELS,
 )
 from rcpia.pps.schemas import (
+    AI_ORIGIN_TITLE,
     NomogramFigure,
     PpsDocument,
     Referral,
     SupportItem,
     TreatmentStep,
 )
+from rcpia.pps.sections import proposal_sections
 from rcpia.rules.approval import SUGGESTION_CAVEAT
 
 # Word's own defaults read as a draft. A named font and a modest heading scale are the
@@ -444,6 +446,8 @@ def _header_rows(document: PpsDocument) -> list[tuple[str, str]]:
 
 def render_fiche_docx(document: PpsDocument) -> Document:
     """Sections 1 to 6 and what is missing: the document the RCP reads and acts on."""
+    if document.proposal is not None:
+        return _render_proposal_fiche(document)
     doc = _document()
     _provisional_footer(doc)
     doc.add_heading("FICHE RCP — PROPOSITION DE PRISE EN CHARGE (PPS)", level=0)
@@ -623,6 +627,40 @@ def render_fiche_docx(document: PpsDocument) -> Document:
     return doc
 
 
+def _render_proposal_fiche(document: PpsDocument) -> Document:
+    doc = _document()
+    _provisional_footer(doc)
+    doc.add_heading(AI_ORIGIN_TITLE, level=0)
+    _banner(doc, document.banner)
+    if document.fiche is None:
+        _kv_table(doc, _header_rows(document))
+    if document.superseded_by is not None:
+        _banner(doc, "Données modifiées depuis cette analyse : réanalyse requise.")
+    _version_divergence(doc, document)
+    for index, section in enumerate(proposal_sections(document), 1):
+        _heading(doc, f"{index} — {section.title}")
+        for block in section.blocks:
+            if block.kind == "table":
+                _kv_table(doc, block.rows)
+            elif block.kind == "heading":
+                _heading(doc, block.text, level=2)
+            elif block.kind == "bullet":
+                doc.add_paragraph(block.text, style="List Bullet")
+            else:
+                _paragraphs(doc, block.text)
+    if document.fiche is not None:
+        return doc
+    if document.missing:
+        _heading(doc, "INFORMATIONS REQUISES")
+        _kv_table(doc, [(item.label, item.message) for item in document.missing])
+    _nomograms(doc, document)
+    _withheld_specialists(doc, document)
+    if not document.evidence:
+        _banner(doc, "Aucune source citée : proposition non étayée.")
+    _muted(doc, "Les sources et les attributions détaillées figurent dans le dossier probatoire.")
+    return doc
+
+
 def render_probatoire_docx(document: PpsDocument) -> Document:
     """The sources register and every specialist's full reasoning.
 
@@ -640,6 +678,22 @@ def render_probatoire_docx(document: PpsDocument) -> Document:
         "agent et vérifiée avant que sa recommandation ne soit acceptée.",
     )
     _kv_table(doc, _header_rows(document))
+    if document.proposal is not None:
+        _panel(doc, document)
+    if document.fiche is not None:
+        _heading(doc, "PROPOSITION DÉTAILLÉE ET CONDITIONS")
+        for section in proposal_sections(document, detailed=True):
+            _heading(doc, section.title, level=2)
+            for block in section.blocks:
+                if block.kind == "table":
+                    _kv_table(doc, block.rows)
+                else:
+                    _paragraphs(doc, block.text)
+        if document.missing:
+            _heading(doc, "INFORMATIONS REQUISES")
+            _kv_table(doc, [(item.label, item.message) for item in document.missing])
+        _nomograms(doc, document)
+        _withheld_specialists(doc, document)
 
     _heading(doc, "REGISTRE DES SOURCES")
     if not document.evidence:

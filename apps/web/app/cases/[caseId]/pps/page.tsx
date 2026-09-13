@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { SERVER_API_BASE_URL } from "@/lib/api";
 import {
   AGENT_LABELS,
+  AI_ORIGIN_TITLE,
   ANSWER_LABELS,
   docxUrl,
   downloadUrl,
@@ -17,6 +18,7 @@ import {
   type TreatmentStep,
 } from "@/lib/pps";
 
+import { DecisionProposal } from "./decision-proposal";
 
 export const dynamic = "force-dynamic";
 
@@ -133,7 +135,7 @@ export default async function PpsPage({
           nothing. */}
       <p className="provisional">{pps.banner}</p>
 
-      <h1>Fiche RCP — proposition de prise en charge</h1>
+      <h1>{pps.proposal ? AI_ORIGIN_TITLE : "Fiche RCP — proposition de prise en charge"}</h1>
       {pps.superseded_by !== null ? (
         <p className="provisional">
           Données modifiées depuis cette analyse : l&apos;avis porte sur la version{" "}
@@ -141,11 +143,11 @@ export default async function PpsPage({
           l&apos;analyse avant de vous appuyer sur ce document.
         </p>
       ) : null}
-      <p className="muted">
+      {!pps.fiche && <p className="muted">
         Dossier {pps.case_reference} · généré le {pps.generated_on} · données version{" "}
         {pps.ledger_version} · générateur {pps.generator_version} · avis{" "}
         {pps.agent_run_ids.join(", ") || "—"}
-      </p>
+      </p>}
       {/* The fiche is what goes to the RCP; the probatoire and the markdown are for
           whoever wants to check the reasoning behind it. */}
       <p className="downloads">
@@ -170,6 +172,10 @@ export default async function PpsPage({
         <dd>{pps.synthesis.question}</dd>
       </dl>
 
+      {pps.proposal ? (
+        <DecisionProposal pps={pps} proposal={pps.proposal} />
+      ) : (
+        <>
       <h2>2 — Décision RCP</h2>
       <p>{pps.decision.statement}</p>
       <ul>
@@ -264,7 +270,10 @@ export default async function PpsPage({
         <dt>Réévaluation</dt>
         <dd>{pps.framework.review}</dd>
       </dl>
+        </>
+      )}
 
+      {!pps.fiche && <>
       <h2>Informations manquantes et incertaines</h2>
       {pps.missing.length === 0 ? (
         <p className="muted">
@@ -339,6 +348,7 @@ export default async function PpsPage({
           ) : null}
         </section>
       ))}
+      </>}
     </section>
   );
 }

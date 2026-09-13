@@ -18,6 +18,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from rcpia.agents.pps_fiche import ConciseFiche, InstitutionalFiche
+from rcpia.agents.pps_proposal import PpsProposal
 from rcpia.rules.approval import SUGGESTION_CAVEAT, Authority
 
 # Section 2 records a decision the RCP has not yet taken, and section 6 records validation
@@ -39,6 +41,9 @@ PROVISIONAL_BANNER = (
     "DOCUMENT PROVISOIRE — préparé automatiquement par RCPia à partir du dossier déposé. "
     "Aucune décision n'a été prise. Ce document doit être relu, corrigé et validé en RCP "
     "avant tout usage clinique."
+)
+AI_ORIGIN_TITLE = (
+    "FICHE RCP — CREATED BY AN AI AGENT — PROPOSITION DE PRISE EN CHARGE (PPS)"
 )
 
 
@@ -80,9 +85,16 @@ class Referral(Strict):
     # RCPia's unvalidated reading. Never rendered as the checkbox.
     suggestion: Answer | None = None
     authority: Authority = Authority.none
+    kind: Literal["rule", "draft_proposal"] = "rule"
 
     @model_validator(mode="after")
     def only_a_clinician_may_tick_the_box(self) -> "Referral":
+        if self.kind == "draft_proposal":
+            if self.authority is not Authority.none or self.suggestion is not None:
+                raise ValueError(
+                    "Une proposition ne peut pas se présenter comme une règle validée."
+                )
+            return self
         if (
             self.answer != "a_determiner"
             and self.authority is not Authority.clinician_approved
@@ -373,6 +385,8 @@ class PpsDocument(Strict):
     generator_version: str = "0"
 
     banner: str = PROVISIONAL_BANNER
+    proposal: PpsProposal | None = None
+    fiche: ConciseFiche | InstitutionalFiche | None = None
     synthesis: Synthesis
     decision: Decision
     # Empty unless a synthesis agent reconciled several specialists.
@@ -397,6 +411,12 @@ class PpsDocument(Strict):
         `"[X] Non"` inside a display string, which a value reading `[X] Non … [X] Oui`
         satisfied while claiming the opposite. Booleans cannot be phrased around.
         """
+        if self.fiche is not None:
+            if self.proposal is None:
+                raise DocumentAssertsADecision(
+                    "A concise fiche requires its detailed source proposal"
+                )
+            self.fiche.validate_for(self.proposal)
         if self.decision.taken:
             raise DocumentAssertsADecision("decision.taken is True in a generated PPS")
         if self.framework.validated:
@@ -415,6 +435,10 @@ class PpsDocument(Strict):
         # text that happens to contain the phrase, and the previous two attempts at this
         # guard were both defeated that way.
         for referral in self.decision.referrals:
+            if referral.kind == "draft_proposal":
+                if self.proposal is None or referral.authority is not Authority.none:
+                    raise DocumentAssertsADecision("An unsupported draft checkbox was supplied")
+                continue
             if (
                 referral.answer != "a_determiner"
                 and referral.authority is not Authority.clinician_approved
@@ -422,6 +446,23 @@ class PpsDocument(Strict):
                 raise DocumentAssertsADecision(
                     f"{referral.label}: {referral.authority} ticked the decision box"
                 )
+
+        if self.proposal is not None:
+            expected = [
+                self.proposal.referrals.oncogenetics.answer,
+                self.proposal.referrals.oncogeriatrics.answer,
+                self.proposal.referrals.fertility.answer,
+            ]
+            if (
+                [referral.answer for referral in self.decision.referrals] != expected
+                or any(r.kind != "draft_proposal" for r in self.decision.referrals)
+                or self.decision.statement != (
+                    self.fiche.decision if self.fiche else self.proposal.decision
+                )
+                or self.framework.clinical_trial != self.proposal.clinical_trial.answer
+                or self.treatments.withheld
+            ):
+                raise DocumentAssertsADecision("PPS fields contradict the stored draft proposal")
 
         # Prose RCPia authors must not carry the phrases that mean "decided" and
         # "validated". This is not applied to the whole document: an agent or a dossier

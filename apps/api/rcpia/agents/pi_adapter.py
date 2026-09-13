@@ -139,6 +139,10 @@ class PiRunFailed(PiError):
 class PiOutputInvalid(PiError):
     """Pi produced text that is not the JSON the task bundle asked for."""
 
+    def __init__(self, message: str, *, feedback: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.feedback = feedback
+
 
 @dataclass(frozen=True)
 class PiUsage:
@@ -178,11 +182,18 @@ class PiRunResult:
             parsed = json.loads(text)
         except json.JSONDecodeError as exc:
             raise PiOutputInvalid(
-                f"L'agent {self.agent_name} n'a pas renvoyé de JSON exploitable : {exc}"
+                f"L'agent {self.agent_name} n'a pas renvoyé de JSON exploitable : {exc}",
+                feedback=(
+                    "Retournez un seul objet JSON complet et valide, sans chaîne inachevée "
+                    "ni commentaire hors JSON.",
+                ),
             ) from exc
         if not isinstance(parsed, dict):
             raise PiOutputInvalid(
-                f"L'agent {self.agent_name} a renvoyé {type(parsed).__name__}, pas un objet JSON"
+                f"L'agent {self.agent_name} a renvoyé {type(parsed).__name__}, pas un objet JSON",
+                feedback=(
+                    "La réponse doit être un objet JSON, pas une liste ou une valeur simple.",
+                ),
             )
         return parsed
 
@@ -718,6 +729,7 @@ class PiAdapter:
 
         session_bytes = written
         parsed = parse_session(session_bytes)
+        parsed.require_complete(agent_name=agent_name, session_bytes=session_bytes)
 
         if not parsed.output_text.strip():
             raise PiRunFailed(
@@ -767,12 +779,23 @@ class ParsedSession:
     session_id: str | None = None
     usage: PiUsage = field(default_factory=PiUsage)
     assistant_messages: int = 0
+    stop_reason: str | None = None
+    error_message: str | None = None
+
+    def require_complete(self, *, agent_name: str, session_bytes: bytes) -> None:
+        if self.stop_reason in {"error", "aborted", "length"} or self.error_message:
+            raise PiRunFailed(
+                f"La réponse de {agent_name} a été interrompue "
+                f"(stopReason={self.stop_reason or 'error'}). "
+                f"{(self.error_message or '')[:500]}",
+                session_bytes=session_bytes,
+            )
 
 
 def parse_session(session: bytes | str) -> ParsedSession:
     """Read Pi's append-only JSONL session.
 
-    The final answer is the **last** assistant text part, not every text part joined.
+    The final answer is the text of the **last** assistant message, even when empty.
     A model that says anything before its JSON — a sentence of preamble, a retry after a
     tool call — would otherwise produce a concatenation that parses as nothing at all.
     Thinking and tool-call parts are skipped; they are reasoning, not answer.
@@ -789,6 +812,8 @@ def parse_session(session: bytes | str) -> ParsedSession:
     input_tokens = output_tokens = total_tokens = 0
     cost = 0.0
     assistant_messages = 0
+    stop_reason: str | None = None
+    error_message: str | None = None
 
     for line in text.splitlines():
         line = line.strip()
@@ -819,6 +844,10 @@ def parse_session(session: bytes | str) -> ParsedSession:
         assistant_messages += 1
         provider = message.get("provider") or provider
         model = message.get("model") or model
+        reason = message.get("stopReason")
+        error = message.get("errorMessage")
+        stop_reason = reason if isinstance(reason, str) else None
+        error_message = error if isinstance(error, str) else None
 
         usage = message.get("usage")
         if isinstance(usage, dict):
@@ -841,9 +870,8 @@ def parse_session(session: bytes | str) -> ParsedSession:
             for part in message.get("content") or []
             if isinstance(part, dict) and part.get("type") == "text"
         ]
-        joined = "".join(parts)
-        if joined.strip():
-            last_text = joined
+        # An empty retry cannot lend its successful status to an earlier failed answer.
+        last_text = "".join(parts)
 
     return ParsedSession(
         output_text=last_text or "",
@@ -857,4 +885,6 @@ def parse_session(session: bytes | str) -> ParsedSession:
             cost_total=cost,
         ),
         assistant_messages=assistant_messages,
+        stop_reason=stop_reason,
+        error_message=error_message,
     )

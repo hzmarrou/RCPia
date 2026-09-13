@@ -279,6 +279,12 @@ The concatenated text is then validated against the agent's Pydantic output sche
 
 Task bundles are written as JSON files and passed via `-p "@path"`. The format follows the structure proven in `pi-agent-fleet`:
 
+The attachment uses compact UTF-8 JSON through `agents.serialization.bundle_bytes`.
+Only JSON formatting whitespace is omitted; string contents, source quotations, metadata,
+arrays and the output schema are unchanged. The bundle gate measures these same bytes
+that the adapter writes. The 223,232-byte ceiling is unchanged: an oversized compact
+bundle is still refused, never trimmed to fit. The example below is indented for readability.
+
 ```json
 {
   "goal": "Produce a structured specialist recommendation for this urological oncology case.",

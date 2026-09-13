@@ -20,12 +20,21 @@ Four rules shape this handler, and they are the same ones parsing follows:
 
 import logging
 import uuid
+from dataclasses import replace
 
 import sqlalchemy as sa
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rcpia.agents.bundle import BuiltBundle, BundleError, build_bundle
+from rcpia.agents.bundle import BuiltBundle, BundleError, build_bundle, check_bundle_size
+from rcpia.agents.output_processing import (
+    FEEDBACK_KEY,
+    complete_reference_register,
+    feedback_for_failure,
+    schema_feedback,
+    validation_location,
+    with_output_feedback,
+)
 from rcpia.agents.pi_adapter import (
     PiAdapter,
     PiNotConfigured,
@@ -33,6 +42,7 @@ from rcpia.agents.pi_adapter import (
     PiRunFailed,
     PiRunResult,
 )
+from rcpia.agents.pps_fiche import CURRENT_SYNTHESIS_CONTRACT
 from rcpia.agents.schemas import (
     SYNTHESIS_ROLE,
     AgentOutput,
@@ -44,7 +54,7 @@ from rcpia.agents.schemas import (
     UngroundedRecommendation,
     check_citations,
     check_synthesis,
-    output_model_for,
+    output_model_from_schema,
 )
 from rcpia.cases.ledger import latest_version
 from rcpia.core.models import (
@@ -113,6 +123,14 @@ async def run_agent(
     it is ungrounded, not fail to produce a fiche at all.
     """
     agent_role = str(job.payload.get("agent_role") or DEFAULT_AGENT_ROLE)
+    if (
+        agent_role == SYNTHESIS_ROLE
+        and job.payload.get("pps_proposal_contract") != CURRENT_SYNTHESIS_CONTRACT
+    ):
+        return _terminal(
+            "Contrat PPS absent ou obsolète : demandez une nouvelle synthèse. "
+            "Les avis historiques restent consultables."
+        )
     if (
         agent_role != SYNTHESIS_ROLE
         and job.payload.get("retrieval_contract") != RETRIEVAL_CONTRACT
@@ -209,6 +227,16 @@ async def run_agent(
         blocking = " ; ".join(issue.message for issue in built.report.blocking)
         return JobOutcome(status=JobStatus.waiting_for_user, error_message=blocking)
 
+    if FEEDBACK_KEY in job.payload:
+        try:
+            retry_bundle = with_output_feedback(built.bundle, job.payload[FEEDBACK_KEY])
+            check_bundle_size(retry_bundle)
+        except ValidationError:
+            return _terminal("Retour de validation invalide : demandez une nouvelle analyse.")
+        except (ValueError, BundleError) as exc:
+            return _terminal(str(exc))
+        built = replace(built, bundle=retry_bundle)
+
     run_id = uuid.uuid4()
     await milestones(RunStep.REASONING)
     try:
@@ -262,8 +290,13 @@ async def run_agent(
     adapter.cleanup(case_id=case.id, agent_name=agent_role, run_id=run_id)
 
     try:
-        output = _validated_output(result, built.bundle)
+        output, register_completion = _validated_output_with_receipt(result, built.bundle)
     except PiOutputInvalid as exc:
+        if exc.feedback:
+            job.payload = {
+                **job.payload,
+                FEEDBACK_KEY: feedback_for_failure(built.bundle, run_id, exc.feedback),
+            }
         await _record_failure(
             session,
             job=job,
@@ -318,6 +351,8 @@ async def run_agent(
                 "recommendation_withheld": output.recommendation_withheld,
                 "total_tokens": result.usage.total_tokens,
                 "duration_ms": run.duration_ms,
+                "reference_register_completion": register_completion,
+                "validation_feedback_used": FEEDBACK_KEY in job.payload,
             },
         )
     )
@@ -346,6 +381,12 @@ async def _requested_version(
 
 
 def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
+    return _validated_output_with_receipt(result, bundle)[0]
+
+
+def _validated_output_with_receipt(
+    result: PiRunResult, bundle: TaskBundle,
+) -> tuple[AgentOutput, list[dict[str, str]]]:
     """Parse, validate, and reject anything the agent was not entitled to say."""
     payload = result.output_json()
 
@@ -353,11 +394,18 @@ def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
     # call decides both, so a synthesis is not rejected for returning the fields it was told
     # to return.
     try:
-        output = output_model_for(bundle.inputs.agent_role).model_validate(payload)
+        model = output_model_from_schema(bundle.inputs.agent_role, bundle.output_format.schema_)
+    except ValueError as exc:
+        raise PiOutputInvalid(str(exc)) from exc
+    try:
+        output = model.model_validate(payload)
     except ValidationError as exc:
+        first = exc.errors(include_input=False, include_url=False)[0]
         raise PiOutputInvalid(
             f"La réponse de {result.agent_name} ne respecte pas le schéma demandé : "
-            f"{exc.error_count()} erreur(s) — {exc.errors()[0].get('msg', '')}"
+            f"{exc.error_count()} erreur(s) — {validation_location(first['loc'])}: "
+            f"{first.get('msg', '')}",
+            feedback=schema_feedback(exc),
         ) from exc
 
     # The agent is asked to echo the case and role it was given. Getting either wrong
@@ -365,30 +413,49 @@ def _validated_output(result: PiRunResult, bundle: TaskBundle) -> AgentOutput:
     if output.case_id != bundle.inputs.case_id:
         raise PiOutputInvalid(
             f"La réponse porte sur le dossier {output.case_id}, "
-            f"pas sur {bundle.inputs.case_id}."
+            f"pas sur {bundle.inputs.case_id}.",
+            feedback=("Recopiez exactement inputs.case_id dans case_id.",),
         )
     if output.agent_role != bundle.inputs.agent_role:
         raise PiOutputInvalid(
             f"La réponse est signée {output.agent_role}, "
-            f"pas {bundle.inputs.agent_role}."
+            f"pas {bundle.inputs.agent_role}.",
+            feedback=("Recopiez exactement inputs.agent_role dans agent_role.",),
         )
 
     try:
         check_citations(output, bundle)
     except CITATION_FAILURES as exc:
-        raise PiOutputInvalid(str(exc)) from exc
+        raise PiOutputInvalid(
+            str(exc),
+            feedback=(
+                "Les citations doivent utiliser uniquement les identifiants fournis dans "
+                "source_snippets/guideline_passages, dans les champs structurés prévus. "
+                "Chaque recommandation doit être étayée ; n'inventez aucune source.",
+            ),
+        ) from exc
 
     # A synthesis claims agreements between agents it read. Each claim must be quotable from
     # the agent's own opinion, for the same reason an evidence citation must resolve: an
     # assertion nobody can check is not reviewable, and a fabricated consensus reads exactly
     # like a real one on the rendered page.
+    register_completion: list[dict[str, str]] = []
     if isinstance(output, SynthesisOutput):
         try:
+            output, register_completion = complete_reference_register(output, bundle)
+            assert isinstance(output, SynthesisOutput)
             check_synthesis(output, bundle)
         except UnattestedAgreement as exc:
-            raise PiOutputInvalid(str(exc)) from exc
+            raise PiOutputInvalid(
+                str(exc),
+                feedback=(
+                    "Respectez les citations et l'attribution : chaque quote doit reprendre "
+                    "la position du rôle réellement fourni ; silence et accord sont distincts. "
+                    "N'inventez ni identifiant, ni avis, ni consensus.",
+                ),
+            ) from exc
 
-    return output
+    return output, register_completion
 
 
 async def _archive_session(
