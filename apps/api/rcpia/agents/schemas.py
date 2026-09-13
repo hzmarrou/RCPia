@@ -817,6 +817,9 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
         for option in (*output.alternatives, *output.rejected_options)
         for evidence_id in option.evidence_ids
     }
+    on_proposal = (
+        output.pps_proposal.cited_ids() if isinstance(output, DecisionLedSynthesisOutput) else set()
+    )
     # Matched case-insensitively: an id is only miscased or fabricated, and a reviewer
     # reading "SNIP-001" would find snip-001 without difficulty.
     allowed_folded = {identifier.casefold() for identifier in allowed}
@@ -825,7 +828,7 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
     invented = sorted(
         {
             identifier
-            for identifier in (on_recommendation | on_options)
+            for identifier in (on_recommendation | on_options | on_proposal)
             if identifier.casefold() not in allowed_folded
         }
         | {identifier for identifier in in_prose if identifier not in allowed_folded}
@@ -851,7 +854,9 @@ def check_citations(output: AgentOutput, bundle: TaskBundle) -> None:
     # in prose: two otherwise healthy runs, carrying eight and six references each, listed
     # twenty-odd `snip-NNN` there. Reading that as a misplaced citation would fail an
     # agent for using the field as intended.
-    structured = {identifier.casefold() for identifier in (on_recommendation | on_options)}
+    structured = {
+        identifier.casefold() for identifier in (on_recommendation | on_options | on_proposal)
+    }
     passages = {passage.id.casefold() for passage in bundle.inputs.guideline_passages}
     misplaced = sorted(
         identifier

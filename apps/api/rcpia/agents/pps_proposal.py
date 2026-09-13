@@ -1,5 +1,7 @@
 """A proposed care decision, distinct from a clinician's approval or a fact."""
 
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Annotated, Final, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
@@ -51,6 +53,14 @@ class ProposalReferrals(Strict):
     fertility: ProposedAnswer
 
 
+@dataclass(frozen=True)
+class ProposalCitation:
+    id: str
+    evidence_path: str
+    supports: str
+    supports_path: str
+
+
 class PpsProposal(Strict):
     contract: Literal["rcpia.pps-proposal.v1"] = PPS_PROPOSAL_CONTRACT
     decision: Text
@@ -77,23 +87,47 @@ class PpsProposal(Strict):
             raise ValueError("Les options doivent être classées 1, 2, ... ; le rang 1 est retenu.")
         return self
 
-    def cited_ids(self) -> set[str]:
-        identifiers = set(self.evidence_ids)
-        for answer in (
-            self.referrals.oncogenetics,
-            self.referrals.oncogeriatrics,
-            self.referrals.fertility,
-            self.clinical_trial,
-            self.palliative_care,
+    def citation_uses(self) -> Iterator[ProposalCitation]:
+        """Locate explicit citations and their own, unchanged supporting statement."""
+        def uses(
+            path: str, identifiers: list[str], supports: str, field: str,
+        ) -> Iterator[ProposalCitation]:
+            for identifier in identifiers:
+                yield ProposalCitation(
+                    identifier, f"{path}.evidence_ids", supports, f"{path}.{field}",
+                )
+
+        root = "pps_proposal"
+        yield from uses(root, self.evidence_ids, self.rationale, "rationale")
+        for name, answer in (
+            ("oncogenetics", self.referrals.oncogenetics),
+            ("oncogeriatrics", self.referrals.oncogeriatrics),
+            ("fertility", self.referrals.fertility),
         ):
-            identifiers.update(answer.evidence_ids)
-        for option in self.options:
-            identifiers.update(option.evidence_ids)
-            for step in option.steps:
-                identifiers.update(step.evidence_ids)
-        for action in (*self.supportive_care, self.follow_up):
-            identifiers.update(action.evidence_ids)
-        return identifiers
+            yield from uses(
+                f"{root}.referrals.{name}", answer.evidence_ids, answer.rationale, "rationale",
+            )
+        for name, answer in (
+            ("clinical_trial", self.clinical_trial), ("palliative_care", self.palliative_care),
+        ):
+            yield from uses(f"{root}.{name}", answer.evidence_ids, answer.rationale, "rationale")
+        for index, option in enumerate(self.options):
+            path = f"{root}.options[{index}]"
+            yield from uses(path, option.evidence_ids, option.rationale, "rationale")
+            for step_index, step in enumerate(option.steps):
+                yield from uses(
+                    f"{path}.steps[{step_index}]", step.evidence_ids, step.action, "action",
+                )
+        for index, action in enumerate(self.supportive_care):
+            yield from uses(
+                f"{root}.supportive_care[{index}]", action.evidence_ids, action.action, "action",
+            )
+        yield from uses(
+            f"{root}.follow_up", self.follow_up.evidence_ids, self.follow_up.action, "action",
+        )
+
+    def cited_ids(self) -> set[str]:
+        return {use.id for use in self.citation_uses()}
 
     def prose(self) -> list[str]:
         def strings(value: object) -> list[str]:

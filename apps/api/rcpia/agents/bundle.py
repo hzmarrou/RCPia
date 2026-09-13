@@ -525,8 +525,12 @@ async def build_bundle(
         constraints=constraints,
     )
 
-    # Refused, not silently trimmed further. A case this large is a situation a person
-    # has to look at, and a provider error would tell them nothing about why.
+    check_bundle_size(bundle)
+    return BuiltBundle(bundle=bundle, ledger_version=version, report=report)
+
+
+def check_bundle_size(bundle: TaskBundle) -> None:
+    """Include retry diagnostics in the same unchanged transmission ceiling."""
     size = len(bundle_bytes(bundle))
     if size > MAX_BUNDLE_BYTES:
         raise BundleTooLarge(
@@ -534,9 +538,6 @@ async def build_bundle(
             f"({size // 1024} Ko pour un maximum de {MAX_BUNDLE_BYTES // 1024} Ko). "
             "Réduisez le nombre de documents ou scindez l'analyse."
         )
-
-    return BuiltBundle(bundle=bundle, ledger_version=version, report=report)
-
 
 def _priority(entry: LedgerEntry, cancer_type: CancerType) -> tuple[int, str]:
     """Rank a field by how badly its sources are needed, lowest first.

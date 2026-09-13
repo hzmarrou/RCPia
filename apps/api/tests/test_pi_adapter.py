@@ -418,6 +418,66 @@ async def test_an_answer_split_across_text_parts_is_rejoined(
     assert result.output_json()["case_id"] == str(CASE_ID)
 
 
+@pytest.mark.parametrize("mode", ["provider_error", "provider_aborted", "provider_length"])
+async def test_zero_exit_with_interrupted_provider_response_is_not_a_success(
+    adapter: PiAdapter, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    with pytest.raises(PiRunFailed, match="interrompue") as caught:
+        await run(adapter, monkeypatch, mode=mode)
+    assert caught.value.session_bytes
+    parsed = parse_session(caught.value.session_bytes)
+    assert parsed.stop_reason == mode.removeprefix("provider_")
+    # Even a syntactically complete object cannot override an explicit interruption.
+    assert json.loads(parsed.output_text)["case_id"] == str(CASE_ID)
+
+
+async def test_completed_response_after_transient_provider_error_is_accepted(
+    adapter: PiAdapter, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed = await run(adapter, monkeypatch, mode="provider_recovered")
+    assert completed.output_json()["case_id"] == str(CASE_ID)
+    parsed = parse_session(completed.session_bytes)
+    assert parsed.error_message is None
+    assert parsed.stop_reason not in {"error", "aborted", "length"}
+
+
+@pytest.mark.parametrize("mode", [
+    "provider_empty_recovery", "provider_thinking_recovery",
+    "provider_whitespace_recovery", "provider_tool_recovery",
+])
+async def test_recovery_without_its_own_answer_cannot_resurrect_failed_json(
+    adapter: PiAdapter, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    with pytest.raises(PiRunFailed, match="aucune réponse") as caught:
+        await run(adapter, monkeypatch, mode=mode)
+    assert caught.value.session_bytes
+    parsed = parse_session(caught.value.session_bytes)
+    assert parsed.stop_reason == "stop"
+    assert not parsed.output_text.strip()
+    messages = [
+        event["message"] for line in caught.value.session_bytes.decode("utf-8").splitlines()
+        if (event := json.loads(line)).get("type") == "message"
+        and event["message"].get("role") == "assistant"
+    ]
+    assert messages[-2]["stopReason"] == "error"
+    assert json.loads(messages[-2]["content"][0]["text"])["case_id"] == str(CASE_ID)
+
+
+def test_final_empty_error_message_cannot_reuse_an_earlier_answer() -> None:
+    session = "\n".join([
+        json.dumps({"type": "message", "message": {
+            "role": "assistant", "content": [{"type": "text", "text": "{}"}],
+        }}),
+        json.dumps({"type": "message", "message": {
+            "role": "assistant", "content": [], "stopReason": "error",
+            "errorMessage": "terminated",
+        }}),
+    ]).encode("utf-8")
+    parsed = parse_session(session)
+    with pytest.raises(PiRunFailed, match="terminated"):
+        parsed.require_complete(agent_name="rcp_synthesis", session_bytes=session)
+
+
 def test_parts_are_joined_within_a_message_but_not_across_messages() -> None:
     """The two mistakes are opposites: joining across messages would concatenate a
     preamble onto the answer, and not joining within one would truncate it."""

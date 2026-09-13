@@ -1,6 +1,6 @@
 # Decision-led PPS and reviewer copies
 
-New synthesis jobs use `rcpia.pps-proposal.v3` by default. They produce an explicit
+New synthesis jobs use `rcpia.pps-proposal.v4` by default. They produce an explicit
 preferred strategy, ranked alternatives, sequenced actions, proposed referral/trial
 answers, palliative and supportive care, social planning and follow-up. Conditions
 and missing information remain visible. A required preliminary work-up is a
@@ -33,6 +33,42 @@ a question, not a confirmed diagnosis, stage or resectability finding.
 These structural checks do not prove semantic equivalence; clinical review must
 check that the summary preserves the conditions that change the treatment choice.
 
+## Output reliability and audit
+
+The v4 execution contract keeps the detailed proposal and fiche schemas unchanged.
+After validating the original structured citations, the service completes a missing
+outer `evidence_references` entry only from an explicit `pps_proposal.evidence_ids`
+use (including nested actions/referrals). It copies that use's existing rationale
+or action verbatim into `supports`; it never invents an ID, selects new evidence,
+changes a clinical statement, or removes an existing reference. Existing grounding,
+allowlist, attribution and complete-register checks still apply. An entirely
+ungrounded outer recommendation is not repaired from incidental support citations.
+
+The accepted database output includes those mirrored entries. Its
+`agent.run_completed` audit event records `reference_register_completion` with the
+exact citation and source-field paths. The archived Pi transcript retains the raw
+model response, including the original register omission. A mirrored entry records
+the model's existing support claim; it does not prove clinical entailment.
+
+Schema/JSON failures still reject the attempt. Within the existing queue attempt
+budget, a failed validation stores bounded technical feedback in the job payload.
+The next bundle carries it in `constraints`, never as patient data or a specialist
+opinion. It includes field locations and length bounds, not the failed clinical
+draft. Feedback is bound to the exact patient/evidence/opinion inputs and output
+schema; a mismatch explicitly stops that retry. Diagnostics are included in the
+same 223,232-byte limit and each attempted bundle remains archived.
+
+No text is truncated and no length bound is increased. In particular, diagnosis
+and comorbidities remain limited to 450 characters each; an overlong summary must
+be reformulated by the model while preserving decision-relevant conditions.
+
+An explicit interrupted provider response (`error`, `aborted`, `length`, or an
+error message) is a runtime failure even when Pi exits with code zero or leaves
+parseable partial text. Its transcript is retained. A later completed response
+can recover only with its own nonempty answer; an empty, thinking-only or tool-only
+retry cannot reuse an earlier failed answer. An earlier answer cannot mask a final
+provider error.
+
 The six reference sections share their content between Word and Markdown; the
 web representation uses the same typed concise fiche. Actual
 validation, communication to the GP, calculator eligibility and approval of
@@ -55,7 +91,7 @@ a preferred strategy does not change the recorded disagreements or invent consen
 
 New standalone and automatic synthesis jobs carry `pps_proposal_contract`.
 The synthesis deduplication fingerprint includes that contract. Workers explicitly
-refuse unversioned/obsolete synthesis jobs rather than silently running them under
+refuse unversioned/obsolete synthesis jobs (including v3) rather than silently running them under
 a changed instruction set. Drain old jobs before rollout, or request a new
 synthesis after an obsolete job settles. Historical successful runs remain readable;
 their stored schema distinguishes them from required current proposals.

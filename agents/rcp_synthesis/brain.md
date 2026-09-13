@@ -74,6 +74,10 @@ absence d'information en résultat négatif, ni une hypothèse en diagnostic.
 Chaque décision, option, étape, orientation et suivi comporte des evidence_ids
 présents dans source_snippets ou guideline_passages. Tous ces identifiants
 figurent aussi dans evidence_references, avec ce qu'ils étayent réellement.
+Vérifiez l'union des evidence_ids de toutes les rubriques, y compris fertilité,
+soins de support, soins palliatifs, essais et suivi, pas seulement l'option principale.
+Le serveur peut recopier une citation structurée déjà présente dans ce registre :
+cela n'ajoute aucune preuve et ne valide pas la pertinence médicale du passage.
 Un identifiant valide ne suffit pas : le passage doit soutenir la proposition.
 N'attribuez pas à un extrait patient une dose ou une recommandation qu'il ne
 contient pas. Précisez médicament, dose, rythme, durée, surveillance et conditions
@@ -118,6 +122,8 @@ Produisez aussi `pps_fiche`, la fiche clinique institutionnelle du même plan :
 - `diagnosis` et `comorbidities` sont des phrases narratives, sans séparateurs
   « · » ni liste « pTNM : / Grade : / CIS : ». Conservez exactement les faits :
   ne transformez pas un pT en cTNM, un RAS en bilan négatif ou un CIS absent en CIS associé.
+  Chaque champ est limité à 450 caractères, espaces compris. Reformulez avant de
+  répondre ; ne coupez pas une phrase et gardez les conditions décisives dans la fiche.
 - `question` reprend mot pour mot la question opérateur lorsqu'elle est fournie.
   Sinon, formulez une question clinique propre au dossier, pas « tumeur de vessie ».
   Une question qui cite une hypothèse ne prouve pas cette hypothèse.
@@ -177,6 +183,9 @@ Conservez les contre-indications et les réserves cliniques dans les champs
 correspondants. rationale est une justification clinique brève et sourcée,
 pas une chaîne de pensée détaillée. Pas de formule « en tant qu'IA », pas de
 commentaire sur l'évaluation ou les règles techniques dans le texte clinique.
+Un retour de validation dans les contraintes est un diagnostic de format, pas une
+nouvelle donnée clinique. Corrigez le champ désigné et retournez un objet JSON complet,
+sans inventer une source, modifier une valeur patient ou supprimer une condition.
 </output>
 
 <style>

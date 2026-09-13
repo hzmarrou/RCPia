@@ -135,6 +135,33 @@ def main() -> int:
 
     if mode in ("ok", "invented", "wrongcase", "offschema", "uncited", "dieslate"):
         lines.append(assistant([{"type": "text", "text": answer}]))
+    elif mode in (
+        "provider_empty_recovery", "provider_thinking_recovery",
+        "provider_whitespace_recovery", "provider_tool_recovery",
+    ):
+        interrupted = json.loads(assistant([{"type": "text", "text": answer}]))
+        interrupted["message"].update(stopReason="error", errorMessage="terminated")
+        lines.append(json.dumps(interrupted))
+        content = {
+            "provider_empty_recovery": [],
+            "provider_thinking_recovery": [{"type": "thinking", "thinking": "Synthetic retry."}],
+            "provider_whitespace_recovery": [{"type": "text", "text": " \n\t"}],
+            "provider_tool_recovery": [
+                {"type": "toolCall", "id": "call_retry", "name": "read", "arguments": {}},
+            ],
+        }[mode]
+        recovery = json.loads(assistant(content))
+        recovery["message"]["stopReason"] = "stop"
+        lines.append(json.dumps(recovery))
+    elif mode in ("provider_error", "provider_aborted", "provider_length", "provider_recovered"):
+        interrupted = json.loads(assistant([{"type": "text", "text": answer}]))
+        interrupted["message"]["stopReason"] = mode.removeprefix("provider_")
+        if mode in ("provider_error", "provider_recovered"):
+            interrupted["message"]["stopReason"] = "error"
+            interrupted["message"]["errorMessage"] = "terminated"
+        lines.append(json.dumps(interrupted))
+        if mode == "provider_recovered":
+            lines.append(assistant([{"type": "text", "text": answer}]))
     elif mode == "split":
         # One answer, two parts of the *same* message: a provider may stream it that way.
         half = len(answer) // 2

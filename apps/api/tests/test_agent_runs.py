@@ -23,6 +23,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rcpia.agents.bundle import BundleTooLarge, build_bundle
+from rcpia.agents.output_processing import FEEDBACK_KEY, OutputFeedback
 from rcpia.agents.pi_adapter import PiAdapter
 from rcpia.agents.routes import dedupe_key_for
 from rcpia.agents.service import run_agent
@@ -237,6 +238,34 @@ async def execute(
         )
         await session.commit()
         return outcome
+
+
+async def test_validation_feedback_survives_commit_and_reaches_the_next_attempt(
+    session_factory, adapter, blobs, monkeypatch,
+) -> None:
+    _, case = await seed_case(session_factory)
+    job_id = await agent_job(session_factory, case)
+    first = await execute(session_factory, job_id, adapter, blobs, monkeypatch, mode="offschema")
+    assert first is not None and first.retryable
+    async with session_factory() as session:
+        job = await session.get(AnalysisJob, job_id)
+        feedback = OutputFeedback.model_validate(job.payload[FEEDBACK_KEY])
+        assert feedback.messages
+        failed = await session.get(AgentRun, feedback.previous_run_id)
+        assert failed.status == AgentRunStatus.failed
+        original_inputs = failed.bundle["inputs"]
+    assert await execute(session_factory, job_id, adapter, blobs, monkeypatch) is None
+    async with session_factory() as session:
+        succeeded = await session.scalar(sa.select(AgentRun).where(
+            AgentRun.job_id == job_id, AgentRun.status == AgentRunStatus.succeeded,
+        ))
+        assert succeeded.bundle["inputs"] == original_inputs
+        assert str(feedback.previous_run_id) in succeeded.bundle["constraints"][-1]
+        assert all(message in succeeded.bundle["constraints"][-1] for message in feedback.messages)
+        event = await session.scalar(sa.select(AuditEvent).where(
+            AuditEvent.entity_id == succeeded.id, AuditEvent.event_type == "agent.run_completed",
+        ))
+        assert event.payload["validation_feedback_used"] is True
 
 
 async def runs_for(

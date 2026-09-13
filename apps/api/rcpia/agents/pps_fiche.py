@@ -8,7 +8,7 @@ from pydantic import Field, model_validator
 from rcpia.agents.pps_proposal import PpsProposal, Strict, Text
 
 FICHE_CONTRACT: Final = "rcpia.pps-fiche.v1"
-CURRENT_SYNTHESIS_CONTRACT: Final = "rcpia.pps-proposal.v3"
+CURRENT_SYNTHESIS_CONTRACT: Final = "rcpia.pps-proposal.v4"
 ShortText = Annotated[Text, Field(max_length=240)]
 Sentence = Annotated[Text, Field(max_length=450)]
 PROHIBITED_LABELS = re.compile(
