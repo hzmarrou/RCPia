@@ -11,8 +11,13 @@ does not authorize deployment, paid parser/model calls or account creation.
 
 ## Release boundaries
 
-- Use a reviewed, merged commit and the V1 agent brains. Do not change model selection,
-  retrieval, citation safeguards, clinical rules or the corpus as part of deployment.
+- Use a reviewed, merged commit with the agent brains shipped by that same commit:
+  evidence-first V2 specialist brains and the decision-led synthesis brain. Do not
+  substitute archived V1 brains or change model selection, retrieval, citation safeguards,
+  clinical rules or the corpus as part of deployment.
+- Release the normal workflow only. The decision-matrix/targeted-review pilot and its
+  experimental input allowance are excluded until separately approved. Do not build from
+  an experimental worktree or copy its files into the release image.
 - Keep `AUTO_PANEL_ROLES` empty on both API and worker. Uploading spends parser and
   extraction-model usage, but must not start the specialist panel before clinician review.
 - The web app is the only public ingress. Browser requests use relative `/api`;
@@ -23,6 +28,37 @@ does not authorize deployment, paid parser/model calls or account creation.
 - Use synthetic dossiers for this procedure. Never put passwords, invitation links,
   session cookies, patient data or raw agent output in Git, PRs or deployment transcripts.
   See [data handling](transparency/data-handling.md).
+
+### Current PPS generation contract
+
+New synthesis jobs use `rcpia.pps-proposal.v4`. Their detailed proposal and institutional
+fiche remain `rcpia.pps-proposal.v1` and `rcpia.pps-fiche.v2`. The API, workers, synthesis
+brain and export/UI code must come from the same release. See
+[PPS contracts and reliability](evaluation/pps-review-copies.md) for the audited
+reference-register completion and bounded validation feedback.
+
+Workers refuse obsolete synthesis job contracts, including v3. Drain queued/running work
+and resolve paused work with its owner before replacing images. Do not rewrite old job
+payloads or historical outputs to make them compatible; request a new synthesis through
+the normal workflow after release when authorized. Historical results remain readable.
+An earlier PPS is not evidence that a new analysis succeeded.
+
+Check brain/document consistency from the approved clean checkout before building:
+
+```powershell
+Push-Location apps\api
+try {
+    python -m rcpia.ops.agent_brains --check
+    if ($LASTEXITCODE -ne 0) { throw 'Runtime brain/document consistency check failed.' }
+} finally {
+    Pop-Location
+}
+```
+
+Do not regenerate brains during deployment or raise bundle/output limits to obtain a
+successful rehearsal. Any intentional source or limit change belongs in another reviewed
+release. The normal input allowance remains 223,232 bytes; the pilot allowance is not a
+production setting.
 
 ## 1. Prepare the release and rollback record
 
@@ -293,6 +329,8 @@ the institution's approved channel. A possible safety issue pauses the affected 
 for clinician review rather than prompting an improvised change to clinical rules.
 
 Before clinician handover, confirm the rehearsal, individual access, feedback route and
-V1/provisional-output explanation. Track the existing Vitest and transitive PostCSS
+current-release/provisional-output explanation. Explain that selecting a proposed treatment
+does not mean a clinician approved it, and that an evaluation account is not permission for
+unsupervised clinical use. Track the existing Vitest and transitive PostCSS
 advisories separately with an owner and exposure assessment; PR #13 is not a claim that
 the dependency audit is clean. Keep Vitest API/UI servers closed pending remediation.

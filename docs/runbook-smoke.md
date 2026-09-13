@@ -87,6 +87,29 @@ authorization failures invisible. Never export browser cookies or storage state.
 | 9. Recognize completion | Return to the dashboard and confirm the current-ledger case is completed only after a usable, citation-attested synthesis. A terminal panel without usable synthesis must be visibly blocked. |
 | 10. Report feedback | Submit one synthetic issue through the chosen private feedback channel and confirm the designated triage person can receive it. An undecided channel means this step is pending. |
 
+For the current institutional PPS, also confirm:
+
+- The normal launch creates a v4 synthesis job. Its accepted output has the detailed
+  proposal v1 and fiche v2, linked to the actual rehearsal case, corrected ledger and
+  successful synthesis. A superseded PPS from an earlier ledger is not a new result.
+- The approved correction values and their provenance notes reach the actual specialist
+  inputs. Inspect important populated narratives as well as fields highlighted missing:
+  a heading or page footer can occupy a field without preserving its clinical content.
+- The short fiche and detailed probatory export preserve the chosen plan, alternatives
+  and decision-changing conditions. The main fiche identifies AI origin and remains
+  provisional; selecting a proposed treatment does not set clinician validation or
+  delivery-to-GP flags.
+- If the service completes the outer reference register, its audit event identifies the
+  already-cited source and original supporting-text path. The raw archived response stays
+  unchanged. Valid citation IDs alone are not proof of clinical appropriateness.
+- Record any schema, provider-interruption or citation failures without relabelling them
+  as clinical abstention or substituting an older successful PPS. Do not force a failure
+  with extra model calls; inspect such behaviour only if it occurs during the authorized
+  run, otherwise rely on the existing automated regressions.
+
+This rehearsal does not invoke the decision-matrix pilot. Its separate review rounds,
+experimental input allowance and file-only results are outside the clinician UI release.
+
 For invitations, also confirm an `uploader` cannot administer invitations and that revoking
 an unused synthetic invitation prevents activation. Do not revoke a real clinician's link
 for a rehearsal. Do not create extra model runs to exercise these account checks.
