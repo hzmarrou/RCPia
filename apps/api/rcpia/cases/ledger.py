@@ -7,13 +7,13 @@ what the agents were given can always be reconstructed.
 
 Colour follows status, and the distinction the whole design turns on:
 
-- **red** — the field is missing, nobody recorded it;
+- **red** — the field is missing or explicitly not recorded;
 - **amber** — the value is uncertain, or the dossier says two different things;
 - **plain** — a value was read, including `RAS`, which means the clinician looked.
 """
 
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from rcpia.cases.fact_schema import (
     absence_answers,
     fields_for,
     is_reported_absent,
+    is_unknown_value,
 )
 from rcpia.core.models import (
     AuditEvent,
@@ -96,6 +97,93 @@ def highlight_for(status: FactStatus) -> str:
     if status in (FactStatus.uncertain, FactStatus.conflicting):
         return AMBER
     return NEUTRAL
+
+
+def _entry_reading(entry: LedgerEntry) -> LedgerReading:
+    return LedgerReading(
+        value=entry.value, source_excerpt=entry.source_excerpt,
+        source_document_id=entry.source_document_id, source_chunk_id=entry.source_chunk_id,
+        source_chunk_ids=entry.source_chunk_ids, fact_id=entry.fact_id,
+    )
+
+
+def _unanswered(key: str, value: str | None) -> bool:
+    return is_unknown_value(value) or (
+        value is not None and is_reported_absent(value) and not absence_answers(key)
+    )
+
+
+def _current_readings(entry: LedgerEntry) -> tuple[LedgerReading, ...]:
+    representative = _entry_reading(entry)
+    if entry.origin == "human":
+        return (representative,)
+    readings = entry.readings or (representative,)
+    if entry.value is not None and not any(r.value == entry.value for r in readings):
+        readings = (representative, *readings)
+    return readings
+
+
+def effective_readings(entry: LedgerEntry) -> tuple[LedgerReading, ...]:
+    """Current answers only; placeholders and superseded readings are provenance, not answers."""
+    return tuple(r for r in _current_readings(entry) if not _unanswered(entry.key, r.value))
+
+
+def project_entry(entry: LedgerEntry) -> LedgerEntry:
+    """Apply current missingness semantics without rewriting a fact or stored version.
+
+    The literal value survives in the note and readings, alongside its original citation.
+    Returning a new entry also makes repeated projection safe for live and snapshot readers.
+    """
+    unanswered = _unanswered(entry.key, entry.value)
+    current = _current_readings(entry)
+    answered = effective_readings(entry)
+    note = entry.note
+    readings = entry.readings
+    if unanswered and entry.value is not None:
+        explanation = (
+            f"Valeur source « {entry.value} » : information non renseignée, "
+            "ni réponse négative ni résultat normal ; les autres lectures sont conservées."
+            if is_unknown_value(entry.value)
+            else (
+                "Le formulaire porte « RAS » pour ce champ. « Rien à signaler » ne peut pas "
+                "répondre à ce champ : la valeur est traitée comme absente."
+            )
+        )
+        note = f"{note}\n{explanation}" if note else explanation
+        if not any(r.value == entry.value for r in readings):
+            readings = (_entry_reading(entry), *readings)
+    if not answered:
+        return replace(
+            entry, value=None, status=str(FactStatus.missing), highlight=RED,
+            note=note, readings=readings,
+        )
+
+    status, highlight = entry.status, entry.highlight
+    distinct = {" ".join((r.value or "").casefold().split()) for r in answered}
+    if len(distinct) > 1:
+        status, highlight = str(FactStatus.conflicting), AMBER
+    elif status == str(FactStatus.conflicting) and any(
+        _unanswered(entry.key, r.value) for r in current
+    ):
+        # The sole answer only disagreed with a blank box, not another answer.
+        status, highlight = str(FactStatus.confirmed), NEUTRAL
+    elif unanswered and status == str(FactStatus.missing):
+        # A legacy missing status cannot attest that the surviving reading was confirmed.
+        status, highlight = str(FactStatus.uncertain), AMBER
+
+    if unanswered:
+        representative = answered[0]
+        entry = replace(
+            entry, value=representative.value, source_excerpt=representative.source_excerpt,
+            source_document_id=representative.source_document_id,
+            source_chunk_id=representative.source_chunk_id,
+            source_chunk_ids=representative.source_chunk_ids, fact_id=representative.fact_id,
+        )
+        if not readings:
+            readings = current
+    return replace(
+        entry, status=status, highlight=highlight, note=note, readings=readings,
+    )
 
 
 # Fields whose label is an acronym or has internal capitals. Capitalising the first
@@ -182,7 +270,12 @@ async def current_readings(
     }
     for key, correction in human.items():
         chosen[key] = [correction]
-    return chosen
+    # A recovered answer leads; retained not-recorded readings remain source history,
+    # not competing answers. A human correction still outranks every machine reading.
+    return {
+        key: sorted(rows, key=lambda row: is_unknown_value(row.value))
+        for key, rows in chosen.items()
+    }
 
 
 async def current_facts(session: AsyncSession, *, case_id: uuid.UUID) -> dict[str, ExtractedFact]:
@@ -251,35 +344,17 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
             )
             continue
 
-        # `RAS` on a field where absence cannot be an answer is an empty box, not a finding.
-        # Recorded as missing so the query builder, the completeness check, the agents and the
-        # rendered page all read it the same way -- and the form's own wording is kept in the
-        # note, because "the box said RAS" and "nobody filled the box" are different facts about
-        # the dossier even though both leave the value unknown.
-        blank_box = (
-            fact.value is not None
-            and is_reported_absent(fact.value)
-            and not absence_answers(spec.key)
-        )
-        note = fact.note
-        if blank_box:
-            note = (
-                "Le formulaire porte « RAS » pour ce champ. « Rien à signaler » ne peut pas "
-                "répondre à un type histologique, un grade ou un stade : la valeur est traitée "
-                "comme absente."
-            )
-
         entries.append(
             LedgerEntry(
                 key=spec.key,
                 label=display_label(spec.key),
                 category=str(spec.category),
-                value=None if blank_box else fact.value,
-                status=str(FactStatus.missing) if blank_box else str(fact.status),
+                value=fact.value,
+                status=str(fact.status),
                 origin=str(fact.origin),
-                highlight=RED if blank_box else highlight_for(fact.status),
+                highlight=highlight_for(fact.status),
                 unit=spec.unit,
-                note=note,
+                note=fact.note,
                 source_excerpt=fact.source_excerpt,
                 source_document_id=(
                     str(fact.source_document_id) if fact.source_document_id else None
@@ -308,7 +383,7 @@ async def build_entries(session: AsyncSession, *, case: Case) -> list[LedgerEntr
             )
         )
 
-    return entries
+    return [project_entry(entry) for entry in entries]
 
 
 ADENOCARCINOMA_CONFIRMATION = "prostate_adenocarcinoma_confirmed"
@@ -455,7 +530,7 @@ async def apply_correction(
         organization_id=case.organization_id,
         fact_type=fact_type,
         value=value,
-        status=FactStatus.missing if value is None else FactStatus.confirmed,
+        status=FactStatus.missing if is_unknown_value(value) else FactStatus.confirmed,
         origin=FactOrigin.human,
         supersedes_fact_id=superseded.id if superseded is not None else None,
         recorded_by_user_id=user.id,

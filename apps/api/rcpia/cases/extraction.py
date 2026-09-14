@@ -23,6 +23,7 @@ from rcpia.cases.fact_schema import (
     FactField,
     absence_answers,
     is_reported_absent,
+    is_unknown_value,
 )
 from rcpia.core.models import CancerType, FactStatus
 
@@ -589,6 +590,7 @@ def resolve(
             )
             continue
 
+        placeholders = tuple(candidate for candidate in found if is_unknown_value(candidate.value))
         # An empty box does not contradict a reading. Where absence cannot be an answer --
         # a histology, a grade, a stage -- `RAS` means the field was not filled in, so it must
         # not compete with a value read elsewhere in the dossier. Without this, recovering
@@ -605,6 +607,24 @@ def resolve(
             ]
             if answered:
                 found = answered
+
+        answered = [candidate for candidate in found if not is_unknown_value(candidate.value)]
+        if answered:
+            found = answered
+        else:
+            first = found[0]
+            resolved.append(
+                ResolvedFact(
+                    key=field_spec.key,
+                    value=first.value,
+                    status=FactStatus.missing,
+                    excerpt=first.excerpt,
+                    chunk_id=first.chunk_id,
+                    document_id=first.document_id,
+                    readings=tuple(found),
+                )
+            )
+            continue
 
         distinct = {normalize_value(candidate.value) for candidate in found}
         first = found[0]
@@ -627,7 +647,7 @@ def resolve(
                     conflicting_values=tuple(
                         sorted({candidate.value or "" for candidate in found})
                     ),
-                    readings=tuple(seen.values()),
+                    readings=(*seen.values(), *placeholders),
                 )
             )
             continue
@@ -640,7 +660,7 @@ def resolve(
                 excerpt=first.excerpt,
                 chunk_id=first.chunk_id,
                 document_id=first.document_id,
-                readings=(first,),
+                readings=(first, *placeholders),
             )
         )
 

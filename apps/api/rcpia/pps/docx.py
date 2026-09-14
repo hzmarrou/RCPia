@@ -27,6 +27,7 @@ import io
 from docx import Document as _new_document
 from docx.document import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
 from rcpia.pps.render import (
@@ -57,8 +58,16 @@ MUTED_COLOR = RGBColor(0x59, 0x59, 0x59)
 WARNING_COLOR = RGBColor(0xB0, 0x3A, 0x2E)
 
 
+def ensure_zoom_percentage(doc: Document) -> None:
+    """Supply the required percentage missing from some default Word templates."""
+    zoom = doc.settings.element.find(qn("w:zoom"))
+    if zoom is not None and zoom.get(qn("w:percent")) is None:
+        zoom.set(qn("w:percent"), "100")
+
+
 def _document() -> Document:
     doc = _new_document()
+    ensure_zoom_percentage(doc)
     style = doc.styles["Normal"]
     style.font.name = BODY_FONT
     style.font.size = Pt(10.5)

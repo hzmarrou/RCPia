@@ -5,6 +5,46 @@ task.
 
 ---
 
+## Runtime correction: explicit unknown values (September 2026)
+
+The historical design below is retained for context. The implemented intake now shares
+`fact_schema.is_unknown_value` across deterministic/LLM resolution, ledger projection,
+mandatory completeness checks, retrieval exclusion and nomogram parsing.
+
+An empty value or a **whole** not-recorded marker (for example `Non renseigné`,
+`non renseignée`, `inconnu`, `unknown`, `not documented`, `NR`) is missing, never `Non`,
+zero or a normal finding. Case, accents, whitespace and surrounding punctuation are
+normalized only for recognition. A report containing these words elsewhere is not erased.
+Explicit negatives remain answers; `RAS` keeps its existing field-dependent meaning.
+
+New machine and human placeholder facts retain their literal value, source quotation or
+correction note, and provenance, but have missing status. Live ledger reads and
+`entries_from_version` apply the same non-mutating projection to historical snapshots,
+including old `confirmed` values: delivered value `null`, status `missing`, red highlight,
+with the original wording in readings and an explanatory note. Existing facts, versions
+and historical run bundles are not rewritten. Newly built bundles, retrieval, calculators
+and the PPS missing-information view consume projected entries.
+
+Projection considers all effective readings, not just the historical representative value.
+An unknown reading does not contradict a known answer; two opposing known answers remain
+amber and appear in the bundle's structured conflicts even if an unknown reading came first.
+Human corrections replace the effective answer without resurrecting superseded readings.
+The LLM guard likewise distinguishes an unknown form box from a separate quoted conclusion:
+the proposed answer must occur outside the unknown box and outside other fields' readings.
+The complete verified quotation is retained, rather than dropping a supporting conclusion
+after the first 400 characters; chunk traceability is still checked before storing it.
+
+Unknown mandatory fields block both single-agent and panel POST dispatch. The requested
+snapshot is checked as well as the live ledger; an older queued/running job is not silently
+reused after a correction. A valid correction appends a fact and version, while an unknown
+correction leaves the gate closed. Human nomogram eligibility and clinical-versus-pathological
+stage rules are unchanged.
+
+Synthetic regression coverage: `tests/test_unknown_facts.py` (no database) and
+`tests/test_unknown_facts_db.py` (private ephemeral PostgreSQL, existing fake Pi only).
+
+---
+
 ## Background: how dossier extraction works today
 
 RCPia reads patient dossiers through a deterministic label matcher
@@ -268,4 +308,3 @@ Two design notes from the code, for whoever builds it:
 - **Provenance must reach the fiche**, not only the log. A value read from prose by a model is
   not the same kind of fact as one read from a filled field, and the clinician holding the page
   is the person who needs to know which it was.
-

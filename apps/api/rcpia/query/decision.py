@@ -6,8 +6,13 @@ from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from rcpia.cases.fact_schema import absence_answers, fields_for, is_reported_absent
-from rcpia.cases.ledger import LedgerEntry
+from rcpia.cases.fact_schema import (
+    absence_answers,
+    fields_for,
+    is_reported_absent,
+    is_unknown_value,
+)
+from rcpia.cases.ledger import LedgerEntry, effective_readings, project_entry
 from rcpia.core.models import CancerType
 from rcpia.evidence.hashing import payload_sha256
 from rcpia.query.builder import BuiltQuery, Fact, build_filter
@@ -115,10 +120,13 @@ class QueryProvenance(QueryModel):
 
 
 def exclusion(entry: LedgerEntry) -> str | None:
+    entry = project_entry(entry)
     if entry.status != "confirmed":
         return entry.status
     if not entry.value or not entry.value.strip():
         return "blank"
+    if is_unknown_value(entry.value):
+        return "not_answered"
     if is_reported_absent(entry.value) and not absence_answers(entry.key):
         return "not_answered"
     if entry.key in {"ctnm", "ptnm"}:
@@ -127,15 +135,17 @@ def exclusion(entry: LedgerEntry) -> str | None:
             return "ambiguous_stage"
     # build_entries replaces machine readings with the human correction. Historical
     # superseded readings must not overrule an explicitly corrected human value.
-    if not (entry.origin == "human" and entry.corrected):
-        readings = {" ".join((r.value or "").split()) for r in entry.readings}
-        if len(readings) > 1:
-            return "conflicting_readings"
+    readings = {
+        " ".join((r.value or "").split()) for r in effective_readings(entry)
+    }
+    if len(readings) > 1:
+        return "conflicting_readings"
     return None
 
 
 def usable_facts(entries: Sequence[LedgerEntry]) -> list[Fact]:
     """Both query modes read the same status-aware projection."""
+    entries = [project_entry(entry) for entry in entries]
     return [Fact(entry.key, entry.value) for entry in entries if exclusion(entry) is None]
 
 
@@ -155,6 +165,7 @@ def decision_search(
     request: RetrievalQuery | None,
     operator_question: str | None,
 ) -> DecisionSearch:
+    entries = [project_entry(entry) for entry in entries]
     if request is not None:
         validate_query(request, cancer_type)
     by_key = {entry.key: entry for entry in entries}

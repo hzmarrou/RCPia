@@ -38,8 +38,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
-from rcpia.cases.extraction import FactCandidate, normalize_value
-from rcpia.cases.fact_schema import FIELDS_BY_KEY
+from rcpia.cases.extraction import LABEL_LINE, FactCandidate, extract_from_text, normalize_value
+from rcpia.cases.fact_schema import FIELDS_BY_KEY, is_unknown_value
 
 # How much of the dossier goes to the model. Real dossiers run to a few thousand words; this is
 # a guard against a pathological upload rather than a working limit.
@@ -138,6 +138,8 @@ RÈGLES ABSOLUES
 5. « RAS » dans un formulaire signifie que la case n'a pas été remplie. Ce n'est pas une valeur :
    cherche la valeur réelle dans le texte rédigé.
 6. Réponds UNIQUEMENT par l'objet JSON décrit ci-dessous, sans texte avant ni après.
+7. Une mention explicite d'information inconnue ou non renseignée n'est jamais « Non »,
+   zéro ou un résultat normal. Garde le champ dans "still_missing".
 
 FORMAT DE RÉPONSE
 {{
@@ -202,6 +204,33 @@ def _braced(text: str) -> str | None:
     return text[start : end + 1] if start != -1 and end > start else None
 
 
+def _unknown_quote_cannot_support(key: str, value: str, source: str) -> bool:
+    """An unknown box cannot supply a value, but a separate quoted answer can.
+
+    Restrict this guard to explicit placeholders. Other fields' readings cannot answer
+    this field either; any remaining narrative must actually contain the proposed value.
+    """
+    if is_unknown_value(source):
+        return True
+    readings = extract_from_text(source)
+    if not any(r.key == key and is_unknown_value(r.value) for r in readings):
+        return False
+    remaining = f" {flatten(source)} "
+    unsupported = [
+        r.excerpt for r in readings if r.key != key or is_unknown_value(r.value)
+    ]
+    for line in source.splitlines():
+        labelled = LABEL_LINE.match(line)
+        if is_unknown_value(labelled.group("value") if labelled else line):
+            unsupported.append(line)
+    for text in unsupported:
+        excerpt = flatten(text)
+        if excerpt:
+            remaining = remaining.replace(f" {excerpt} ", " ")
+    proposed = flatten(value)
+    return not proposed or f" {proposed} " not in remaining
+
+
 def parse_response(
     raw: str,
     *,
@@ -250,12 +279,19 @@ def parse_response(
             )
             continue
 
-        claimed.add(key)
+        if not is_unknown_value(value) and _unknown_quote_cannot_support(key, value, source):
+            rejected.append(RejectedFact(
+                key, value, "la citation indique une donnée non renseignée, pas une réponse",
+            ))
+            continue
+
+        if not is_unknown_value(value):
+            claimed.add(key)
         candidates.append(
             FactCandidate(
                 key=key,
                 value=value,
-                excerpt=source[:400],
+                excerpt=source,
                 document_id=document_id,
                 from_narrative=True,
             )

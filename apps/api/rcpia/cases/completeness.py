@@ -15,8 +15,13 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from rcpia.cases.fact_schema import FIELDS_BY_KEY, is_reported_absent, required_fields_for
-from rcpia.cases.ledger import AMBER, RED, LedgerEntry, display_label
+from rcpia.cases.fact_schema import (
+    FIELDS_BY_KEY,
+    is_reported_absent,
+    is_unknown_value,
+    required_fields_for,
+)
+from rcpia.cases.ledger import AMBER, RED, LedgerEntry, display_label, project_entry
 from rcpia.core.models import CancerType
 
 # Fields without which no provisional proposal can be made safely. Kept deliberately
@@ -79,7 +84,7 @@ def _valid_isup(text: str) -> bool:
 
 
 # What a blocking field must look like to count as answered. A field absent from this map
-# only has to be non-empty and not `RAS`.
+# only has to be non-empty and neither an unknown placeholder nor `RAS`.
 BLOCKING_VALUE_CHECKS: dict[str, "Callable[[str], bool]"] = {
     "gleason": _valid_gleason,
     "isup": _valid_isup,
@@ -89,6 +94,7 @@ BLOCKING_VALUE_CHECKS: dict[str, "Callable[[str], bool]"] = {
 def satisfies_blocking(key: str, value: str | None) -> bool:
     """Whether a recorded value actually answers a blocking field.
 
+    Unknown placeholders never answer it, regardless of the recorded status or origin.
     `RAS` never does. It means the clinician looked and found nothing to report, which is
     meaningful for a symptom and meaningless for a histology or a grade — there is no such
     thing as a tumour with no histological type.
@@ -97,7 +103,7 @@ def satisfies_blocking(key: str, value: str | None) -> bool:
     score, `score inconnu 7` as a grade of 7, and `12` as an ISUP group.
     """
     text = (value or "").strip()
-    if not text or is_reported_absent(text):
+    if is_unknown_value(text) or is_reported_absent(text):
         return False
     check = BLOCKING_VALUE_CHECKS.get(key)
     return check(text) if check else True
@@ -139,6 +145,7 @@ class CompletenessReport:
 
 
 def assess(entries: list[LedgerEntry], *, cancer_type: CancerType) -> CompletenessReport:
+    entries = [project_entry(entry) for entry in entries]
     by_key = {entry.key: entry for entry in entries}
     blocking = BLOCKING_FIELDS.get(cancer_type, ())
     issues: list[CompletenessIssue] = []

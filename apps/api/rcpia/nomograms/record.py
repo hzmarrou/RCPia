@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from rcpia.cases.fact_schema import is_unknown_value
+
 
 class Tristate(StrEnum):
     """Yes, no, and the answer nobody wrote down."""
@@ -34,7 +36,7 @@ class Tristate(StrEnum):
 
 # `RAS`, an empty box, a dash. None of these is a measurement.
 NOT_A_VALUE = frozenset(
-    {"ras", "r.a.s", "r.a.s.", "néant", "neant", "non précisé", "non precise", "-", "", "?"}
+    {"ras", "r.a.s", "r.a.s.", "néant", "neant"}
 )
 
 # `7 (3+4)`, `7(4+3)`, `9 (5+4)`, `Gleason 4 + 3`. The sum is not enough: 3+4 and 4+3 total
@@ -50,7 +52,7 @@ LEADING_NUMBER = re.compile(r"-?\d+(?:[.,]\d+)?")
 
 
 def usable(value: str | None) -> bool:
-    if value is None:
+    if value is None or is_unknown_value(value):
         return False
     return value.strip().lower().rstrip(".") not in NOT_A_VALUE
 
