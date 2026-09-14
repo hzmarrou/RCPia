@@ -27,6 +27,7 @@ from rcpia.cases.fact_schema import (
     absence_answers,
     fields_for,
     is_reported_absent,
+    is_unknown_value,
 )
 from rcpia.cases.llm_extractor import (
     NarrativeExtraction,
@@ -143,11 +144,14 @@ async def extract_case_facts(
                 # no adapter passed by the caller. Without it, a worker wired without an
                 # adapter is indistinguishable from a dossier whose form answered everything.
                 "narrative_ran": narrative.ran,
-                "narrative_wanted": len(narrative.still_missing) + len(narrative.candidates),
-                "narrative_facts": len(narrative.candidates),
-                "narrative_filled": sorted(
-                    {candidate.key for candidate in narrative.candidates}
+                "narrative_wanted": len(
+                    set(narrative.still_missing) | {c.key for c in narrative.candidates}
                 ),
+                "narrative_facts": len(narrative.candidates),
+                "narrative_filled": sorted({
+                    candidate.key for candidate in narrative.candidates
+                    if not is_unknown_value(candidate.value)
+                }),
                 "narrative_rejected": len(narrative.rejected),
                 "narrative_rejected_reasons": sorted(
                     {item.reason for item in narrative.rejected}
@@ -171,8 +175,8 @@ async def _narrative_pass(
     """Ask a model to read the dossier's prose for the fields the form left unanswered.
 
     **Which fields are asked for is derived, never guessed.** A field is wanted when the first
-    pass produced nothing for it, or produced `RAS` where absence cannot be an answer — the
-    dossier-8 case, where the form's boxes are empty and the diagnosis is in a sentence. Fields
+    pass produced nothing or an unknown placeholder, or `RAS` where absence cannot be an answer.
+    In the dossier-8 case the form's boxes are empty and the diagnosis is in a sentence. Fields
     the form answered are not re-read: the deterministic reading is better evidence than a
     model's, and re-opening a settled field would only manufacture conflicts.
     """
@@ -302,10 +306,10 @@ def _made_traceable(
 
 
 def _needs_narrative_reading(value: str | None, key: str) -> bool:
-    if value is None or not value.strip():
+    if is_unknown_value(value):
         return True
     # `RAS` on a diagnosis is an empty box, and the value may be written in prose elsewhere.
-    return is_reported_absent(value) and not absence_answers(key)
+    return value is not None and is_reported_absent(value) and not absence_answers(key)
 
 
 def extraction_signature(documents: list[UploadedDocument]) -> str:
@@ -381,7 +385,7 @@ def _to_rows(case: Case, fact: ResolvedFact, signature: str) -> list[ExtractedFa
     spec = FIELDS_BY_KEY.get(fact.key)
     unit = spec.unit if spec else None
 
-    if fact.status is FactStatus.missing:
+    if fact.status is FactStatus.missing and not fact.readings:
         return [
             ExtractedFact(
                 case_id=case.id,
@@ -408,7 +412,7 @@ def _to_rows(case: Case, fact: ResolvedFact, signature: str) -> list[ExtractedFa
             value=reading.value,
             unit=unit,
             observed_date=_observed_date(fact.key, reading.value),
-            status=fact.status,
+            status=FactStatus.missing if is_unknown_value(reading.value) else fact.status,
             origin=FactOrigin.machine,
             source_document_id=reading.document_id,
             source_chunk_id=reading.chunk_id,

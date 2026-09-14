@@ -38,8 +38,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
-from rcpia.cases.extraction import FactCandidate, normalize_value
-from rcpia.cases.fact_schema import FIELDS_BY_KEY
+from rcpia.cases.extraction import FactCandidate, extract_from_text, normalize_value
+from rcpia.cases.fact_schema import FIELDS_BY_KEY, is_unknown_value
 
 # How much of the dossier goes to the model. Real dossiers run to a few thousand words; this is
 # a guard against a pathological upload rather than a working limit.
@@ -138,6 +138,8 @@ RÈGLES ABSOLUES
 5. « RAS » dans un formulaire signifie que la case n'a pas été remplie. Ce n'est pas une valeur :
    cherche la valeur réelle dans le texte rédigé.
 6. Réponds UNIQUEMENT par l'objet JSON décrit ci-dessous, sans texte avant ni après.
+7. Une mention explicite d'information inconnue ou non renseignée n'est jamais « Non »,
+   zéro ou un résultat normal. Garde le champ dans "still_missing".
 
 FORMAT DE RÉPONSE
 {{
@@ -250,7 +252,23 @@ def parse_response(
             )
             continue
 
-        claimed.add(key)
+        source_values = [
+            candidate.value for candidate in extract_from_text(source) if candidate.key == key
+        ]
+        if (
+            not is_unknown_value(value)
+            and (
+                is_unknown_value(source)
+                or (source_values and all(is_unknown_value(v) for v in source_values))
+            )
+        ):
+            rejected.append(RejectedFact(
+                key, value, "la citation indique une donnée non renseignée, pas une réponse",
+            ))
+            continue
+
+        if not is_unknown_value(value):
+            claimed.add(key)
         candidates.append(
             FactCandidate(
                 key=key,

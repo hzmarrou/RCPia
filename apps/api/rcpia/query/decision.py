@@ -6,7 +6,12 @@ from typing import Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from rcpia.cases.fact_schema import absence_answers, fields_for, is_reported_absent
+from rcpia.cases.fact_schema import (
+    absence_answers,
+    fields_for,
+    is_reported_absent,
+    is_unknown_value,
+)
 from rcpia.cases.ledger import LedgerEntry
 from rcpia.core.models import CancerType
 from rcpia.evidence.hashing import payload_sha256
@@ -119,6 +124,8 @@ def exclusion(entry: LedgerEntry) -> str | None:
         return entry.status
     if not entry.value or not entry.value.strip():
         return "blank"
+    if is_unknown_value(entry.value):
+        return "not_answered"
     if is_reported_absent(entry.value) and not absence_answers(entry.key):
         return "not_answered"
     if entry.key in {"ctnm", "ptnm"}:
@@ -128,7 +135,10 @@ def exclusion(entry: LedgerEntry) -> str | None:
     # build_entries replaces machine readings with the human correction. Historical
     # superseded readings must not overrule an explicitly corrected human value.
     if not (entry.origin == "human" and entry.corrected):
-        readings = {" ".join((r.value or "").split()) for r in entry.readings}
+        readings = {
+            " ".join((r.value or "").split()) for r in entry.readings
+            if not is_unknown_value(r.value)
+        }
         if len(readings) > 1:
             return "conflicting_readings"
     return None

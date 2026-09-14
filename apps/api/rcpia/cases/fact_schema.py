@@ -4,15 +4,18 @@ Derived from the reference dossiers in `docs/reference/examples/`, which are str
 French forms: a label, a colon, and a value. The catalogue names the fields, the labels
 they appear under, and which cancer types care about them.
 
-Two absences are deliberately distinguished throughout:
+Source states are deliberately distinguished throughout:
 
 - **`RAS`** — the clinician looked and found nothing to report. That is information.
+- **explicitly unknown** — the source says the information was not recorded, not "No".
 - **not present at all** — nobody filled the field in. That is a gap, shown in red.
 
-Collapsing the two would paint a properly completed dossier red and hide real gaps in the
+Collapsing these would paint a properly completed dossier red and hide real gaps in the
 noise.
 """
 
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -23,6 +26,29 @@ REPORTED_ABSENT = "RAS"
 REPORTED_ABSENT_TOKENS = frozenset(
     {"ras", "r.a.s", "r.a.s.", "néant", "neant", "sans particularité", "sans particularite"}
 )
+
+# Whole placeholders only: a report mentioning an unknown elsewhere is still a report.
+# RAS and explicit negatives are deliberately outside this vocabulary.
+_UNKNOWN_VALUE = re.compile(
+    r"(?:non (?:renseigne|documente|precise|connu)e?s?"
+    r"|inconnue?s?|unknown|not (?:documented|recorded|provided|known)"
+    r"|n\s*(?:[./]\s*)?r)"
+)
+
+
+def is_unknown_value(value: str | None) -> bool:
+    """An empty value or a whole explicit not-recorded marker, never a clinical negative.
+
+    Shared by intake and readers of immutable historical records. Only surrounding
+    punctuation is ignored; no prefix matching or interpretation of report prose.
+    """
+    if value is None:
+        return True
+    folded = unicodedata.normalize("NFKD", value.casefold())
+    text = "".join(c for c in folded if not unicodedata.combining(c))
+    text = " ".join(text.split())
+    text = text.strip(" \t\r\n.,;:!?…-–—()[]{}\"'«»“”*")
+    return not text or _UNKNOWN_VALUE.fullmatch(text) is not None
 
 
 class FactCategory(StrEnum):

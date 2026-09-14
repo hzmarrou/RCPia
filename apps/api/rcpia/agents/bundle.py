@@ -46,6 +46,7 @@ from rcpia.cases.ledger import (
     LedgerEntry,
     LedgerReading,
     adenocarcinoma_confirmation,
+    project_entry,
 )
 from rcpia.core.models import CancerType, Case, CaseLedgerVersion, DocumentChunk
 from rcpia.evidence.embedding import Embedder
@@ -138,11 +139,12 @@ class BuiltBundle:
 
 
 def entries_from_version(version: CaseLedgerVersion) -> list[LedgerEntry]:
-    """Rebuild the ledger entries stored in a version snapshot.
+    """Project stored entries using current missingness rules, without changing the snapshot.
 
     Unknown keys are dropped rather than passed through: a snapshot written by an older
     build of RCPia must still be readable, and `LedgerEntry` would reject a field it has
-    since lost.
+    since lost. Historical literal values and citations survive in readings and notes;
+    the delivered status is not an attestation of the historical extractor's status.
     """
     known = set(LedgerEntry.__dataclass_fields__)
     entries: list[LedgerEntry] = []
@@ -174,7 +176,7 @@ def entries_from_version(version: CaseLedgerVersion) -> list[LedgerEntry]:
         values["readings"] = tuple(readings)
         entries.append(LedgerEntry(**values))
 
-    return entries
+    return [project_entry(entry) for entry in entries]
 
 
 async def _chunk_metadata(

@@ -150,6 +150,14 @@ async def start_analysis(
             status.HTTP_409_CONFLICT,
             "Aucune version du tableau de données : l'extraction n'a pas encore abouti.",
         )
+    snapshot_report = completeness.assess(
+        entries_from_version(version), cancer_type=case.cancer_type,
+    )
+    if not snapshot_report.can_run_analysis:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            " ; ".join(issue.message for issue in snapshot_report.blocking),
+        )
     try:
         retrieval_query = pin_query(
             payload.retrieval_query, cancer_type=str(case.cancer_type),
@@ -176,7 +184,12 @@ async def start_analysis(
         if existing.payload.get("retrieval_contract") != RETRIEVAL_CONTRACT:
             return False
         if retrieval_query is None and existing.payload.get("retrieval_query") is None:
-            return True  # Existing baseline resume semantics are unchanged.
+            # Only a parked job is re-pinned below. A queued/running job still reads its
+            # original snapshot, even if the live ledger now passes the gate.
+            return (
+                existing.status is JobStatus.waiting_for_user
+                or existing.payload.get("ledger_version") == version.version
+            )
         return panel_service.job_is_compatible(
             existing, ledger_version=version.version, question=payload.clinical_question,
             retrieval_query=retrieval_query,
@@ -345,6 +358,14 @@ async def start_panel(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Aucune version du tableau de données : l'extraction n'a pas encore abouti.",
+        )
+    snapshot_report = completeness.assess(
+        entries_from_version(version), cancer_type=case.cancer_type,
+    )
+    if not snapshot_report.can_run_analysis:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            " ; ".join(issue.message for issue in snapshot_report.blocking),
         )
 
     try:
