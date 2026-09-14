@@ -99,47 +99,90 @@ def highlight_for(status: FactStatus) -> str:
     return NEUTRAL
 
 
+def _entry_reading(entry: LedgerEntry) -> LedgerReading:
+    return LedgerReading(
+        value=entry.value, source_excerpt=entry.source_excerpt,
+        source_document_id=entry.source_document_id, source_chunk_id=entry.source_chunk_id,
+        source_chunk_ids=entry.source_chunk_ids, fact_id=entry.fact_id,
+    )
+
+
+def _unanswered(key: str, value: str | None) -> bool:
+    return is_unknown_value(value) or (
+        value is not None and is_reported_absent(value) and not absence_answers(key)
+    )
+
+
+def _current_readings(entry: LedgerEntry) -> tuple[LedgerReading, ...]:
+    representative = _entry_reading(entry)
+    if entry.origin == "human":
+        return (representative,)
+    readings = entry.readings or (representative,)
+    if entry.value is not None and not any(r.value == entry.value for r in readings):
+        readings = (representative, *readings)
+    return readings
+
+
+def effective_readings(entry: LedgerEntry) -> tuple[LedgerReading, ...]:
+    """Current answers only; placeholders and superseded readings are provenance, not answers."""
+    return tuple(r for r in _current_readings(entry) if not _unanswered(entry.key, r.value))
+
+
 def project_entry(entry: LedgerEntry) -> LedgerEntry:
     """Apply current missingness semantics without rewriting a fact or stored version.
 
     The literal value survives in the note and readings, alongside its original citation.
     Returning a new entry also makes repeated projection safe for live and snapshot readers.
     """
-    unknown = is_unknown_value(entry.value)
-    blank_box = (
-        entry.value is not None
-        and is_reported_absent(entry.value)
-        and not absence_answers(entry.key)
-    )
-    if not unknown and not blank_box:
-        return entry
+    unanswered = _unanswered(entry.key, entry.value)
+    current = _current_readings(entry)
+    answered = effective_readings(entry)
     note = entry.note
     readings = entry.readings
-    if entry.value is not None:
+    if unanswered and entry.value is not None:
         explanation = (
             f"Valeur source « {entry.value} » : information non renseignée, "
-            "traitée comme manquante ; ni réponse négative ni résultat normal."
-            if unknown
+            "ni réponse négative ni résultat normal ; les autres lectures sont conservées."
+            if is_unknown_value(entry.value)
             else (
                 "Le formulaire porte « RAS » pour ce champ. « Rien à signaler » ne peut pas "
                 "répondre à ce champ : la valeur est traitée comme absente."
             )
         )
         note = f"{note}\n{explanation}" if note else explanation
+        if not any(r.value == entry.value for r in readings):
+            readings = (_entry_reading(entry), *readings)
+    if not answered:
+        return replace(
+            entry, value=None, status=str(FactStatus.missing), highlight=RED,
+            note=note, readings=readings,
+        )
+
+    status, highlight = entry.status, entry.highlight
+    distinct = {" ".join((r.value or "").casefold().split()) for r in answered}
+    if len(distinct) > 1:
+        status, highlight = str(FactStatus.conflicting), AMBER
+    elif status == str(FactStatus.conflicting) and any(
+        _unanswered(entry.key, r.value) for r in current
+    ):
+        # The sole answer only disagreed with a blank box, not another answer.
+        status, highlight = str(FactStatus.confirmed), NEUTRAL
+    elif unanswered and status == str(FactStatus.missing):
+        # A legacy missing status cannot attest that the surviving reading was confirmed.
+        status, highlight = str(FactStatus.uncertain), AMBER
+
+    if unanswered:
+        representative = answered[0]
+        entry = replace(
+            entry, value=representative.value, source_excerpt=representative.source_excerpt,
+            source_document_id=representative.source_document_id,
+            source_chunk_id=representative.source_chunk_id,
+            source_chunk_ids=representative.source_chunk_ids, fact_id=representative.fact_id,
+        )
         if not readings:
-            readings = (
-                LedgerReading(
-                    value=entry.value,
-                    source_excerpt=entry.source_excerpt,
-                    source_document_id=entry.source_document_id,
-                    source_chunk_id=entry.source_chunk_id,
-                    source_chunk_ids=entry.source_chunk_ids,
-                    fact_id=entry.fact_id,
-                ),
-            )
+            readings = current
     return replace(
-        entry, value=None, status=str(FactStatus.missing), highlight=RED,
-        note=note, readings=readings,
+        entry, status=status, highlight=highlight, note=note, readings=readings,
     )
 
 

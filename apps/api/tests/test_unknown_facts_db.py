@@ -218,3 +218,57 @@ async def test_stale_job_uses_its_blocked_snapshot_and_is_not_reused(
         )) == 0
         stored_case = await session.get(Case, case.id)
         assert stored_case.status is CaseStatus.ready_for_review
+
+
+async def test_legacy_unknown_first_snapshot_retains_structured_known_conflict(
+    client, session_factory,
+):
+    text = (
+        "Type histologique : Carcinome urothélial\n"
+        "Infiltration du muscle : NR\n"
+        "Infiltration du muscle : Non\n"
+        "Infiltration du muscle : Oui"
+    )
+    user, case = await seed_case(session_factory, text=text)
+    await sign_in(client, user)
+    async with session_factory() as session:
+        previous = await ledger.latest_version(session, case_id=case.id)
+        raw = deepcopy(previous.ledger)
+        field = next(e for e in raw["entries"] if e["key"] == "muscle_invasion")
+        unknown = next(r for r in field["readings"] if r["value"] == "NR")
+        field.update(unknown)
+        field["status"], field["highlight"] = "conflicting", "amber"
+        field["readings"].sort(key=lambda reading: ["NR", "Non", "Oui"].index(reading["value"]))
+        version = CaseLedgerVersion(
+            case_id=case.id, organization_id=case.organization_id, version=previous.version + 1,
+            ledger=raw, missing_fields=[], uncertain_fields=["muscle_invasion"],
+            change_reason="Ancienne représentation synthétique : lecture inconnue en premier",
+            created_by_user_id=user.id,
+        )
+        session.add(version)
+        await session.commit()
+        version_id, expected = version.id, deepcopy(version.ledger)
+    async with session_factory() as session:
+        stored = await session.get(CaseLedgerVersion, version_id)
+        entries = entries_from_version(stored)
+        projected = next(e for e in entries if e.key == "muscle_invasion")
+        assert projected.status == "conflicting" and projected.highlight == "amber"
+        assert projected.value == "Non"
+        assert [r.value for r in projected.readings] == ["NR", "Non", "Oui"]
+        built = await build_bundle(
+            session, case=case, agent_role="urology_oncology", version=stored,
+        )
+        conflict = next(c for c in built.bundle.inputs.conflicting_fields
+                        if c.field == "muscle_invasion")
+        assert conflict.values == ["Non", "Oui"] and conflict.source_ids
+        assert not built.report.can_run_analysis
+        assert "muscle_invasion" not in built.bundle.inputs.missing_fields
+        assert any("NR" in snippet.text for snippet in built.bundle.inputs.source_snippets)
+        assert stored.ledger == expected
+    body = (await client.get(f"/cases/{case.id}/ledger")).json()
+    field = next(e for e in body["entries"] if e["key"] == "muscle_invasion")
+    assert field["status"] == "conflicting" and field["highlight"] == "amber"
+    for path in ("analysis", "analysis/panel"):
+        payload = {"roles": ["urology_oncology"]} if path.endswith("panel") else {}
+        assert (await client.post(f"/cases/{case.id}/{path}", json=payload)).status_code == 409
+    await assert_no_analysis(session_factory, case.id)

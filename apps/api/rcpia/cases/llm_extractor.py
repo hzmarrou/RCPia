@@ -38,7 +38,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
-from rcpia.cases.extraction import FactCandidate, extract_from_text, normalize_value
+from rcpia.cases.extraction import LABEL_LINE, FactCandidate, extract_from_text, normalize_value
 from rcpia.cases.fact_schema import FIELDS_BY_KEY, is_unknown_value
 
 # How much of the dossier goes to the model. Real dossiers run to a few thousand words; this is
@@ -204,6 +204,33 @@ def _braced(text: str) -> str | None:
     return text[start : end + 1] if start != -1 and end > start else None
 
 
+def _unknown_quote_cannot_support(key: str, value: str, source: str) -> bool:
+    """An unknown box cannot supply a value, but a separate quoted answer can.
+
+    Restrict this guard to explicit placeholders. Other fields' readings cannot answer
+    this field either; any remaining narrative must actually contain the proposed value.
+    """
+    if is_unknown_value(source):
+        return True
+    readings = extract_from_text(source)
+    if not any(r.key == key and is_unknown_value(r.value) for r in readings):
+        return False
+    remaining = f" {flatten(source)} "
+    unsupported = [
+        r.excerpt for r in readings if r.key != key or is_unknown_value(r.value)
+    ]
+    for line in source.splitlines():
+        labelled = LABEL_LINE.match(line)
+        if is_unknown_value(labelled.group("value") if labelled else line):
+            unsupported.append(line)
+    for text in unsupported:
+        excerpt = flatten(text)
+        if excerpt:
+            remaining = remaining.replace(f" {excerpt} ", " ")
+    proposed = flatten(value)
+    return not proposed or f" {proposed} " not in remaining
+
+
 def parse_response(
     raw: str,
     *,
@@ -252,16 +279,7 @@ def parse_response(
             )
             continue
 
-        source_values = [
-            candidate.value for candidate in extract_from_text(source) if candidate.key == key
-        ]
-        if (
-            not is_unknown_value(value)
-            and (
-                is_unknown_value(source)
-                or (source_values and all(is_unknown_value(v) for v in source_values))
-            )
-        ):
+        if not is_unknown_value(value) and _unknown_quote_cannot_support(key, value, source):
             rejected.append(RejectedFact(
                 key, value, "la citation indique une donnée non renseignée, pas une réponse",
             ))
@@ -273,7 +291,7 @@ def parse_response(
             FactCandidate(
                 key=key,
                 value=value,
-                excerpt=source[:400],
+                excerpt=source,
                 document_id=document_id,
                 from_narrative=True,
             )

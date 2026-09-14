@@ -372,3 +372,164 @@ async def test_actual_post_gates_live_and_stored_entries_without_enqueuing(monke
             assert "Infiltration du muscle" in response.json()["detail"]
     session.execute.assert_not_called()
     session.add.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("values", "status", "expected_value", "expected_status", "expected_highlight", "conflict"),
+    [
+        (["NR", "Non", "Oui"], "conflicting", "Non", "conflicting", "amber", ["Non", "Oui"]),
+        (["NR", "Non"], "conflicting", "Non", "confirmed", "neutral", []),
+        (["Non", "NR"], "conflicting", "Non", "confirmed", "neutral", []),
+        (["NR", "Non renseigné"], "conflicting", None, "missing", "red", []),
+        (["Non infiltré ?"], "uncertain", "Non infiltré ?", "uncertain", "amber", []),
+        (["NR", "Non infiltré ?"], "uncertain", "Non infiltré ?", "uncertain", "amber", []),
+        (["Non infiltré ?", "NR"], "uncertain", "Non infiltré ?", "uncertain", "amber", []),
+    ],
+)
+async def test_legacy_mixed_readings_keep_effective_answers_and_structured_conflicts(
+    values, status, expected_value, expected_status, expected_highlight, conflict,
+):
+    old = replace(
+        entry(values[0]), status=status, highlight="amber",
+        readings=tuple(ledger.LedgerReading(
+            value=value, fact_id=str(uuid.uuid4()), source_document_id=str(uuid.uuid4()),
+            source_chunk_id=str(uuid.uuid4()), source_excerpt=f"Muscle : {value}",
+        ) for value in values),
+    )
+    version = CaseLedgerVersion(
+        version=1, ledger={"entries": [
+            asdict(entry("Carcinome urothélial", key="histology")), asdict(old),
+        ]}, missing_fields=[], uncertain_fields=["muscle_invasion"],
+    )
+    raw = deepcopy(version.ledger)
+    projected = entries_from_version(version)[1]
+    assert (projected.value, projected.status, projected.highlight) == (
+        expected_value, expected_status, expected_highlight,
+    )
+    assert projected.readings == old.readings
+    if expected_value is not None and is_unknown_value(values[0]):
+        assert projected.source_excerpt == old.readings[1].source_excerpt
+        assert projected.source_chunk_id == old.readings[1].source_chunk_id
+        assert projected.fact_id == old.readings[1].fact_id
+    assert ledger.project_entry(projected) == projected
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    built = await build_bundle(
+        session, case=Case(id=uuid.uuid4(), cancer_type=CancerType.bladder),
+        agent_role="urology_oncology", version=version,
+    )
+    assert [c.values for c in built.bundle.inputs.conflicting_fields] == (
+        [conflict] if conflict else []
+    )
+    assert built.report.can_run_analysis is (expected_status == "confirmed")
+    assert ("muscle_invasion" in built.bundle.inputs.missing_fields) is (
+        expected_status == "missing"
+    )
+    assert {s.text for s in built.bundle.inputs.source_snippets} >= {
+        reading.source_excerpt for reading in old.readings
+    }
+    usable = usable_facts([old])
+    assert [fact.value for fact in usable] == (
+        [expected_value] if expected_status == "confirmed" else []
+    )
+    assert version.ledger == raw
+
+
+@pytest.mark.parametrize("corrected", [True, False])
+@pytest.mark.parametrize("value", ["NR", "Non renseigné", None, "Non"])
+async def test_human_override_does_not_resurrect_superseded_readings(value, corrected):
+    old = replace(
+        entry(value, origin="human"), corrected=corrected,
+        readings=(
+            ledger.LedgerReading(value="Non", fact_id=str(uuid.uuid4())),
+            ledger.LedgerReading(value="Oui", fact_id=str(uuid.uuid4())),
+        ),
+    )
+    version = CaseLedgerVersion(version=1, ledger={"entries": [
+        asdict(entry("Carcinome urothélial", key="histology")), asdict(old),
+    ]})
+    raw = deepcopy(version.ledger)
+    projected = entries_from_version(version)[1]
+    assert projected.value == ("Non" if value == "Non" else None)
+    assert projected.status == ("confirmed" if value == "Non" else "missing")
+    assert all(reading in projected.readings for reading in old.readings)
+    assert ledger.project_entry(projected) == projected
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    built = await build_bundle(
+        session, case=Case(id=uuid.uuid4(), cancer_type=CancerType.bladder),
+        agent_role="urology_oncology", version=version,
+    )
+    assert not built.bundle.inputs.conflicting_fields
+    assert built.report.can_run_analysis is (value == "Non")
+    assert bool(usable_facts([old])) is (value == "Non")
+    assert version.ledger == raw
+
+
+@pytest.mark.parametrize("value", [
+    "Carcinome urothélial confirmé", "Carcinome urothélial à confirmer",
+])
+def test_unknown_histology_box_does_not_erase_a_separately_quoted_conclusion(value):
+    source = f"Type histologique : Non renseigné.\nConclusion : {value}."
+    result = parse_response(
+        json.dumps({"facts": [{"field": "histology", "value": value, "source": source}]}),
+        dossier_text=source, wanted=["histology"],
+    )
+    assert not result.rejected
+    assert result.still_missing == []
+    assert len(result.candidates) == 1
+    assert result.candidates[0].value == value
+    assert result.candidates[0].excerpt == source
+
+
+@pytest.mark.parametrize(("extra", "invented"), [
+    ("", "Non"),
+    ("\nConclusion : Non renseigné.", "Non"),
+    ("\nNon renseigné.", "Non"),
+    ("\nNote : dossier relu.", "Non"),
+    ("\nAllergies : Non", "Non"),
+    ("\nAge : 70", "0"),
+    ("\nConclusion : contrôles administratifs normaux.", "Normal"),
+    ("\nType histologique : Carcinome urothélial confirmé.", "Non"),
+])
+def test_unrelated_text_cannot_supply_an_answer_from_an_unknown_muscle_box(extra, invented):
+    source = "Infiltration du muscle : Non renseigné." + extra
+    result = parse_response(
+        json.dumps({"facts": [{
+            "field": "muscle_invasion", "value": invented, "source": source,
+        }]}),
+        dossier_text=source, wanted=["muscle_invasion"],
+    )
+    assert not result.candidates
+    assert result.still_missing == ["muscle_invasion"]
+    assert result.rejected
+
+
+def test_separate_known_same_field_after_unknown_box_can_answer_it():
+    source = "Infiltration du muscle : NR.\nInfiltration du muscle : Non."
+    result = parse_response(
+        json.dumps({"facts": [{
+            "field": "muscle_invasion", "value": "Non", "source": source,
+        }]}),
+        dossier_text=source, wanted=["muscle_invasion"],
+    )
+    assert not result.rejected
+    assert result.candidates[0].value == "Non"
+
+
+def test_separate_conclusion_after_a_long_quote_keeps_the_actual_supporting_source():
+    value = "Carcinome urothélial confirmé"
+    source = (
+        "Type histologique : Non renseigné.\n"
+        + "Contexte synthétique du compte rendu.\n" * 15
+        + f"Conclusion : {value}."
+    )
+    assert source.index(value) > 400
+    result = parse_response(
+        json.dumps({"facts": [{"field": "histology", "value": value, "source": source}]}),
+        dossier_text=source, wanted=["histology"],
+    )
+    assert not result.rejected
+    assert result.candidates[0].excerpt == source

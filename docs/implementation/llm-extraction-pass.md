@@ -25,6 +25,15 @@ with the original wording in readings and an explanatory note. Existing facts, v
 and historical run bundles are not rewritten. Newly built bundles, retrieval, calculators
 and the PPS missing-information view consume projected entries.
 
+Projection considers all effective readings, not just the historical representative value.
+An unknown reading does not contradict a known answer; two opposing known answers remain
+amber and appear in the bundle's structured conflicts even if an unknown reading came first.
+Human corrections replace the effective answer without resurrecting superseded readings.
+The LLM guard likewise distinguishes an unknown form box from a separate quoted conclusion:
+the proposed answer must occur outside the unknown box and outside other fields' readings.
+The complete verified quotation is retained, rather than dropping a supporting conclusion
+after the first 400 characters; chunk traceability is still checked before storing it.
+
 Unknown mandatory fields block both single-agent and panel POST dispatch. The requested
 snapshot is checked as well as the live ledger; an older queued/running job is not silently
 reused after a correction. A valid correction appends a fact and version, while an unknown

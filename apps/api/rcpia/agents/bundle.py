@@ -46,6 +46,7 @@ from rcpia.cases.ledger import (
     LedgerEntry,
     LedgerReading,
     adenocarcinoma_confirmation,
+    effective_readings,
     project_entry,
 )
 from rcpia.core.models import CancerType, Case, CaseLedgerVersion, DocumentChunk
@@ -390,11 +391,13 @@ async def build_bundle(
     conflicts = [
         ConflictingField(
             field=entry.key,
-            values=[reading.value or "" for reading in entry.readings],
+            values=[reading.value or "" for reading in effective_readings(entry)],
             source_ids=source_ids_by_key.get(entry.key, []),
         )
         for entry in entries
-        if entry.highlight == AMBER and len(entry.readings) > 1
+        if entry.highlight == AMBER and len({
+            " ".join((r.value or "").casefold().split()) for r in effective_readings(entry)
+        }) > 1
     ]
 
     # **Deterministic calculators, run over this patient's own ledger.**
