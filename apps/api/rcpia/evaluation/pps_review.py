@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from rcpia.core.jsonio import load_json
 from rcpia.evaluation.runtime_provenance import check_output, restricted_input
-from rcpia.pps.docx import PROVISIONAL_FOOTER
+from rcpia.pps.docx import PROVISIONAL_FOOTER, ensure_zoom_percentage
 from rcpia.pps.schemas import AI_ORIGIN_TITLE, PROVISIONAL_BANNER
 from rcpia.pps.sections import SECTION_TITLES
 
@@ -422,9 +422,7 @@ def _write_table(document, rows: list[tuple[str, list[str]]]) -> None:
 
 def render_copy(alias: str, letter: str, sections: list[list[str]]) -> bytes:
     document = Document()
-    zoom = document.settings.element.find(qn("w:zoom"))
-    if zoom is not None and zoom.get(qn("w:percent")) is None:
-        zoom.set(qn("w:percent"), "100")
+    ensure_zoom_percentage(document)
     section = document.sections[0]
     section.page_width, section.page_height = Cm(21), Cm(29.7)
     section.top_margin = section.bottom_margin = Cm(1.7)

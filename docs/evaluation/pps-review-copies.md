@@ -12,6 +12,12 @@ the companion probatory document retains the full proposal, attribution and
 missing-information detail. Rendering does not invoke another model or truncate
 text. Historical v1 proposals without a concise fiche retain their existing view.
 
+Native fiche, probatory and neutral reviewer Word exports share the same document
+settings repair: an existing `w:zoom` element without its required `w:percent`
+receives `100`. Existing percentages are preserved and an absent optional zoom
+element is not added. This changes document settings only, never clinical content.
+Existing saved proposals can be exported again without rerunning any clinical agent.
+
 The institutional fiche contract (`rcpia.pps-fiche.v2`) requires narrative
 diagnosis/comorbidity text and short phase titles with explicit bullet items.
 Conditional alternatives continue the numbered plan; their source ranks and
