@@ -77,6 +77,21 @@ the database purge.
 
 ## What must change before production
 
+### Tester access boundary (16 September 2026)
+
+Uploaders can list, read, correct and analyze only cases they created. Administrators
+can supervise every case within their own organization, never another organization's.
+An individual account does not grant access to colleagues' cases. This rule is enforced
+by the shared API case lookup for documents, ledger operations, analyses and exports,
+not only by the dashboard. Responses under `/cases` are not cacheable.
+
+The change does not alter stored case ownership or prior clinical evidence. Cases with
+no recorded creator remain available only to organization administrators. New testers
+see an empty workspace with no automatic example; peer sharing is not implemented.
+An administrator's access means these are not confidential spaces from that administrator.
+
+### Remaining production requirements
+
 - Parse inside the hospital (`PARSER_PROVIDER=liteparse`) or contract cloud parsing properly.
 - Host PostgreSQL and blob storage on the internal server.
 - Define retention, erasure authorization, and access logging review.

@@ -175,6 +175,9 @@ async def start_analysis(
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
+    # Rollback expires ORM rows; compare a concurrent job to the original pinned version.
+    requested_version = version.version
+
     def compatible(existing: AnalysisJob) -> bool:
         if (
             payload.agent_role == SYNTHESIS_ROLE
@@ -188,10 +191,10 @@ async def start_analysis(
             # original snapshot, even if the live ledger now passes the gate.
             return (
                 existing.status is JobStatus.waiting_for_user
-                or existing.payload.get("ledger_version") == version.version
+                or existing.payload.get("ledger_version") == requested_version
             )
         return panel_service.job_is_compatible(
-            existing, ledger_version=version.version, question=payload.clinical_question,
+            existing, ledger_version=requested_version, question=payload.clinical_question,
             retrieval_query=retrieval_query,
         )
 

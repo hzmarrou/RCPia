@@ -40,8 +40,8 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def no_store_for_auth(request: Request, call_next: Callable) -> Response:
-    """Keep credential material out of caches and referrers.
+async def no_store_for_private_routes(request: Request, call_next: Callable) -> Response:
+    """Keep credentials and case responses out of caches and referrers.
 
     Applied as middleware rather than per route because headers set on an injected
     Response are lost when the handler raises: a failed login or a rejected invitation
@@ -49,7 +49,11 @@ async def no_store_for_auth(request: Request, call_next: Callable) -> Response:
     URLs and bodies should not be retained.
     """
     response: Response = await call_next(request)
-    if request.url.path.startswith("/auth"):
+    if (
+        request.url.path.startswith("/auth")
+        or request.url.path == "/cases"
+        or request.url.path.startswith("/cases/")
+    ):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
     return response
