@@ -176,8 +176,10 @@ async def seed_case(
             is_active=True,
         )
         session.add(user)
+        await session.flush()
         case = Case(
             organization_id=organization.id,
+            created_by_user_id=user.id,
             reference=f"CASE-{uuid.uuid4().hex[:8]}",
             cancer_type=CancerType.bladder,
             status=CaseStatus.ready_for_review,

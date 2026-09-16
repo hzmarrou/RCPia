@@ -77,7 +77,7 @@ remain unknown, and elapsed time is neither capped nor converted into a progress
 
 ## Invitations
 
-`/admin/invitations`, linked from the dashboard, lets an organization administrator
+`/admin/invitations`, linked only from an administrator's dashboard, lets that administrator
 create invitations, copy their one-time activation links and revoke outstanding
 invitations. Access is decided by `GET /auth/invitations`, not a frontend role check.
 The API lists only the caller's organization's unexpired, pending invitations.
@@ -86,3 +86,11 @@ Activation links use the web origin and a URL fragment (`/activate#token=…`).
 They are held only in the current page's memory, never in browser storage. Copy a
 link before creating another invitation or leaving the page; lost links cannot be
 retrieved. No invitation email is sent automatically.
+
+## Private tester workspaces
+
+The dashboard and workstation rail display the API's authorized case list: uploaders
+see only cases they created, and administrators see their organization's cases.
+The empty dashboard explains the upload, review and deliberate-analysis sequence.
+It does not add an example or expose another user's dossier. The role check only hides
+admin navigation; the API still decides access to invitations and every case operation.

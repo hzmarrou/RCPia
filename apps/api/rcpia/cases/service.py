@@ -1,7 +1,8 @@
 """Case and dossier intake.
 
-Every operation is scoped to the caller's organization: the case id alone is never
-enough to reach a case, which is the same rule the schema's composite keys enforce.
+Uploaders can access only cases they created. Administrators can access every case
+in their organization, including historical cases without a recorded creator.
+The same lookup protects the list and every case-scoped HTTP operation.
 
 Uploading a dossier writes three things in one transaction — the blob metadata row, the
 audit event, and the parsing job — so a document can never exist without a job to parse
@@ -24,6 +25,7 @@ from rcpia.core.models import (
     ParseStatus,
     UploadedDocument,
     User,
+    UserRole,
 )
 from rcpia.jobs import service as jobs
 from rcpia.jobs.models import LIVE_JOB_STATUSES, JobType
@@ -40,7 +42,7 @@ class DuplicateReference(CaseError):
 
 
 class CaseNotFound(CaseError):
-    """No such case in the caller's organization."""
+    """No such case visible to the caller."""
 
 
 async def create_case(
@@ -81,24 +83,24 @@ async def create_case(
     return case
 
 
+def _accessible_cases(user: User) -> sa.Select[tuple[Case]]:
+    statement = sa.select(Case).where(Case.organization_id == user.organization_id)
+    if user.role == UserRole.admin:
+        return statement
+    if user.role == UserRole.uploader:
+        return statement.where(Case.created_by_user_id == user.id)
+    return statement.where(sa.false())
+
+
 async def list_cases(session: AsyncSession, *, user: User) -> list[Case]:
-    result = await session.execute(
-        sa.select(Case)
-        .where(Case.organization_id == user.organization_id)
-        .order_by(Case.created_at.desc())
-    )
+    result = await session.execute(_accessible_cases(user).order_by(Case.created_at.desc()))
     return list(result.scalars().all())
 
 
 async def get_case(session: AsyncSession, *, user: User, case_id: uuid.UUID) -> Case:
-    case = await session.scalar(
-        sa.select(Case).where(
-            Case.id == case_id, Case.organization_id == user.organization_id
-        )
-    )
+    case = await session.scalar(_accessible_cases(user).where(Case.id == case_id))
     if case is None:
-        # Deliberately indistinguishable from "belongs to another organization": the
-        # caller learns nothing about cases they may not see.
+        # Do not reveal whether an inaccessible case belongs to a colleague or another org.
         raise CaseNotFound(str(case_id))
     return case
 

@@ -15,6 +15,8 @@ RCPia prepares **provisional** RCP/MDT-style outputs for urological oncology cas
 - Specialist agents run independently before any conflict resolution.
 - The synthesis agent is called the **RCP synthesis agent**.
 - Blocking safety findings prevent actionable PPS generation.
+- Uploaders see and work on only the cases they created. Administrators supervise all
+  cases in their own organization; a new invitation does not share existing dossiers.
 
 ## Architecture
 
@@ -29,6 +31,19 @@ Next.js web  ->  FastAPI api  ->  PostgreSQL + pgvector
 No Redis, RabbitMQ, NATS, Qdrant, Azure AI Search, or separate vector database in v1.
 Deployment target is Azure Container Apps; the same containers run locally with Docker
 Compose and on-premises later.
+
+## Tester workspaces
+
+New uploaders start with an empty welcome page and instructions for submitting an
+approved synthetic or de-identified dossier. No shared example is added automatically.
+The API applies creator ownership to case lists and direct case access, including
+source downloads, ledger corrections, analysis requests and PPS exports. Administrators
+retain organization-wide access, including historical cases without a recorded creator.
+Existing ownership and clinical history are not rewritten. Peer-to-peer sharing is not
+implemented; inviting a colleague alone does not grant access to another user's cases.
+
+References remain unique within an organization. Use distinct test references; a name
+collision does not grant access to the existing case.
 
 ## Repository layout
 

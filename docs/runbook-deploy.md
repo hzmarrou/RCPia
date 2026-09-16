@@ -286,9 +286,23 @@ as part of an image rollback.
 ## 5. Clinician invitations
 
 The owner supplies the approved recipients and organization through a private channel.
-Do not add recipient lists or passwords to repository files. Accounts are individual,
-but cases and corrections are shared within the organization; separate logins do not
-create private per-user case spaces.
+Do not add recipient lists or passwords to repository files. Uploaders can access only
+cases they created; administrators retain access to all cases in their own organization.
+An invitation does not share the administrator's or colleagues' dossiers. New uploaders
+start with an empty welcome page, without an automatically shared example.
+
+This ownership boundary also applies to direct case URLs, original documents, ledger
+corrections, activity, agent runs, analysis requests and every PPS export. Historical
+cases without a creator remain administrator-only. Do not reassign or delete old cases
+to create a clean landing page. References remain organization-unique: choose distinct
+synthetic references for each tester.
+
+Before releasing this access change, verify two uploaders in the same organization
+cannot read or alter one another's cases through either UI or API, while a same-org
+administrator can supervise both. Check an administrator from another organization is
+still refused. Use pre-existing inaccessible cases only for read-only checks on staging;
+exercise forbidden writes and provider-free fixtures in the isolated local environment.
+No data migration or model/corpus change is required.
 
 An existing organization administrator opens `/admin/invitations`, creates an invitation
 for each clinician with role `uploader`, and shares the one-time link privately. `viewer`
