@@ -131,7 +131,8 @@ async def correct_field(
         ) from exc
 
     version = await ledger_service.record_version(
-        session, case=case, change_reason=f"Correction : {payload.fact_type}", user=user
+        session, case=case, change_reason=f"Correction : {payload.fact_type}", user=user,
+        inherit_sources=True,
     )
     await session.commit()
 

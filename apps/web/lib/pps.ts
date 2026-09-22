@@ -257,6 +257,7 @@ export const ANSWER_LABELS: Record<Answer, string> = {
 };
 
 export const AGENT_LABELS: Record<string, string> = {
+  rcp_synthesis: "RCP Synthesis",
   urology_oncology: "Oncologie urologique",
   medical_oncology: "Oncologie médicale",
   radiation_oncology: "Radiothérapie",

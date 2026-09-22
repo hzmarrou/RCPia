@@ -30,6 +30,7 @@ from rcpia.agents.schemas import (
     agent_output_json_schema,
 )
 from rcpia.agents.serialization import bundle_bytes
+from rcpia.core.paths import filesystem_path
 
 FAKE_PI = Path(__file__).resolve().parent / "fake_pi.py"
 CASE_ID = uuid.UUID("11111111-2222-4333-8444-555555555555")
@@ -108,6 +109,44 @@ async def test_attachment_bytes_are_exactly_the_bytes_measured_by_the_bundle_gat
     assert json.loads(actual)["inputs"]["source_snippets"][0]["text"] == (
         task.inputs.source_snippets[0].text
     )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows extended-path regression")
+async def test_long_windows_work_root_writes_reads_and_cleans_the_same_session(
+    adapter: PiAdapter, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter.work_root = adapter.work_root / ("long-runtime-" + "a" * 110)
+    run_id = uuid.uuid4()
+    session_path = adapter.session_path(CASE_ID, "urology_oncology", run_id)
+    task_path = adapter.task_path(CASE_ID, "urology_oncology", run_id)
+    assert str(session_path).startswith("\\\\?\\")
+    assert len(str(session_path)) > 260 and len(str(task_path)) > 260
+    monkeypatch.setenv("RCPIA_FAKE_PI_MODE", "ok")
+    try:
+        result = await adapter.run(
+            bundle=bundle(), agent_name="urology_oncology", case_id=CASE_ID, run_id=run_id,
+        )
+        assert result.output_text and result.session_bytes == session_path.read_bytes()
+        assert task_path.read_bytes() == bundle_bytes(bundle())
+        adapter.cleanup(case_id=CASE_ID, agent_name="urology_oncology", run_id=run_id)
+        assert not session_path.exists() and not task_path.exists()
+    finally:
+        adapter.cleanup(case_id=CASE_ID, agent_name="urology_oncology", run_id=run_id)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows namespace conversion")
+def test_windows_runtime_paths_are_absolute_idempotent_and_support_unc():
+    local = filesystem_path(Path("relative") / "task.json")
+    assert local.is_absolute() and str(local).startswith("\\\\?\\")
+    assert filesystem_path(local) == local
+    remote = filesystem_path(Path(r"\\server\share\folder\task.json"))
+    assert str(remote) == r"\\?\UNC\server\share\folder\task.json"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Non-Windows behavior")
+def test_non_windows_runtime_paths_are_unchanged():
+    path = Path("relative") / "task.json"
+    assert filesystem_path(path) == path
 
 
 # --------------------------------------------------------------------------------------

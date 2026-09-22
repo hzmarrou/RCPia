@@ -34,6 +34,7 @@ import anyio.to_thread
 from rcpia.agents.lifecycle import Phase, RunTimeline, TimeBudget, TimeoutLayer
 from rcpia.agents.schemas import TaskBundle
 from rcpia.agents.serialization import bundle_bytes
+from rcpia.core.paths import filesystem_path
 
 # The design fixes ten minutes per agent run; the job lease is fifteen, so a timeout is
 # always recorded by the worker that owns the job rather than by a lease expiring.
@@ -446,10 +447,14 @@ class PiAdapter:
 
     def session_path(self, case_id: uuid.UUID, agent_name: str, run_id: uuid.UUID) -> Path:
         # Sessions are scoped per case, per agent and per run: never reused across cases.
-        return self.work_root / "sessions" / f"case-{case_id}-{agent_name}-{run_id}.jsonl"
+        return filesystem_path(
+            self.work_root / "sessions" / f"case-{case_id}-{agent_name}-{run_id}.jsonl"
+        )
 
     def task_path(self, case_id: uuid.UUID, agent_name: str, run_id: uuid.UUID) -> Path:
-        return self.work_root / "tasks" / f"task-{case_id}-{agent_name}-{run_id}.json"
+        return filesystem_path(
+            self.work_root / "tasks" / f"task-{case_id}-{agent_name}-{run_id}.json"
+        )
 
     # ---------------------------------------------------------------- running
 

@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import CaseList from "@/app/_components/CaseList";
+import QueuedWorkNotice from "@/app/_components/QueuedWorkNotice";
+import DiscussionPlaceholder from "@/app/_components/DiscussionPlaceholder";
+import { SourceFieldReview, SourceReviewProvider, SourceReviewSummary } from "@/app/_components/SourceReview";
 import {
   JOB_LABELS,
   STEP_LABELS,
@@ -29,7 +32,12 @@ const PANES = {
 const CENTRE_MIN = 360;
 const STORE = "rcpia.poste.panes";
 
-type Tab = "correction" | "fiche";
+type Tab = "correction" | "fiche" | "discussion";
+const SIDE_TABS: { id: Tab; label: string }[] = [
+  { id: "correction", label: "Correction" },
+  { id: "fiche", label: "Fiche" },
+  { id: "discussion", label: "Discussion" },
+];
 
 /**
  * Where a launch has got to.
@@ -82,6 +90,10 @@ export default function Workstation({
   // A different dossier is a different question; nothing observed about the last one carries.
   useEffect(() => {
     sawWork.current = false;
+    setEditing(null);
+    setValue("");
+    setReason("");
+    setError(null);
   }, [clinicalCase.id]);
 
   // A server refresh brings a newer ledger than anything held here, so local state steps
@@ -166,6 +178,9 @@ export default function Workstation({
   }, [clinicalCase.id, clinicalCase.status, launchPhase, router, attempt]);
 
   const openCorrection = useCallback((entry: LedgerEntry) => {
+    if (saving) return false;
+    if (editing && (value !== (editing.value ?? "") || reason.trim()) &&
+      !window.confirm("Remplacer la correction en cours ? Les modifications non enregistrées seront perdues.")) return false;
     setEditing(entry);
     setValue(entry.value ?? "");
     setReason("");
@@ -173,7 +188,8 @@ export default function Workstation({
     setTab("correction");
     setCollapsed(false);
     window.setTimeout(() => valueInput.current?.focus(), 0);
-  }, []);
+    return true;
+  }, [editing, value, reason, saving]);
 
   async function save() {
     if (editing === null) return;
@@ -237,6 +253,12 @@ export default function Workstation({
   const busy = live.length > 0 || launch.phase === "sending" || launch.phase === "running";
 
   return (
+    <SourceReviewProvider
+      key={`${clinicalCase.id}:${ledgerState?.version}:${ledgerState?.updated_at}:${clinicalCase.updated_at}`}
+      caseId={clinicalCase.id}
+      ledgerVersion={ledgerState?.version ?? null}
+      onCorrect={openCorrection}
+    >
     <div className={`poste${collapsed ? " collapsed" : ""}`}>
       <nav className="poste-rail" aria-label="Dossiers">
         <div className="poste-brand">
@@ -283,6 +305,7 @@ export default function Workstation({
               );
             })}
           </ol>
+          <QueuedWorkNotice jobs={live} reachable={reachable} />
           {pipeline.includes("unknown") ? (
             <p className="poste-qualifier">
               {reachable ? (
@@ -311,11 +334,12 @@ export default function Workstation({
             <p className="muted">
               Aucune donnée extraite pour ce dossier. Déposez un document, puis revenez.
             </p>
+            <SourceReviewSummary />
           </section>
         ) : (
           <>
             <section className="poste-section">
-              <h2>Complétude</h2>
+              <h2>Contrôles pour l’analyse</h2>
               <div className="poste-metrics">
                 <div>
                   <div className="k">Données lues</div>
@@ -354,6 +378,7 @@ export default function Workstation({
                 Les champs signalés « Bloquante » empêchent le lancement de l&apos;analyse.
                 Les autres données manquantes restent à vérifier.
               </p>
+              <SourceReviewSummary />
               {groups.map((group) => (
                 <div key={group.category} className="poste-group">
                   <div className="poste-grouphead">
@@ -389,15 +414,7 @@ export default function Workstation({
                             // Keep older API revisions and historical responses readable:
                             // they may still contain duplicate field keys.
                             key={`${entry.key}-${index}`}
-                            className={
-                              !applicable
-                                ? "na"
-                                : entry.highlight === "red"
-                                  ? "miss"
-                                  : entry.highlight === "amber"
-                                    ? "unc"
-                                    : undefined
-                            }
+                            className={!applicable ? "na" : undefined}
                             data-severity={issue?.severity}
                           >
                             <td className="field">
@@ -420,12 +437,13 @@ export default function Workstation({
                                   {entry.value === null ? "" : ` — ${entry.value}`}
                                 </span>
                               ) : entry.value === null ? (
-                                <span className="missing-value">Information manquante</span>
+                                <span className="source-empty-value">Valeur structurée non renseignée</span>
                               ) : (
                                 <Value text={entry.value} />
                               )}
                               {entry.corrected ? <span className="poste-tag">Corrigé</span> : null}
                               {entry.note ? <div className="src">{entry.note}</div> : null}
+                              <SourceFieldReview entry={entry} />
                             </td>
                             <td>
                               <button
@@ -523,20 +541,30 @@ export default function Workstation({
       <Grip which="right" />
 
       <aside className="poste-side">
-        <div className="poste-tabs" role="tablist">
-          <button
-            role="tab"
-            aria-selected={tab === "correction"}
-            onClick={() => setTab("correction")}
-          >
-            Correction
-          </button>
-          <button role="tab" aria-selected={tab === "fiche"} onClick={() => setTab("fiche")}>
-            Fiche
-          </button>
-          <button role="tab" aria-selected="false" disabled title="Disponible prochainement">
-            Questions <span className="coming-soon">À venir</span>
-          </button>
+        <div className="poste-tabs" role="tablist" aria-label="Panneau du dossier">
+          {SIDE_TABS.map((item, index) => (
+            <button
+              key={item.id}
+              id={`poste-tab-${item.id}`}
+              role="tab"
+              aria-controls="poste-panel"
+              aria-selected={tab === item.id}
+              tabIndex={tab === item.id ? 0 : -1}
+              onClick={() => setTab(item.id)}
+              onKeyDown={(event) => {
+                const next = event.key === "ArrowRight" ? (index + 1) % SIDE_TABS.length
+                  : event.key === "ArrowLeft" ? (index + SIDE_TABS.length - 1) % SIDE_TABS.length
+                  : event.key === "Home" ? 0 : event.key === "End" ? SIDE_TABS.length - 1 : null;
+                if (next === null) return;
+                event.preventDefault();
+                setTab(SIDE_TABS[next].id);
+                document.getElementById(`poste-tab-${SIDE_TABS[next].id}`)?.focus();
+              }}
+            >
+              {item.label}
+              {item.id === "discussion" ? <span className="coming-soon">À venir</span> : null}
+            </button>
+          ))}
           <button
             className="poste-close"
             onClick={() => setCollapsed(true)}
@@ -546,7 +574,7 @@ export default function Workstation({
           </button>
         </div>
 
-        <div className="poste-sidebody">
+        <div className="poste-sidebody" role="tabpanel" id="poste-panel" aria-labelledby={`poste-tab-${tab}`} tabIndex={0}>
           {tab === "correction" ? (
             editing === null ? (
               <p className="muted">
@@ -588,7 +616,7 @@ export default function Workstation({
                 ) : null}
               </>
             )
-          ) : (
+          ) : tab === "discussion" ? <DiscussionPlaceholder /> : (
             <>
               <p className="provisional">
                 Toute sortie de RCPia est provisoire et doit être relue, corrigée et validée
@@ -619,6 +647,7 @@ export default function Workstation({
         </button>
       ) : null}
     </div>
+    </SourceReviewProvider>
   );
 }
 

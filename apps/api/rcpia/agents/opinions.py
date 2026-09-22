@@ -27,8 +27,12 @@ from rcpia.agents.schemas import (
     SYNTHESIS_ROLE,
     AgentOpinion,
     AgentOutput,
+    BundleInputs,
     GuidelinePassage,
+    citations_in_prose,
 )
+from rcpia.cases.patient_context import PatientContext
+from rcpia.cases.patient_sources import PatientSourceError, PatientSourceUnit
 from rcpia.core.models import AgentRun, AgentRunStatus, AnalysisPanelJob
 
 # The label a constraint uses for each speciality. Kept here rather than imported from the PPS
@@ -85,6 +89,9 @@ async def prior_opinions(
     case_id: uuid.UUID,
     panel_id: uuid.UUID | None = None,
     missing_roles: Sequence[str] = (),
+    ledger_version_id: uuid.UUID | None = None,
+    patient_source_units: Sequence[PatientSourceUnit] = (),
+    patient_context: PatientContext | None = None,
 ) -> tuple[list[AgentOpinion], list[GuidelinePassage], list[str]]:
     """The specialist opinions this synthesis is reconciling, and the evidence behind them.
 
@@ -127,6 +134,7 @@ async def prior_opinions(
     seen: set[str] = set()
     opinions: list[AgentOpinion] = []
     passages: dict[str, GuidelinePassage] = {}
+    units = {unit.id: unit for unit in patient_source_units}
     for run in rows.scalars().all():
         if run.agent_role in seen or run.output is None:
             continue
@@ -136,6 +144,30 @@ async def prior_opinions(
             # Recorded as absent rather than crashing the synthesis: an unreadable opinion is
             # one speciality missing, and the note below says how many were read.
             continue
+        raw_inputs = (run.bundle or {}).get("inputs", {})
+        if raw_inputs.get("patient_source_units"):
+            try:
+                stored = BundleInputs.model_validate(raw_inputs)
+            except ValueError as exc:
+                raise PatientSourceError("Invalid specialist patient source bundle") from exc
+            if (
+                stored.case_id != str(case_id) or output.case_id != str(case_id)
+                or run.ledger_version_id != ledger_version_id
+                or any(
+                    unit.organization_id != run.organization_id
+                    for unit in stored.patient_source_units
+                )
+                or any(units.get(unit.id) != unit for unit in stored.patient_source_units)
+                or stored.patient_context != patient_context
+            ):
+                raise PatientSourceError(
+                    "Specialist patient sources differ from synthesis snapshot"
+                )
+        for identifier in citations_in_prose(output.model_dump_json()):
+            if identifier.startswith("patient-") and identifier not in units:
+                raise PatientSourceError(
+                    "Specialist patient citation is absent from synthesis sources"
+                )
         seen.add(run.agent_role)
         opinions.append(opinion_of(output))
         for passage in _passages_of(run):

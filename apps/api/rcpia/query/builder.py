@@ -17,7 +17,7 @@ the patient, so they are arguments rather than derivations.
 """
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rcpia.evidence.retrieval import Concepts, Filter
 from rcpia.query.lexicon import build_concepts
@@ -26,13 +26,17 @@ from rcpia.query.staging import (
     Stage,
     derive_bladder_setting,
     derive_prostate_setting,
+    has_competing_stage_components,
     parse_gleason,
     parse_number,
     parse_stage,
+    reported_disease_phase,
 )
 
 # The fields the builder reads, so a caller can check the ledger carries them before asking.
-STAGING_FIELDS = ("ctnm", "ptnm", "muscle_invasion", "cis", "gleason", "isup", "psa_total")
+STAGING_FIELDS = (
+    "ctnm", "ptnm", "ct_dre", "muscle_invasion", "cis", "gleason", "isup", "psa_total",
+)
 
 
 @dataclass(frozen=True)
@@ -85,77 +89,61 @@ def derive_setting(
     from the pathological stage is using the outcome of the operation to choose whether to
     operate. EAU §4.5 keeps the two apart and so does this.
     """
-    clinical = parse_stage(_value(facts, "ctnm"))
+    clinical_text = _value(facts, "ctnm")
+    clinical = parse_stage(clinical_text)
     pathological = parse_stage(_value(facts, "ptnm"))
+    if clinical_text and has_competing_stage_components(clinical_text):
+        return SettingDecision(None, "Competing stage components require attribution.", ("ctnm",))
+    basis = "ptnm" if post_operative else "ctnm"
     stage: Stage | None = pathological if post_operative else clinical
-    if stage is None and not post_operative:
-        # A dossier that recorded only a pathological stage still says something, but using it
-        # for a pre-treatment question has to be a stated fallback rather than a silent one.
-        if pathological is not None:
-            decision = _derive(cancer_type, pathological, facts)
-            return SettingDecision(
-                setting=decision.setting,
-                reason=(
-                    "No clinical stage recorded; derived from the pathological stage instead. "
-                    + decision.reason
-                    + " Pre-treatment guidance chosen from pathology should be treated as "
-                    "provisional."
-                ),
-                basis=("ptnm",) + decision.basis[1:],
-                missing=("ctnm",) + decision.missing,
-            )
-    return _derive(cancer_type, stage, facts)
+    if not post_operative and not clinical_text and cancer_type == "prostate":
+        dre = parse_stage(_value(facts, "ct_dre"))
+        if dre is not None and dre.t is not None and dre.prefix != "p":
+            # Keep only the explicitly recorded clinical T. A DRE field cannot supply N/M.
+            stage, basis = replace(
+                dre, prefix="c", n=None, m=None, n_prefix=None, m_prefix=None,
+            ), "ct_dre"
+    decision = _derive(cancer_type, stage, facts, post_operative=post_operative)
+    decision = replace(
+        decision, basis=tuple(basis if key == "ctnm" else key for key in decision.basis),
+    )
+    if not post_operative and stage is None and pathological is not None:
+        decision = replace(
+            decision,
+            reason=decision.reason + " Pathological TNM is retained separately; it is not "
+            "substituted for clinical extent or assigned to the current organ/episode.",
+            basis=tuple(dict.fromkeys((*decision.basis, "ptnm"))),
+        )
+    return decision
 
 
-def _derive(cancer_type: str, stage: Stage | None, facts: Sequence[Fact]) -> SettingDecision:
+def _derive(
+    cancer_type: str, stage: Stage | None, facts: Sequence[Fact], *, post_operative: bool,
+) -> SettingDecision:
     if cancer_type == "bladder":
         return derive_bladder_setting(
             stage=stage,
             muscle_invasion=_value(facts, "muscle_invasion"),
             cis=_value(facts, "cis"),
+            post_operative=post_operative,
         )
     if cancer_type == "prostate":
-        return derive_prostate_setting(
+        isup = int(parse_number(_value(facts, "isup")) or 0) or None
+        decision = derive_prostate_setting(
             stage=stage,
             gleason_sum=parse_gleason(_value(facts, "gleason")),
-            isup=int(parse_number(_value(facts, "isup")) or 0) or None,
+            isup=isup,
             psa=parse_number(_value(facts, "psa_total")),
-            on_adt=_on_adt(facts),
-            psa_rising=_psa_rising(facts),
+            castration_status=reported_disease_phase(_value(facts, "disease_phase")),
+            post_operative=post_operative,
         )
+        if isup is None and "isup" in decision.basis:
+            decision = replace(
+                decision,
+                basis=tuple("gleason" if key == "isup" else key for key in decision.basis),
+            )
+        return decision
     return SettingDecision(None, f"No staging logic for cancer type {cancer_type!r}.")
-
-
-def _on_adt(facts: Sequence[Fact]) -> bool:
-    """Whether the record says androgen deprivation is already running.
-
-    Read from free text, which is why it is conservative: it must name an agent or the therapy
-    itself. A false positive here moves a patient into castration-resistant guidance.
-    """
-    haystack = " ".join(
-        (_value(facts, key) or "").lower()
-        for key in (
-            "previous_rcp_decisions", "illness_history", "medical_history", "disease_phase"
-        )
-    )
-    agents = ("adt", "hormonothérapie", "hormonotherapie", "triptoréline", "triptoreline",
-              "leuproréline", "leuprorelin", "goséréline", "goserelin", "dégarélix", "degarelix",
-              "castration", "abiratérone", "abiraterone", "enzalutamide")
-    return any(agent in haystack for agent in agents)
-
-
-def _psa_rising(facts: Sequence[Fact]) -> bool:
-    haystack = " ".join(
-        (_value(facts, key) or "").lower()
-        for key in (
-            "previous_rcp_decisions", "illness_history", "disease_phase", "progression_site"
-        )
-    )
-    return any(
-        token in haystack
-        for token in ("progression", "récidive", "recidive", "ascension", "rising", "échappement",
-                      "echappement", "résistant", "resistant")
-    )
 
 
 def build_filter(

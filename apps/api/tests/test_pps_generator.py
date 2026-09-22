@@ -700,9 +700,9 @@ async def test_the_recommendation_carries_the_sources_behind_it(
 
     assert document.evidence, "the agent cited something"
     entry = document.evidence[0]
-    assert entry.quote, "the citation resolves to the text the agent was given"
+    assert entry.quote == DOSSIER_TEXT, "the citation preserves the complete patient source"
     assert f"`{entry.id}`" in body
-    assert entry.quote[:20] in body
+    assert entry.quote.replace("\n", " ").strip() in body
 
 
 async def test_a_withheld_recommendation_is_not_turned_into_a_plan(

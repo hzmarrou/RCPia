@@ -915,11 +915,12 @@ async def test_a_multi_page_report_cites_an_honest_page_range_in_the_bundle(
             session, case=case, agent_role="urology_oncology", version=version
         )
 
-        snippet = next(
-            s for s in built.bundle.inputs.source_snippets if "CONCLUSION" in s.text
+        unit = next(
+            unit for unit in built.bundle.inputs.patient_source_units if "CONCLUSION" in unit.text
         )
-        assert snippet.page == 1, "the excerpt still starts where the report itself opens"
-        assert snippet.page_end == 3, "and must say it reaches the page the diagnosis is on"
+        pages = [chunk.page for chunk in unit.documents[0].chunks]
+        assert pages[0] == 1, "the complete quotation starts where the report itself opens"
+        assert pages[-1] == 3, "and reaches the page the diagnosis is on"
 
 
 def test_every_field_key_is_unique_and_indexed() -> None:

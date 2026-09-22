@@ -43,6 +43,7 @@ export default async function PostePage({
 
   return (
     <Workstation
+      key={clinicalCase.id}
       clinicalCase={clinicalCase}
       ledger={ledger}
       cases={cases ?? [clinicalCase]}

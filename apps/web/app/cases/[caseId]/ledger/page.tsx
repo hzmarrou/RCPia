@@ -29,13 +29,13 @@ export default async function LedgerPage({
     <>
       <h1>Données du dossier</h1>
       <p className="muted">
-        Données extraites automatiquement du dossier déposé. En rouge : information
-        manquante. En orange : donnée incertaine ou contradictoire. Vérifiez et corrigez
+        Données extraites automatiquement du dossier déposé. Les repères de relecture
+        des sources sont distincts des contrôles bloquant l’analyse. Vérifiez et corrigez
         avant toute analyse — les agents ne verront que cette version.
         {ledger.version ? ` Version ${ledger.version}.` : ""}
       </p>
 
-      <LedgerTable initial={ledger} />
+      <LedgerTable key={`${ledger.case_id}:${ledger.version}:${ledger.updated_at}`} initial={ledger} />
     </>
   );
 }

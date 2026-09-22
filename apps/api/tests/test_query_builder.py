@@ -5,8 +5,8 @@ dangerously.** A wrong therapy line returns weaker guidance; a wrong setting ret
 written for a different patient, with a real citation attached. So most of these tests are about
 what the builder *refuses* to conclude.
 
-The eight prostate and seven bladder dossiers appear here with their recorded stages, so the
-derivation is checked against real records rather than against invented ones.
+Stage strings below are controlled test inputs, not verified reconstructions of patient
+histories. Actual archived-record fidelity is evaluated separately.
 """
 
 import pytest
@@ -64,7 +64,7 @@ def test_a_dossier_with_no_stage_does_not_get_a_setting() -> None:
     decision = derive_setting("prostate", facts(psa_total="6.2", isup="1"))
     assert decision.setting is None
     assert not decision.determined
-    assert decision.missing == ("ctnm", "ptnm")
+    assert decision.missing == ("ctnm", "ct_dre")
 
 
 def test_localized_prostate_without_grade_or_psa_falls_back_to_the_parent() -> None:
@@ -102,10 +102,10 @@ def test_the_clinical_stage_is_used_and_the_pathological_one_ignored() -> None:
     )
 
 
-def test_falling_back_to_pathology_is_stated_rather_than_silent() -> None:
+def test_pathology_is_not_a_fallback_for_clinical_stage() -> None:
     decision = derive_setting("bladder", facts(ptnm="pT2 N0 M0"))
-    assert decision.setting == "bladder_mibc_non_metastatic"
-    assert "provisional" in decision.reason
+    assert decision.setting is None
+    assert "not substituted" in decision.reason
     assert "ctnm" in decision.missing
 
 
@@ -117,8 +117,8 @@ def test_falling_back_to_pathology_is_stated_rather_than_silent() -> None:
 @pytest.mark.parametrize(
     ("stage", "expected"),
     [
-        ("pTa", "bladder_nmibc_unspecified_risk"),
-        ("pT1 N0 M0", "bladder_nmibc_unspecified_risk"),
+        ("cTa N0 M0", "bladder_nmibc_unspecified_risk"),
+        ("cT1 N0 M0", "bladder_nmibc_unspecified_risk"),
         ("cT2 N0 M0", "bladder_mibc_non_metastatic"),
         ("cT4a N0 M0", "bladder_mibc_non_metastatic"),
         ("cT4b N0 M0", "bladder_locally_advanced_non_metastatic"),
@@ -134,7 +134,7 @@ def test_bladder_settings_follow_muscle_invasion_then_nodes_then_metastases(
 
 def test_recorded_cis_is_routed_to_its_own_setting() -> None:
     assert (
-        derive_setting("bladder", facts(ctnm="pTa", cis="Oui")).setting == "bladder_nmibc_cis"
+        derive_setting("bladder", facts(ctnm="cTa N0 M0", cis="Oui")).setting == "bladder_nmibc_cis"
     )
 
 
@@ -142,7 +142,7 @@ def test_the_nmibc_risk_band_is_not_invented() -> None:
     """The band needs grade, size, multifocality and prior history. The dossier form carries
     none of them as structured fields, so the parent is used rather than a guessed band.
     """
-    decision = derive_setting("bladder", facts(ctnm="pT1 N0 M0"))
+    decision = derive_setting("bladder", facts(ctnm="cT1 N0 M0"))
     assert decision.setting == "bladder_nmibc_unspecified_risk"
     assert "not derivable" in decision.reason
 
@@ -167,15 +167,14 @@ def test_the_nmibc_risk_band_is_not_invented() -> None:
          "prostate_locally_advanced_non_metastatic"),
         (dict(ctnm="cT2 N1 M0", isup="4", psa_total="30"),
          "prostate_node_positive_non_metastatic"),
-        (dict(ctnm="cT3 N1 M1b", isup="5", psa_total="116"),
-         "prostate_metastatic_hormone_sensitive"),
+        (dict(ctnm="cT3 N1 M1b", isup="5", psa_total="116"), None),
     ],
 )
 def test_prostate_risk_bands_follow_the_shared_definition(values: dict, expected: str) -> None:
     assert derive_setting("prostate", facts(**values)).setting == expected
 
 
-def test_a_metastatic_patient_on_adt_with_progression_is_castration_resistant() -> None:
+def test_treatment_and_progression_mentions_do_not_establish_castration_resistance() -> None:
     decision = derive_setting(
         "prostate",
         facts(
@@ -184,24 +183,21 @@ def test_a_metastatic_patient_on_adt_with_progression_is_castration_resistant() 
             disease_phase="progression biologique",
         ),
     )
-    assert decision.setting == "prostate_metastatic_castration_resistant"
-    assert "testosterone < 50" in decision.reason
+    assert decision.setting is None
+    assert "disease_phase" in decision.missing
 
 
-def test_castration_resistance_needs_both_adt_and_progression() -> None:
-    """One without the other is not castration resistance, and labelling it so would route the
-    patient to guidance for a state he is not in.
-    """
+def test_treatment_name_alone_does_not_establish_hormone_sensitivity() -> None:
     on_adt_only = derive_setting(
         "prostate",
         facts(ctnm="cT3 N1 M1b", isup="5", psa_total="73",
               previous_rcp_decisions="ADT par triptoréline"),
     )
-    assert on_adt_only.setting == "prostate_metastatic_hormone_sensitive"
+    assert on_adt_only.setting is None
 
 
 # --------------------------------------------------------------------------------------
-# The real dossiers
+# Historical test strings, not asserted patient truth
 # --------------------------------------------------------------------------------------
 
 
@@ -209,12 +205,11 @@ def test_castration_resistance_needs_both_adt_and_progression() -> None:
     ("dossier", "cancer", "values", "expected"),
     [
         ("dossier-1", "bladder", dict(ctnm="cT4a N1 M1a"), "bladder_metastatic"),
-        ("dossier-2", "bladder", dict(ptnm="pT2 N0 M0"), "bladder_mibc_non_metastatic"),
-        ("dossier-10", "bladder", dict(ptnm="pTa"), "bladder_nmibc_unspecified_risk"),
-        ("dossier-11", "bladder", dict(ptnm="pT1"), "bladder_nmibc_unspecified_risk"),
-        ("dossier-15", "bladder", dict(ptnm="pT1"), "bladder_nmibc_unspecified_risk"),
-        ("dossier-6", "prostate", dict(ctnm="cT3 N1 M1b", isup="5", psa_total="116"),
-         "prostate_metastatic_hormone_sensitive"),
+        ("dossier-2", "bladder", dict(ptnm="pT2 N0 M0"), None),
+        ("dossier-10", "bladder", dict(ptnm="pTa"), None),
+        ("dossier-11", "bladder", dict(ptnm="pT1"), None),
+        ("dossier-15", "bladder", dict(ptnm="pT1"), None),
+        ("dossier-6", "prostate", dict(ctnm="cT3 N1 M1b", isup="5", psa_total="116"), None),
         ("dossier-9", "prostate", dict(ctnm="cT3a N0 M0", isup="3", psa_total="34"),
          "prostate_locally_advanced_non_metastatic"),
         ("dossier-3", "prostate", dict(ctnm="cT2a N0 M0", isup="2", psa_total="7.5"),
@@ -227,12 +222,8 @@ def test_the_recorded_dossiers_derive_the_setting_expected_of_them(
     assert derive_setting(cancer, facts(**values)).setting == expected, dossier
 
 
-def test_dossier_9_is_not_intermediate_risk_and_the_builder_says_so() -> None:
-    """**The `pr-001` conflict, derived rather than argued.** The gold set filters this question
-    as `prostate_localized_intermediate_risk`. Dossier 9 records cT3a with a PSA of 34, which is
-    locally advanced on any stratification — and the builder reaches that independently, from
-    the record, without being told the answer.
-    """
+def test_fully_documented_synthetic_ct3a_n0_m0_does_not_derive_intermediate_risk() -> None:
+    """This positive control does not describe an archived record carrying Mx."""
     decision = derive_setting(
         "prostate", facts(ctnm="cT3a N0 M0", isup="3", psa_total="34")
     )
@@ -266,7 +257,7 @@ def test_an_underivable_setting_leaves_the_dimension_unset_rather_than_wrong() -
     built = build_filter("bladder", facts(age="72"))
     assert built.filter.disease_setting is None
     assert "disease_setting" in built.unset
-    assert "No TNM recorded" in built.explanation
+    assert "No clinical TNM" in built.explanation
 
 
 def test_the_query_explains_itself() -> None:
@@ -286,9 +277,9 @@ def test_an_unconfirmed_metastasis_does_not_select_metastatic_guidance() -> None
     a different treatment intent — on a finding nobody had confirmed.
     """
     decision = derive_setting("bladder", facts(ctnm="cT4a N1 M1a (à confirmer)"))
-    assert decision.setting == "bladder_mibc_non_metastatic"
+    assert decision.setting is None
     assert "unconfirmed" in decision.reason
-    assert "confirmed metastatic status" in decision.missing
+    assert "confirmed staging assessment" in decision.missing
 
 
 def test_a_confirmed_metastasis_still_selects_metastatic_guidance() -> None:

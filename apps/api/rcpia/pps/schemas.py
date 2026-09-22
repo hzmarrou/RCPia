@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from rcpia.agents.pps_fiche import ConciseFiche, InstitutionalFiche
 from rcpia.agents.pps_proposal import PpsProposal
+from rcpia.cases.patient_sources import SourceDocumentReference
 from rcpia.rules.approval import SUGGESTION_CAVEAT, Authority
 
 # Section 2 records a decision the RCP has not yet taken, and section 6 records validation
@@ -180,6 +181,24 @@ class EvidenceEntry(Strict):
     # report, typically -- so the register can say "p. 3-5" rather than implying the whole
     # excerpt sits on page 3.
     page_end: int | None = None
+    patient_source_documents: tuple[SourceDocumentReference, ...] = ()
+
+    @property
+    def patient_source_location(self) -> str:
+        """Complete source identity, shared by both renderers without duplicating the quote."""
+        locations = []
+        for document in self.patient_source_documents:
+            chunks = "; ".join(
+                f"{chunk.id} (p. {chunk.page if chunk.page is not None else '?'}, "
+                f"{chunk.section or 'section non renseignée'}, "
+                f"car. {chunk.start}-{chunk.end})"
+                for chunk in document.chunks
+            )
+            locations.append(
+                f"Document {document.id}, parse {document.parse_run}, "
+                f"SHA-256 {document.checksum_sha256} — chunks : {chunks}"
+            )
+        return "\n".join(locations)
 
 
 class NomogramFigure(Strict):

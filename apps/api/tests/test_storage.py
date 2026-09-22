@@ -9,6 +9,7 @@ with the deployment work in Phase 14.
 
 import asyncio
 import json
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -95,6 +96,22 @@ async def test_put_and_get_round_trip(store: LocalBlobStore) -> None:
     assert info.content_type == "application/pdf"
     assert info.checksum_sha256 == checksum(PDF)
     assert await store.get_bytes(key) == PDF
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows journal archive path regression")
+async def test_long_windows_session_archive_remains_readable_and_immutable(tmp_path: Path) -> None:
+    root = tmp_path / ("private-archive-" + "a" * 100)
+    store = LocalBlobStore(root, signing_secret="test-signing-secret")
+    key = keys.pi_session_key(CASE_ID, "radiation_oncology", uuid.uuid4())
+    assert len(str(store._object_dir(key) / "meta.json")) > 260
+    content = b'{"type":"session","id":"synthetic"}\n'
+    info = await store.put_bytes(key, content, "application/x-ndjson")
+    assert info.key == key
+    assert await store.get_bytes(key) == content
+    assert (await store.stat(key)).checksum_sha256 == checksum(content)
+    with pytest.raises(BlobAlreadyExists):
+        await store.put_bytes(key, b"replacement", "application/x-ndjson")
+    assert await store.get_bytes(key) == content
 
 
 async def test_checksum_and_content_type_survive_a_restart(tmp_path: Path) -> None:

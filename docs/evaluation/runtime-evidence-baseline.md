@@ -1,4 +1,4 @@
-# Actual-runtime evidence-selection baseline (v2)
+# Actual-runtime evidence selection with frozen patient context (v3)
 
 Protected baseline remains the default: both modes now exclude unresolved facts and
 veto ambiguous staging narrowing. Usable-confirmed baseline queries/filters/concepts
@@ -9,7 +9,9 @@ and independent content-bound dev/test approval. No approved dev/test labels shi
 
 This runner measures **evidence selection and delivery only**. It calls the exact
 `rcpia.agents.evidence.guideline_passages_for` used by `build_bundle`, with validated
-frozen `LedgerEntry` inputs. That function derives the filter, concepts and primary
+frozen `LedgerEntry` inputs and the optional typed `patient_context` supplied with them.
+It passes context unchanged in both baseline and decision-targeted modes; absent context
+is never reconstructed. That function derives the filter, concepts and primary
 question, retrieves ten primary passages, independently retrieves four supportive
 passages with empty concepts and the same filter, deduplicates supportive IDs, adds
 notes, and converts the text with `to_passage`. No parallel search pipeline is used.
@@ -112,6 +114,79 @@ one case/version, and synthesis are rejected before DB/provider work.
 are separately recorded; nonempty text is passed unchanged. Whitespace-only questions
 are rejected. Missing facts remain missing; no gold-derived patient facts are invented.
 
+### Optional frozen patient context
+
+`rcpia.runtime-input.v1` remains the context-free historical input format.
+`rcpia.runtime-input.v2` additionally permits a recorded retrieval decision.
+`rcpia.runtime-input.v3` permits optional `patient_context` (`rcpia.patient-context.v1`)
+alongside either query mode. A non-null patient context under v1/v2 is rejected.
+No-context snapshots retain their previous normalized hashes: the unused new field is
+omitted when serializing them, not retrospectively filled.
+
+Construct the snapshot from one stored ledger version, not from gold labels or a fresh
+source read:
+
+```python
+from rcpia.evaluation.runtime_inputs import RuntimeInput, RuntimeSnapshot
+
+snapshot = RuntimeSnapshot.model_validate({
+    "snapshot_id": f"{case.id}-v{version.version}-{role}",
+    "case_id": str(case.id),
+    "ledger_version": version.version,
+    "cancer_type": str(case.cancer_type),
+    "agent_role": role,
+    "operator_question": None,
+    "entries": version.ledger["entries"],
+    "patient_context": version.ledger.get("patient_context"),
+})
+inputs = RuntimeInput.model_validate({
+    "schema_version": "rcpia.runtime-input.v3",
+    "expected_corpus_sha256": actual_loaded_corpus_sha256,
+    "snapshots": [snapshot],
+})
+```
+
+Context is checked against case ID, ledger version, cancer scope and the producer's
+projected-ledger hash. The same binding is rechecked at the evaluation boundary before
+database/provider work, including direct `evaluate_snapshot` callers. Compact shared
+source-location/default encodings and earlier expanded encodings decode to the same
+typed object and normalized hash. One case/version cannot carry different context
+annotations across snapshots in the same input file.
+
+The existing `ledger_sha256` is the canonical identity of supplied entries. It is **not**
+the same hash scheme as `patient_context_ledger_sha256`, which binds the producer's
+existing missingness projection through `context_ledger_sha256`. Neither scheme implies
+clinical approval. Context metadata is included in `snapshot_sha256`, input and clinical-input
+hashes; candidate pools, blinded review inputs, family manifests and approvals therefore
+bind it as well. Context changes invalidate old content-bound review/approval identities.
+No new gold labels or relaxed approval rule accompany this wiring.
+
+**Preflight limits:** this evaluator receives the frozen context, not full patient source
+units. It checks binding and typed references but cannot independently authenticate the
+source-manifest contents, ownership in a patient database, or the correctness of clinical
+attribution. Supply the exact producer snapshot retained with its full TaskBundle/source
+manifest. Source completeness and the 223,232-byte full-bundle gate remain separate tests.
+
+Results explicitly record `patient_context_state` (`provided`/`absent`), its contract and
+hash, the projected-ledger binding hash, and `rcpia.setting-derivation.v2`. A context-free
+run is not a proxy for a production run that had context. For a matched current-code
+control, freeze a separate input file with context absent; do not mix conflicting
+annotations for a case/version in one input. Historical query/evidence outputs remain
+historical observations, not a causal estimate of clinical improvement: code, context,
+corpus and provider versions may differ. Unresolved settings can broaden filters and
+reduce setting-specific question coverage; do not force a stage to improve those metrics.
+
+### Private working-tree experiments
+
+The CLI still requires a clean, commit-bound checkout; there is no dirty-source switch.
+An operator may separately use the existing `evaluate_run` function for a **private,
+unscored experimental receipt**, under `readonly_snapshot(engine)` against a separately
+restored local corpus. Record the exact working-file hashes, dirty state, input/corpus
+identities and provider fingerprints outside the returned result. Do not manufacture a
+clean `source_identity` from HEAD or label that wrapper as a clean release baseline.
+Use no gold/manifest/approval arguments for this private experiment. Its receipt is not
+clinical approval and does not relax the formal dev/test scoring path.
+
 ## Optional labelled scoring
 
 Supply `--goldset <path> --split pilot` for **legacy pilot diagnostics**, and add an exact
@@ -143,12 +218,14 @@ Existing `score_question` and `aggregate` compute separate primary and merged-pa
 
 ## Output and provenance
 
-One `rcpia.runtime-evidence.v2` JSON artifact contains the manifest and per-case traces.
-Baseline accepts `rcpia.runtime-input.v1`; D decision contexts use `rcpia.runtime-input.v2`.
+One `rcpia.runtime-evidence.v3` JSON artifact contains the manifest and per-case traces.
+It records the input schema and context/setting contracts explicitly. Historical v1/v2
+runtime inputs remain supported as described above; frozen patient context uses input v3.
 Corpus identity remains
 `rcpia.loaded-corpus.v1`. Historical evidence v1 artifacts retain their original semantics
 (raw-text delivery, missing sections, 4,000-character delivery clipping and 8,000-character
-reranker clipping). They must not be relabelled as v2 or compared by assuming equal pack hashes.
+reranker clipping). Historical evidence v2 did not pass patient context into retrieval.
+Neither may be relabelled as v3 or compared by assuming equal pack hashes.
 Canonical hashes use sorted JSON keys, compact separators, UTF-8 and finite numbers only.
 `manifest_sha256` hashes the entire artifact **excluding that field**. No wall-clock
 timestamp or random run ID affects canonical identity. Distinct filenames preserve runs.
@@ -183,7 +260,7 @@ Recorded identity includes:
 * Original contextual versus actual Azure payload identities in candidate order. Both
   the real client and checked wrapper use `rcpia.evidence.payload.prepare_evidence`.
   `transformation` is `verbatim` or `markdown_cell_padding`; `clipped` is always false
-  in successful v2 output. A compacted string differs from its source bytes, but preserves
+  in successful v2/v3 output. A compacted string differs from its source bytes, but preserves
   every cell's content. Its actual payload hash matches the delivered text hash if selected.
 
 Production tracing is opt-in (`trace=EvidenceTrace()`); its return contract remains

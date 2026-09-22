@@ -45,6 +45,11 @@ CASE_REQUESTS = (
     ("GET", "/cases/{case_id}/documents/{document_id}/content", None),
     ("POST", "/cases/{case_id}/documents", None),
     ("GET", "/cases/{case_id}/ledger", None),
+    ("GET", "/cases/{case_id}/sources", None),
+    ("GET", "/cases/{case_id}/sources/{document_id}", None),
+    ("POST", "/cases/{case_id}/sources/review",
+     {"expected_ledger_version": 1, "source_fingerprint": "a" * 64,
+      "field_key": "age", "status": "absent", "note": "Sources relues, absence attestée."}),
     ("POST", "/cases/{case_id}/ledger/corrections",
      {"fact_type": "muscle_invasion", "value": "Non", "note": "Correction synthétique"}),
     ("GET", "/cases/{case_id}/analysis", None),
@@ -176,6 +181,8 @@ async def test_other_users_cannot_read_or_mutate_any_case_surface(
     before = await counts(session_factory)
     for method, path, body in CASE_REQUESTS:
         path = path.format(case_id=world.cases["owner"], document_id=world.document_id)
+        if method == "GET" and "/sources/" in path:
+            path += "?ledger_version=1&source_fingerprint=" + "a" * 64
         if method == "POST" and path.endswith("/documents"):
             response = await client.post(
                 path, files={"file": ("unauthorized.pdf", PDF_BYTES, "application/pdf")},
@@ -206,7 +213,7 @@ async def test_owner_and_org_admin_can_read_documents_and_all_pps_formats(
     base = f"/cases/{world.cases['owner']}"
     response = await client.get(f"{base}/documents/{world.document_id}/content")
     assert response.status_code == 200 and response.content == PDF_BYTES
-    for suffix in ("/ledger", "/activity", "/analysis", "/pps", "/pps/markdown",
+    for suffix in ("/ledger", "/sources", "/activity", "/analysis", "/pps", "/pps/markdown",
                    "/pps/docx", "/pps/docx/probatoire"):
         response = await client.get(base + suffix)
         assert response.status_code == 200, suffix

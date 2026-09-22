@@ -381,7 +381,7 @@ def test_usable_confirmed_baseline_matches_legacy_query_filter_and_concepts():
     assert result.provenance.request is None
 
 
-def test_missing_ctnm_retains_declared_legacy_pathology_fallback():
+def test_missing_ctnm_does_not_promote_pathology_into_current_clinical_extent():
     result = decision_search(
         cancer_type="bladder",
         agent_role="medical_oncology",
@@ -389,9 +389,9 @@ def test_missing_ctnm_retains_declared_legacy_pathology_fallback():
         request=None,
         operator_question=None,
     )
-    assert result.built.filter.disease_setting == "bladder_mibc_non_metastatic"
+    assert result.built.filter.disease_setting is None
     assert not result.provenance.staging_veto
-    assert "provisional" in result.provenance.setting_reason
+    assert "not substituted" in result.provenance.setting_reason
 
 
 def test_legacy_baseline_job_cannot_match_current_baseline_contract():

@@ -13,6 +13,7 @@ from rcpia.agents.routes import router as analysis_router
 from rcpia.auth.routes import router as auth_router
 from rcpia.cases.ledger_routes import router as ledger_router
 from rcpia.cases.routes import router as cases_router
+from rcpia.cases.source_routes import router as sources_router
 from rcpia.core.config import get_settings
 from rcpia.pps.routes import router as pps_router
 
@@ -62,6 +63,7 @@ async def no_store_for_private_routes(request: Request, call_next: Callable) -> 
 app.include_router(auth_router)
 app.include_router(cases_router)
 app.include_router(ledger_router)
+app.include_router(sources_router)
 app.include_router(analysis_router)
 app.include_router(pps_router)
 
