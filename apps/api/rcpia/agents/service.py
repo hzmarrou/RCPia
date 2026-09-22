@@ -227,6 +227,12 @@ async def run_agent(
         blocking = " ; ".join(issue.message for issue in built.report.blocking)
         return JobOutcome(status=JobStatus.waiting_for_user, error_message=blocking)
 
+    if agent_role == SYNTHESIS_ROLE and not built.bundle.inputs.agent_opinions:
+        return _terminal(
+            "Aucun avis spécialisé exploitable n'est disponible : synthèse non exécutée. "
+            "Corrigez la cause des échecs puis lancez une nouvelle analyse."
+        )
+
     if FEEDBACK_KEY in job.payload:
         try:
             retry_bundle = with_output_feedback(built.bundle, job.payload[FEEDBACK_KEY])
@@ -324,7 +330,7 @@ async def run_agent(
         provider=result.provider,
         model=result.model,
         runtime_version=result.runtime_version,
-        bundle=built.bundle.model_dump(by_alias=True),
+        bundle=built.bundle.model_dump(mode="json", by_alias=True),
         output=output.model_dump(),
         session_blob_key=pi_session_key(case.id, agent_role, run_id),
         session_archived=archived,
@@ -430,7 +436,8 @@ def _validated_output_with_receipt(
             str(exc),
             feedback=(
                 "Les citations doivent utiliser uniquement les identifiants fournis dans "
-                "source_snippets/guideline_passages, dans les champs structurés prévus. "
+                "source_snippets/patient_source_units/guideline_passages, "
+                "dans les champs structurés prévus. "
                 "Chaque recommandation doit être étayée ; n'inventez aucune source.",
             ),
         ) from exc
@@ -511,7 +518,7 @@ async def _record_failure(
         provider=result.provider if result else None,
         model=result.model if result else None,
         runtime_version=result.runtime_version if result else None,
-        bundle=built.bundle.model_dump(by_alias=True),
+        bundle=built.bundle.model_dump(mode="json", by_alias=True),
         error_message=message,
         # Only a run whose transcript reached storage has one to point at. A crashed run
         # that wrote nothing, or one whose archive failed, says so rather than recording

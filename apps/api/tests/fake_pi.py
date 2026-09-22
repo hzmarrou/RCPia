@@ -51,7 +51,7 @@ def read_bundle() -> dict:
 
 def answer_for(bundle: dict, mode: str) -> dict:
     inputs = bundle.get("inputs") or {}
-    snippets = inputs.get("source_snippets") or []
+    snippets = inputs.get("patient_source_units") or inputs.get("source_snippets") or []
     citation = snippets[0]["id"] if snippets else None
 
     answer = {

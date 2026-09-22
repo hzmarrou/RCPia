@@ -1,7 +1,7 @@
 """Private ephemeral PostgreSQL only; synthetic cases and the existing fake Pi runtime."""
 
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 import sqlalchemy as sa
@@ -21,6 +21,7 @@ from rcpia.core.models import (
     JobStatus,
 )
 from rcpia.jobs.models import JobType
+from tests import test_agent_runs as agent_run_fixtures
 from tests.test_agent_runs import (
     adapter as adapter,
 )
@@ -57,10 +58,26 @@ async def historical_case(factory, monkeypatch, origin):
             for fact in original_resolve(candidates, cancer_type=cancer_type)
         ]
 
+    async def legacy_record_version(session, *, case, change_reason):
+        entries = await ledger.build_entries(session, case=case)
+        previous = await ledger.latest_version(session, case_id=case.id)
+        version = CaseLedgerVersion(
+            case_id=case.id, organization_id=case.organization_id,
+            version=previous.version + 1 if previous else 1,
+            ledger={"entries": [asdict(entry) for entry in entries]},
+            missing_fields=ledger.missing_keys(entries),
+            uncertain_fields=ledger.uncertain_keys(entries), change_reason=change_reason,
+        )
+        session.add(version)
+        await session.flush()
+        return version
+
     with monkeypatch.context() as legacy:
         legacy.setattr(facts, "resolve", legacy_resolve)
         legacy.setattr(facts, "is_unknown_value", lambda value: False)
         legacy.setattr(ledger, "project_entry", lambda entry: entry)
+        legacy.setattr(ledger, "record_version", legacy_record_version)
+        legacy.setattr(agent_run_fixtures, "record_version", legacy_record_version)
         user, case = await seed_case(factory, text=SYNTHETIC)
         if origin is FactOrigin.human:
             async with factory() as session:
@@ -234,6 +251,8 @@ async def test_legacy_unknown_first_snapshot_retains_structured_known_conflict(
     async with session_factory() as session:
         previous = await ledger.latest_version(session, case_id=case.id)
         raw = deepcopy(previous.ledger)
+        raw.pop("patient_source_manifest", None)  # This test recreates a pre-manifest snapshot.
+        raw.pop("patient_context", None)
         field = next(e for e in raw["entries"] if e["key"] == "muscle_invasion")
         unknown = next(r for r in field["readings"] if r["value"] == "NR")
         field.update(unknown)

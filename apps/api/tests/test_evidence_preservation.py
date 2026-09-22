@@ -224,8 +224,13 @@ def snapshot_objects() -> tuple[Case, CaseLedgerVersion]:
         source_document_id="fixture-source",
     )
     return (
-        Case(id=uuid.UUID(int=1), cancer_type=CancerType.bladder),
-        CaseLedgerVersion(version=1, ledger={"entries": [asdict(entry) for entry in entries]}),
+        Case(
+            id=uuid.UUID(int=1), organization_id=uuid.UUID(int=2), cancer_type=CancerType.bladder,
+        ),
+        CaseLedgerVersion(
+            case_id=uuid.UUID(int=1), organization_id=uuid.UUID(int=2), version=1,
+            ledger={"entries": [asdict(entry) for entry in entries]},
+        ),
     )
 
 

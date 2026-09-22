@@ -36,6 +36,7 @@ from rcpia.cases.ledger import (
     display_label,
     latest_version,
 )
+from rcpia.cases.patient_sources import PatientSourceUnit
 from rcpia.core.models import AgentRun, AgentRunStatus, Case, CaseLedgerVersion
 from rcpia.nomograms import evaluate_all
 from rcpia.nomograms.record import Tristate
@@ -572,7 +573,7 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
     # sides must agree on what counts as the same id.
     snippets = {
         str(item.get("id")).casefold(): item
-        for key in ("source_snippets", "guideline_passages")
+        for key in ("source_snippets", "patient_source_units", "guideline_passages")
         for item in (inputs.get(key) or [])
         if isinstance(item, dict)
     }
@@ -597,7 +598,22 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
     for identifier in dict.fromkeys(cited):
         snippet = snippets.get(identifier.casefold())
         if snippet is None:  # pragma: no cover - validation refuses uncited ids
+            if identifier.casefold().startswith("patient-"):
+                raise PpsError("La citation patient est absente du bundle enregistré.")
             continue
+        unit = None
+        if str(snippet.get("id", "")).startswith("patient-"):
+            try:
+                unit = PatientSourceUnit.model_validate(snippet)
+            except ValueError as exc:
+                raise PpsError("La citation patient enregistrée est invalide.") from exc
+            if (
+                unit.case_id != run.case_id
+                or unit.organization_id != run.organization_id
+                or unit.ledger_version != inputs.get("ledger_version")
+                or unit.ledger_version != run.ledger_version
+            ):
+                raise PpsError("La citation patient appartient à un autre dossier ou ledger.")
         entries.append(
             EvidenceEntry(
                 id=str(snippet.get("id") or identifier),
@@ -606,9 +622,13 @@ def build_evidence(run: AgentRun, output: AgentOutput) -> list[EvidenceEntry]:
                 # A dossier excerpt carries a document id; a guideline passage carries the
                 # citation label its `source` field holds. Either way the register shows a
                 # reader where the quotation came from.
-                source_document_id=snippet.get("source_document_id") or snippet.get("source"),
+                source_document_id=(
+                    str(unit.documents[0].id) if unit else
+                    snippet.get("source_document_id") or snippet.get("source")
+                ),
                 page=snippet.get("page"),
                 page_end=snippet.get("page_end"),
+                patient_source_documents=unit.documents if unit else (),
             )
         )
     return entries

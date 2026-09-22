@@ -29,6 +29,14 @@ from pydantic import (
 
 from rcpia.agents.pps_fiche import ConciseFiche, InstitutionalFiche
 from rcpia.agents.pps_proposal import PpsProposal
+from rcpia.cases.patient_context import PatientContext, value_sha256
+from rcpia.cases.patient_sources import (
+    PatientSourceCoverage,
+    PatientSourceManifest,
+    PatientSourceUnit,
+    SourceDocumentReference,
+    manifest_sha256,
+)
 from rcpia.corpus.vocabulary import AGENT_ROLES
 from rcpia.evidence.payload import MAX_EVIDENCE_CHARACTERS
 from rcpia.query.decision import QueryProvenance
@@ -40,7 +48,9 @@ MAX_TEXT = 4000
 # The shape of an id RCPia hands out. Used to catch citations written into prose, where
 # no allowlist would otherwise look. Case-insensitive, because a model writing "SNIP-999"
 # has made exactly the same claim as one writing "snip-999".
-CITATION_IN_PROSE = re.compile(r"\b(?:snip|ev)-\d{1,6}\b", re.IGNORECASE)
+CITATION_IN_PROSE = re.compile(
+    r"\b(?:(?:snip|ev)-\d{1,6}|patient-[a-f0-9]{64})\b", re.IGNORECASE,
+)
 
 # The other id RCPia hands out, and the one the prose scan could not see: a corpus passage,
 # named after where it came from --
@@ -233,6 +243,9 @@ class BundleInputs(Strict):
     ledger_version: int
     case_ledger: list[LedgerField] = Field(default_factory=list)
     source_snippets: list[SourceSnippet] = Field(default_factory=list)
+    patient_source_units: list[PatientSourceUnit] = Field(default_factory=list)
+    patient_source_coverage: PatientSourceCoverage | None = None
+    patient_context: PatientContext | None = None
     guideline_passages: list[GuidelinePassage] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
     conflicting_fields: list[ConflictingField] = Field(default_factory=list)
@@ -256,6 +269,12 @@ class BundleInputs(Strict):
         data = handler(self)
         if self.retrieval_query is None:
             data.pop("retrieval_query", None)
+        if not self.patient_source_units:
+            data.pop("patient_source_units", None)
+        if self.patient_source_coverage is None:
+            data.pop("patient_source_coverage", None)
+        if self.patient_context is None:
+            data.pop("patient_context", None)
         return data
 
     @model_validator(mode="after")
@@ -268,20 +287,68 @@ class BundleInputs(Strict):
         """
         snippets = [item.id for item in self.source_snippets]
         passages = [item.id for item in self.guideline_passages]
+        units = [item.id for item in self.patient_source_units]
 
         for label, items in (
             ("source_snippets", snippets),
             ("guideline_passages", passages),
+            ("patient_source_units", units),
         ):
             if len(items) != len(set(items)):
                 raise ValueError(f"{label} contains duplicate ids")
 
-        shared = sorted(set(snippets) & set(passages))
+        shared = sorted(
+            (set(snippets) & set(passages))
+            | (set(units) & (set(snippets) | set(passages)))
+        )
         if shared:
             raise ValueError(
                 "the same id is used by a snippet and a guideline passage, making a "
                 f"citation ambiguous: {', '.join(shared)}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def patient_sources_are_pinned(self) -> "BundleInputs":
+        coverage = self.patient_source_coverage
+        if self.patient_source_units and (
+            coverage is None or coverage.status != "complete_parsed_sources"
+        ):
+            raise ValueError("Patient source units require complete pinned coverage")
+        if coverage is not None and coverage.status == "complete_parsed_sources":
+            documents: list[SourceDocumentReference] = []
+            organizations = set()
+            for unit in self.patient_source_units:
+                if str(unit.case_id) != self.case_id or unit.ledger_version != self.ledger_version:
+                    raise ValueError("Patient source case/version mismatch")
+                if unit.manifest_sha256 != coverage.manifest_sha256:
+                    raise ValueError("Patient source manifest mismatch")
+                documents.extend(unit.documents)
+                organizations.add(unit.organization_id)
+            if (
+                len(documents) != coverage.document_count
+                or len({doc.id for doc in documents}) != len(documents)
+                or sum(len(doc.chunks) for doc in documents) != coverage.chunk_count
+                or len(organizations) > 1
+            ):
+                raise ValueError("Patient source coverage mismatch")
+            if self.patient_source_units:
+                manifest = PatientSourceManifest(
+                    case_id=self.patient_source_units[0].case_id,
+                    organization_id=self.patient_source_units[0].organization_id,
+                    documents=tuple(sorted(documents, key=lambda doc: str(doc.id))),
+                )
+                if manifest_sha256(manifest) != coverage.manifest_sha256:
+                    raise ValueError("Patient source manifest integrity mismatch")
+        if coverage is not None and coverage.status == "complete_parsed_sources":
+            patient_ids = {item.id for item in self.source_snippets} | {
+                unit.id for unit in self.patient_source_units
+            }
+            references = [field.source_ids for field in self.case_ledger] + [
+                conflict.source_ids for conflict in self.conflicting_fields
+            ]
+            if any(not set(ids) <= patient_ids for ids in references):
+                raise ValueError("Ledger source reference does not resolve to patient data")
         return self
 
     @model_validator(mode="after")
@@ -314,6 +381,79 @@ class BundleInputs(Strict):
         self.first_pass = derived
         return self
 
+    @model_validator(mode="after")
+    def patient_context_is_traceable(self) -> "BundleInputs":
+        context = self.patient_context
+        if context is None:
+            return self
+        if (
+            str(context.case_id) != self.case_id or context.ledger_version != self.ledger_version
+            or context.case_scope != self.cancer_type
+        ):
+            raise ValueError("Patient-context case/version mismatch")
+        units = {unit.id: unit for unit in self.patient_source_units}
+        if context.source_coverage == "pinned_parsed_sources" and (
+            self.patient_source_coverage is None
+            or context.source_manifest_sha256 != self.patient_source_coverage.manifest_sha256
+            or any(unit.organization_id != context.organization_id for unit in units.values())
+        ):
+            raise ValueError("Patient-context source generation mismatch")
+        fields = {field.key: field for field in self.case_ledger}
+        if context.observation_scope is not None:
+            covered = {observation.field_key for observation in context.observations}
+            ledger_only = set(context.ledger_only_field_keys)
+            if not ledger_only <= fields.keys() or any(
+                field.value is not None and field.key not in covered | ledger_only
+                for field in self.case_ledger
+            ):
+                raise ValueError("Patient-context observation coverage is incomplete")
+        for observation in context.observations:
+            field = fields.get(observation.field_key)
+            if field is None or value_sha256(field.value) != observation.field_value_sha256:
+                raise ValueError("Patient-context field/value mismatch")
+            if (
+                field.status != observation.ledger_status
+                or (field.origin == "human") != (observation.authority == "human_current")
+                or observation.value_basis != (
+                    "human_entry" if field.origin == "human" else
+                    "inferred_field" if field.status == "inferred" else "extracted_field"
+                )
+            ):
+                raise ValueError("Patient-context field authority/status mismatch")
+            for reading in observation.readings:
+                if not set(reading.source_ids) <= units.keys():
+                    raise ValueError("Patient-context source reference is not supplied")
+                chunks = {
+                    str(chunk.id) for source_id in reading.source_ids
+                    for doc in units[source_id].documents for chunk in doc.chunks
+                }
+                if reading.source_ids and not set(reading.source_chunk_ids) <= chunks:
+                    raise ValueError("Patient-context chunk reference is not supplied")
+        for assertion in context.source_assertions:
+            unit = units.get(assertion.source_id)
+            assertion_chunks = [
+                chunk for doc in unit.documents if str(doc.id) == assertion.document_id
+                for chunk in doc.chunks if str(chunk.id) == assertion.chunk_id
+            ] if unit else []
+            if not assertion_chunks or not (
+                assertion_chunks[0].start <= assertion.start < assertion.end
+                <= assertion_chunks[0].end
+            ):
+                raise ValueError("Patient-context assertion has invalid source boundaries")
+            if unit is None or assertion.value not in unit.text[assertion.start:assertion.end]:
+                raise ValueError("Patient-context assertion is not a source quotation")
+        supplied_segments = {
+            (unit.id, str(doc.id), str(chunk.id))
+            for unit in units.values() for doc in unit.documents for chunk in doc.chunks
+        }
+        segments = [
+            (segment.source_id, segment.document_id, segment.chunk_id)
+            for segment in context.source_segments
+        ]
+        if set(segments) != supplied_segments or len(segments) != len(set(segments)):
+            raise ValueError("Patient-context source-segment coverage mismatch")
+        return self
+
 
 class OutputFormat(Strict):
     type: Literal["json"] = "json"
@@ -335,11 +475,18 @@ class TaskBundle(Strict):
     output_format: OutputFormat
     constraints: list[str] = Field(min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def expand_transport(cls, value: Any) -> Any:
+        from rcpia.agents.transport import decode_transport
+
+        return decode_transport(value)
+
     def citable_ids(self) -> set[str]:
         """Every id an agent is allowed to cite."""
         return {snippet.id for snippet in self.inputs.source_snippets} | {
             passage.id for passage in self.inputs.guideline_passages
-        }
+        } | {unit.id for unit in self.inputs.patient_source_units}
 
 
 # --------------------------------------------------------------------------------------

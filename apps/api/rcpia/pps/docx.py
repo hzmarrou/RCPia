@@ -719,7 +719,10 @@ def render_probatoire_docx(document: PpsDocument) -> Document:
             row = table.add_row().cells
             ref_run = row[0].paragraphs[0].add_run(entry.id)
             ref_run.font.name = "Consolas"
-            row[1].paragraphs[0].add_run(entry.quote)
+            quote = entry.quote
+            if entry.patient_source_location:
+                quote = entry.patient_source_location + "\n" + quote
+            row[1].paragraphs[0].add_run(quote)
             row[2].paragraphs[0].add_run(entry.supports or "")
 
     for appendix in document.appendices:

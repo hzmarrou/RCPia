@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+import { SourceFieldReview, SourceReviewProvider, SourceReviewSummary } from "@/app/_components/SourceReview";
 
 import {
   CATEGORY_LABELS,
@@ -31,7 +33,7 @@ function EntryRow({
   onCorrect: (entry: LedgerEntry) => void;
 }) {
   return (
-    <tr className={`highlight-${entry.highlight}`}>
+    <tr>
       <th scope="row">
         {entry.label}
         {entry.unit ? <span className="muted"> ({entry.unit})</span> : null}
@@ -55,7 +57,7 @@ function EntryRow({
           </>
         ) : (
           <>
-            {entry.value ?? <span className="missing-value">Information manquante</span>}
+            {entry.value ?? <span className="source-empty-value">Valeur structurée non renseignée</span>}
             {entry.corrected ? <span className="badge">corrigé</span> : null}
             {entry.note ? <p className="muted">{entry.note}</p> : null}
             {entry.source_excerpt ? (
@@ -66,6 +68,7 @@ function EntryRow({
             ) : null}
           </>
         )}
+        <SourceFieldReview entry={entry} />
       </td>
       <td>
         <button type="button" onClick={() => onCorrect(entry)}>
@@ -86,6 +89,7 @@ export default function LedgerTable({ initial }: { initial: Ledger }) {
   const [convening, setConvening] = useState(false);
   const [convened, setConvened] = useState(false);
   const [convenError, setConvenError] = useState<string | null>(null);
+  const valueInput = useRef<HTMLInputElement>(null);
 
   async function convene() {
     setConvenError(null);
@@ -103,10 +107,15 @@ export default function LedgerTable({ initial }: { initial: Ledger }) {
   }
 
   function startCorrection(entry: LedgerEntry) {
+    if (pending) return false;
+    if (editing && (value !== (editing.value ?? "") || note.trim()) &&
+      !window.confirm("Remplacer la correction en cours ? Les modifications non enregistrées seront perdues.")) return false;
     setEditing(entry);
     setValue(entry.value ?? "");
     setNote("");
     setError(null);
+    window.setTimeout(() => valueInput.current?.focus(), 0);
+    return true;
   }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -130,9 +139,14 @@ export default function LedgerTable({ initial }: { initial: Ledger }) {
   }
 
   return (
-    <>
+    <SourceReviewProvider
+      key={`${ledger.case_id}:${ledger.version}:${ledger.updated_at}`}
+      caseId={ledger.case_id}
+      ledgerVersion={ledger.version}
+      onCorrect={startCorrection}
+    >
       <section aria-labelledby="completeness">
-        <h2 id="completeness">Complétude</h2>
+        <h2 id="completeness">Contrôles pour l’analyse</h2>
         {ledger.issues.length === 0 ? (
           <p className="muted">Toutes les données requises sont présentes.</p>
         ) : (
@@ -183,12 +197,15 @@ export default function LedgerTable({ initial }: { initial: Ledger }) {
         ) : null}
       </section>
 
+      <SourceReviewSummary />
+
       {editing ? (
         <form onSubmit={submit} className="panel">
           <h2>Corriger : {editing.label}</h2>
           <label htmlFor="value">Valeur</label>
           <input
             id="value"
+            ref={valueInput}
             type="text"
             value={value}
             onChange={(event) => setValue(event.target.value)}
@@ -230,15 +247,15 @@ export default function LedgerTable({ initial }: { initial: Ledger }) {
       {groupByCategory(ledger.entries).map(([category, entries]) => (
         <section key={category}>
           <h2>{CATEGORY_LABELS[category] ?? category}</h2>
-          <table className="ledger">
+          <div className="source-ledger-wrap"><table className="ledger">
             <tbody>
               {entries.map((entry) => (
                 <EntryRow key={entry.key} entry={entry} onCorrect={startCorrection} />
               ))}
             </tbody>
-          </table>
+          </table></div>
         </section>
       ))}
-    </>
+    </SourceReviewProvider>
   );
 }

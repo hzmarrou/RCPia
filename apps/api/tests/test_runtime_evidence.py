@@ -316,7 +316,7 @@ async def test_labelled_and_unlabelled_run_semantics(runtime_engine: AsyncEngine
     assert case["trace"]["primary"]["question"] != label().question
     assert labelled["corpus"]["release_ids"] == ["fixture-v1"]
     assert labelled["defaults"]["merged_pack_budget"] == 14
-    assert labelled["schema_version"] == "rcpia.runtime-evidence.v2"
+    assert labelled["schema_version"] == "rcpia.runtime-evidence.v3"
     assert labelled["evidence_packs_sha256"] == unlabelled["evidence_packs_sha256"]
     assert "No extraction" in labelled["boundary"]
     assert '"embedding":' not in canonical_json(labelled["corpus"])

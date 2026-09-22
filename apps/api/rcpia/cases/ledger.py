@@ -13,7 +13,9 @@ Colour follows status, and the distinction the whole design turns on:
 """
 
 import uuid
+from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +27,15 @@ from rcpia.cases.fact_schema import (
     fields_for,
     is_reported_absent,
     is_unknown_value,
+)
+from rcpia.cases.patient_context import build_patient_context
+from rcpia.cases.patient_sources import (
+    MAX_PATIENT_SOURCE_CHARACTERS,
+    PatientSourceError,
+    PatientSourceManifest,
+    build_patient_source_units,
+    build_source_manifest,
+    parsed_source_documents,
 )
 from rcpia.core.models import (
     AuditEvent,
@@ -445,6 +456,7 @@ async def record_version(
     case: Case,
     change_reason: str,
     user: User | None = None,
+    inherit_sources: bool = False,
 ) -> CaseLedgerVersion:
     """Snapshot the ledger as a new version.
 
@@ -465,11 +477,86 @@ async def record_version(
         )
     )
 
+    snapshot: dict[str, Any] = {"entries": [asdict(entry) for entry in entries]}
+    previous = await latest_version(session, case_id=case.id)
+    machine_fact_count = int(await session.scalar(
+        sa.select(sa.func.count()).select_from(ExtractedFact).where(
+            ExtractedFact.case_id == case.id,
+            ExtractedFact.organization_id == case.organization_id,
+            ExtractedFact.origin == FactOrigin.machine,
+        )
+    ) or 0)
+    snapshot["machine_fact_count"] = machine_fact_count
+    current_machine_ids = {
+        fact_id for entry in entries if entry.origin != "human"
+        for fact_id in (entry.fact_id, *(reading.fact_id for reading in entry.readings))
+        if fact_id
+    }
+    previous_machine_ids = {
+        fact_id for entry in (previous.ledger.get("entries", []) if previous else [])
+        if entry.get("origin") != "human"
+        for fact_id in (
+            entry.get("fact_id"),
+            *(reading.get("fact_id") for reading in entry.get("readings", [])),
+        )
+        if fact_id
+    }
+    previous_count = previous.ledger.get("machine_fact_count") if previous else None
+    # Count append-only machine rows, including those hidden by human corrections.
+    # Looking only at current fields would miss a new parse when every field was corrected.
+    same_extraction = (
+        machine_fact_count == previous_count if previous_count is not None
+        else current_machine_ids <= previous_machine_ids
+    )
+    if previous is not None and (inherit_sources or user is not None or same_extraction):
+        # A correction changes a field, not the parse generation the clinician reviewed.
+        # A legacy version stays explicitly legacy; never retrofit it with today's text.
+        if "patient_source_manifest" in previous.ledger:
+            snapshot["patient_source_manifest"] = deepcopy(
+                previous.ledger["patient_source_manifest"]
+            )
+    else:
+        documents = await parsed_source_documents(session, case=case)
+        manifest = build_source_manifest(
+            documents, case_id=case.id, organization_id=case.organization_id,
+        )
+        snapshot["patient_source_manifest"] = manifest.model_dump(mode="json")
+    if "patient_source_manifest" in snapshot:
+        manifest = PatientSourceManifest.model_validate(snapshot["patient_source_manifest"])
+        pinned = {
+            (str(doc.id), str(chunk.id))
+            for doc in manifest.documents for chunk in doc.chunks
+        }
+        for entry in entries:
+            for reading in entry.readings:
+                for chunk_id in (reading.source_chunk_id, *reading.source_chunk_ids):
+                    if chunk_id and (reading.source_document_id, chunk_id) not in pinned:
+                        raise PatientSourceError(
+                            "Ledger reading does not belong to the pinned source generation"
+                        )
+
+    version_number = 1 if highest is None else int(highest) + 1
+    units = []
+    if "patient_source_manifest" in snapshot:
+        documents = await parsed_source_documents(session, case=case, manifest=manifest)
+        if build_source_manifest(
+            documents, case_id=case.id, organization_id=case.organization_id,
+        ) != manifest:
+            raise PatientSourceError("Pinned source changed while recording patient context")
+        # Oversized documents remain reviewable as a ledger. The existing bundle gate
+        # still refuses them; context must not clip them to create a deliverable source.
+        if all(doc.chunks[-1].end <= MAX_PATIENT_SOURCE_CHARACTERS for doc in manifest.documents):
+            units = build_patient_source_units(manifest, documents, ledger_version=version_number)
+    snapshot["patient_context"] = build_patient_context(
+        entries, units, case_id=case.id, organization_id=case.organization_id,
+        ledger_version=version_number, cancer_type=str(case.cancer_type),
+    ).model_dump(mode="json")
+
     version = CaseLedgerVersion(
         case_id=case.id,
         organization_id=case.organization_id,
-        version=1 if highest is None else int(highest) + 1,
-        ledger={"entries": [asdict(entry) for entry in entries]},
+        version=version_number,
+        ledger=snapshot,
         missing_fields=missing_keys(entries),
         uncertain_fields=uncertain_keys(entries),
         change_reason=change_reason,

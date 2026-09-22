@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from rcpia.agents.bundle import BundleTooLarge, build_bundle
 from rcpia.agents.output_processing import FEEDBACK_KEY, OutputFeedback
 from rcpia.agents.pi_adapter import PiAdapter
+from rcpia.agents.pps_fiche import CURRENT_SYNTHESIS_CONTRACT
 from rcpia.agents.routes import dedupe_key_for
 from rcpia.agents.service import run_agent
 from rcpia.auth import security, throttle
@@ -242,6 +243,29 @@ async def execute(
         return outcome
 
 
+async def test_empty_synthesis_stops_before_any_provider_call(
+    session_factory, adapter, blobs, monkeypatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    _, case = await seed_case(session_factory)
+    job_id = await agent_job(
+        session_factory, case, agent_role="rcp_synthesis",
+        pps_proposal_contract=CURRENT_SYNTHESIS_CONTRACT,
+    )
+    invoke = AsyncMock(side_effect=AssertionError("No model may be called without opinions"))
+    monkeypatch.setattr(adapter, "run", invoke)
+    outcome = await execute(session_factory, job_id, adapter, blobs, monkeypatch)
+    assert outcome is not None and outcome.status == JobStatus.failed
+    assert outcome.retryable is False
+    assert "Aucun avis spécialisé" in outcome.error_message
+    invoke.assert_not_awaited()
+    async with session_factory() as session:
+        assert await session.scalar(
+            sa.select(sa.func.count()).select_from(AgentRun).where(AgentRun.job_id == job_id)
+        ) == 0
+
+
 async def test_validation_feedback_survives_commit_and_reaches_the_next_attempt(
     session_factory, adapter, blobs, monkeypatch,
 ) -> None:
@@ -372,8 +396,8 @@ async def test_the_bundle_carries_the_ledger_and_the_text_behind_each_value(
     assert fields["muscle_invasion"].value == "Oui"
     assert fields["histology"].value == "Carcinome urothélial"
 
-    # Every value the agent can act on names a snippet it can cite.
-    snippets = {snippet.id: snippet for snippet in built.bundle.inputs.source_snippets}
+    # Every value the agent can act on names a complete patient unit it can cite.
+    snippets = {unit.id: unit for unit in built.bundle.inputs.patient_source_units}
     cited = fields["muscle_invasion"].source_ids
     assert cited and cited[0] in snippets
     assert "Infiltration du muscle" in snippets[cited[0]].text
@@ -458,11 +482,11 @@ async def test_a_clinicians_correction_arrives_as_a_clinicians_correction(
     assert fields["muscle_invasion"].origin == "machine"
 
 
-async def test_a_large_dossier_loses_its_least_important_sources_and_says_so(
+async def test_complete_patient_sources_are_not_subject_to_the_legacy_snippet_count_cap(
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A bundle has to fit in a context window. What it drops is chosen, and declared."""
+    """Complete documents are never dropped field by field under the legacy excerpt cap."""
     monkeypatch.setattr("rcpia.agents.bundle.MAX_SNIPPETS", 2)
     user, case = await seed_case(session_factory)
 
@@ -474,11 +498,13 @@ async def test_a_large_dossier_loses_its_least_important_sources_and_says_so(
             version=await _latest_version(session, case),
         )
 
-    assert len(built.bundle.inputs.source_snippets) == 2
+    assert not built.bundle.inputs.source_snippets
+    assert len(built.bundle.inputs.patient_source_units) == 1
     fields = {field.key: field for field in built.bundle.inputs.case_ledger}
     # Muscle invasion decides the whole strategy, so it keeps its source.
     assert fields["muscle_invasion"].source_ids
-    assert any("omis" in constraint for constraint in built.bundle.constraints)
+    assert not any("omis" in constraint for constraint in built.bundle.constraints)
+    assert built.bundle.inputs.patient_source_units[0].text == DOSSIER_TEXT
 
 
 async def test_a_dossier_too_large_to_send_is_refused_not_truncated(

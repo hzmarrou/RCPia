@@ -2,9 +2,16 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Final, Literal, Self
+from typing import Any, Final, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from rcpia.cases.fact_schema import (
     absence_answers,
@@ -13,6 +20,7 @@ from rcpia.cases.fact_schema import (
     is_unknown_value,
 )
 from rcpia.cases.ledger import LedgerEntry, effective_readings, project_entry
+from rcpia.cases.patient_context import PatientContext
 from rcpia.core.models import CancerType
 from rcpia.evidence.hashing import payload_sha256
 from rcpia.query.builder import BuiltQuery, Fact, build_filter
@@ -23,6 +31,7 @@ from rcpia.query.staging import SettingDecision, has_competing_stage_components,
 MAX_QUERY_CHARACTERS = 4000
 RETRIEVAL_CONTRACT: Final = "rcpia.retrieval-query.v2"
 FACT_PROJECTION_CONTRACT: Final = "rcpia.fact-projection.v1"
+SETTING_DERIVATION_CONTRACT: Final = "rcpia.setting-derivation.v2"
 
 
 class QueryModel(BaseModel):
@@ -117,6 +126,16 @@ class QueryProvenance(QueryModel):
     execution: Literal["not_run", "complete"] = "not_run"
     unusable_keys: list[str] = Field(default_factory=list)
     excluded_facts: list[FactUse] = Field(default_factory=list)
+    setting_derivation_contract: Literal["rcpia.setting-derivation.v2"] | None = None
+    patient_context_contract: Literal["rcpia.patient-context.v1"] | None = None
+
+    @model_serializer(mode="wrap")
+    def omit_unused_context(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        for key in ("setting_derivation_contract", "patient_context_contract"):
+            if getattr(self, key) is None:
+                data.pop(key, None)
+        return data
 
 
 def exclusion(entry: LedgerEntry) -> str | None:
@@ -129,9 +148,12 @@ def exclusion(entry: LedgerEntry) -> str | None:
         return "not_answered"
     if is_reported_absent(entry.value) and not absence_answers(entry.key):
         return "not_answered"
-    if entry.key in {"ctnm", "ptnm"}:
+    if entry.key in {"ctnm", "ptnm", "ct_dre"}:
         stage = parse_stage(entry.value)
-        if stage is None or stage.uncertain or has_competing_stage_components(entry.value):
+        if (
+            stage is None or stage.uncertain or stage.lower_bound
+            or has_competing_stage_components(entry.value)
+        ):
             return "ambiguous_stage"
     # build_entries replaces machine readings with the human correction. Historical
     # superseded readings must not overrule an explicitly corrected human value.
@@ -164,6 +186,7 @@ def decision_search(
     entries: Sequence[LedgerEntry],
     request: RetrievalQuery | None,
     operator_question: str | None,
+    patient_context: PatientContext | None = None,
 ) -> DecisionSearch:
     entries = [project_entry(entry) for entry in entries]
     if request is not None:
@@ -180,19 +203,15 @@ def decision_search(
         agent_role=agent_role,
     )
     staging_keys = (
-        {"ctnm", "ptnm", "muscle_invasion", "cis"}
+        {"ctnm", "muscle_invasion", "cis"}
         if cancer_type == "bladder"
         else {
             "ctnm",
-            "ptnm",
+            "ct_dre",
             "gleason",
             "isup",
             "psa_total",
-            "previous_rcp_decisions",
-            "illness_history",
-            "medical_history",
             "disease_phase",
-            "progression_site",
         }
     )
     veto = []
@@ -204,6 +223,13 @@ def decision_search(
             reason == "missing" and entry.value and entry.value.strip()
         ):
             veto.append(entry.key)
+    if patient_context is not None:
+        active_stage = "ctnm" if by_key.get("ctnm") and by_key["ctnm"].value else "ct_dre"
+        used_context_keys = {active_stage, "disease_phase", *built.decision.basis}
+        veto.extend(
+            key for key in patient_context.staging_blockers
+            if key in used_context_keys and key not in veto
+        )
     if veto:
         decision = SettingDecision(
             None,
@@ -326,6 +352,8 @@ def decision_search(
         ),
     )
     provenance = QueryProvenance(
+        setting_derivation_contract=SETTING_DERIVATION_CONTRACT,
+        patient_context_contract=patient_context.contract if patient_context is not None else None,
         fact_projection_contract=FACT_PROJECTION_CONTRACT,
         request=request,
         request_sha256=query_identity(request),

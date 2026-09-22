@@ -1,5 +1,10 @@
 # RCPia Web
 
+When every visible job is queued, the workstation explicitly says that processing
+has not started (or is awaiting a retry). This is a queue observation, not a claim
+that the worker is offline. A UI-only preview without workers cannot process uploads
+or produce a new PPS; a successful upload alone does not demonstrate a running pipeline.
+
 Next.js (App Router) frontend for RCPia v1. Node dependencies are managed with
 [pnpm](https://pnpm.io/).
 
@@ -43,7 +48,37 @@ launch controls, after the ledger. Polling does not scroll or navigate the page.
 The compact header keeps the overall status; a recorded current completion adds
 "Voir la fiche RCP" beside the inline follow-up, never from an empty queue alone.
 Progress remains indeterminate, showing only reported milestones and elapsed time.
-Questions is a disabled, forthcoming tab; no question-answering backend is connected.
+Discussion is an accessible, forthcoming tab with a read-only placeholder; it has no
+message form, submission or question-answering backend.
+
+### Source review
+
+Both clinical ledger routes share a source index controller and a full-document reader.
+The API classifies each field: red **Information absente du dossier**, blue
+**Information présente dans un compte rendu, à préciser**, amber **Interprétation à
+confirmer**, or neutral documented/unverified states. An empty field alone never
+becomes red. These review badges do not change `can_run_analysis`, issue severities,
+blocking counts or launch behavior.
+
+“Consulter les documents” does not assert that a field appears there. Linked fields
+offer “Voir le compte rendu complet”, with linked blocks highlighted, page/section
+locations, a document selector, literal-text search that never removes surrounding
+content, and the authenticated original-document link. Uploaded timestamps are labelled
+“Déposé le”, not examination dates. Source text is rendered as React text, never HTML.
+The modal uses native focus containment/Escape handling and restores its opener.
+
+The server's scope notice remains visible, including unpinned historical sources.
+Requests bypass caches. Case/ledger refreshes reset source state; request generations
+discard late responses and document/fingerprint mismatches. A 409 removes stale content
+and requires an explicit dossier reload rather than silently continuing with old text.
+
+An absence annotation requires the server's explicit `can_attest_absence: true` eligibility,
+an opened nonempty source, explicit attestation and a reason of at least three characters.
+An absent or false eligibility flag disables absence annotation. The client does not
+reinterpret values or retained literal readings such as “non renseigné”; the server
+decides whether a field is unusable or a source supplies a value. Retraction removes the annotation and restores
+the server's underlying classification. Neither action edits a fact, launches analysis or stores clinical state in
+browser storage. Corrections still use the existing form, with unsaved-draft protection.
 
 ### Checking warning calibration
 

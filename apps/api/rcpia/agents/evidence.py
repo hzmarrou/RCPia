@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rcpia.agents.schemas import GuidelinePassage
 from rcpia.cases.ledger import LedgerEntry
+from rcpia.cases.patient_context import PatientContext
 from rcpia.evidence.embedding import Embedder
 from rcpia.evidence.hashing import payload_sha256, text_identity
 from rcpia.evidence.payload import EvidencePreparationError, PreparedEvidence, prepare_evidence
@@ -139,6 +140,7 @@ async def guideline_passages_for(
     supportive_limit: int = SUPPORTIVE_PASSAGE_LIMIT,
     trace: EvidenceTrace | None = None,
     retrieval_query: RetrievalQuery | None = None,
+    patient_context: PatientContext | None = None,
 ) -> tuple[list[GuidelinePassage], list[str]]:
     """Retrieve the guidance this agent may see for this patient.
 
@@ -158,6 +160,7 @@ async def guideline_passages_for(
     planned = decision_search(
         cancer_type=cancer_type, agent_role=agent_role, entries=entries,
         request=retrieval_query, operator_question=question,
+        patient_context=patient_context,
     )
     query = planned.built
     # An operator's own question always wins. Otherwise the patient's derived setting *and* the
@@ -169,13 +172,13 @@ async def guideline_passages_for(
     notes: list[str] = list(planned.notes)
     if not query.decision.determined:
         notes.append(
-            "Le stade de la maladie n'a pas pu être déduit du dossier "
+            "Le contexte ne permet pas de retenir un filtre de stade "
             f"({query.decision.reason}) : la recherche documentaire n'a donc pas été "
             "restreinte au stade, et les passages fournis sont plus larges que nécessaire."
         )
     elif query.decision.missing:
         notes.append(
-            "Stade retenu pour la recherche documentaire : "
+            "Filtre documentaire dérivé, non validation d'un stade clinique : "
             f"{query.decision.setting}. Éléments manquants pour affiner : "
             f"{', '.join(query.decision.missing)}."
         )

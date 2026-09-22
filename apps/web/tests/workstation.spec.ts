@@ -3,9 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import Workstation, { AnalysisFeedback } from "../app/poste/[caseId]/Workstation";
+import LedgerTable from "../app/cases/[caseId]/ledger/LedgerTable";
 import type { JobActivity } from "../lib/activity";
 import type { CaseDetail } from "../lib/cases";
-import type { Ledger } from "../lib/ledger";
+import type { Ledger, LedgerEntry } from "../lib/ledger";
 import { caseSummary } from "./caseFixtures";
 import { elements } from "./elements";
 
@@ -39,6 +40,39 @@ function feedback(overrides: Partial<Parameters<typeof AnalysisFeedback>[0]> = {
 }
 
 describe("analysis as a continuation of ledger review", () => {
+  it("offers an accessible Discussion placeholder tab, not the previous disabled Questions tab", () => {
+    const html = workstation();
+    expect(html).not.toContain("Questions");
+    expect(html).toMatch(/<button[^>]*id="poste-tab-discussion"[^>]*>Discussion/);
+    expect(html).not.toMatch(/<button[^>]*id="poste-tab-discussion"[^>]*disabled/);
+    expect(html).toContain('aria-controls="poste-panel"');
+    expect(html).toContain('role="tabpanel"');
+  });
+
+  it.each([true, false])("keeps the original API launch gate %s on both clinical routes", (allowed) => {
+    const entry: LedgerEntry = {
+      key: "synthetic_field", label: "Champ synthétique", category: "imaging", value: null,
+      status: "missing", origin: "machine", highlight: "red", unit: null, note: null,
+      source_excerpt: null, source_document_id: null, source_chunk_id: null, fact_id: null,
+      corrected: false, readings: [],
+    };
+    const ledger: Ledger = {
+      ...LEDGER, entries: [entry], can_run_analysis: allowed,
+      issues: [{ key: entry.key, label: entry.label, severity: "blocking", highlight: "red", message: "Contrôle synthétique bloquant" }],
+    };
+    const workstationHtml = renderToStaticMarkup(createElement(Workstation, { clinicalCase: CASE, ledger, cases: [CASE] }));
+    const ordinaryHtml = renderToStaticMarkup(createElement(LedgerTable, { initial: ledger }));
+    for (const html of [workstationHtml, ordinaryHtml]) {
+      expect(html).toContain("Valeur structurée non renseignée");
+      expect(html).toContain("Relecture des sources : chargement");
+      expect(html).not.toMatch(/<tr class="(?:miss|highlight-red)"/);
+      const button = html.match(/<button[^>]*>Lancer l&#x27;analyse<\/button>/)?.[0];
+      expect(button).toBeDefined();
+      expect(button?.includes('disabled=""')).toBe(!allowed);
+    }
+    expect(workstationHtml).toContain("Bloquante");
+  });
+
   it("places the feedback region after the ledger and launch control", () => {
     const html = workstation();
     const ledger = html.indexOf("Données extraites du dossier");
@@ -65,10 +99,15 @@ describe("analysis as a continuation of ledger review", () => {
     expect(html).toContain('role="status">La fiche RCP provisoire est disponible.');
   });
 
-  it.each(["medical_oncology", "rcp_synthesis"])(
+  it.each([
+    ["medical_oncology", "Oncologie médicale"],
+    ["rcp_synthesis", "RCP Synthesis"],
+  ])(
     "renders reported specialist or synthesis progress in the feedback region: %s",
-    (role) => {
+    (role, label) => {
       const html = renderToStaticMarkup(feedback({ jobs: [{ ...JOB, agent_role: role }] }));
+      expect(html).toContain(label);
+      expect(html).not.toContain(role);
       expect(html).toContain('id="poste-analysis-feedback"');
       expect(html).toContain('role="progressbar"');
       expect(html).not.toContain("aria-valuenow");

@@ -25,6 +25,7 @@ from rcpia.core.models import (
     CancerType,
     Case,
     CaseLedgerVersion,
+    DocumentChunk,
     ExtractedFact,
     FactOrigin,
     FactStatus,
@@ -62,6 +63,26 @@ def entry(
         source_chunk_id=str(uuid.uuid4()), source_excerpt=f"Champ synthétique : {value}",
         corrected=origin == "human", note="Note de relecture" if origin == "human" else None,
     )
+
+
+def legacy_bundle_context(version: CaseLedgerVersion) -> tuple[AsyncMock, Case]:
+    """Supply actual same-case citation metadata while isolating field projection tests."""
+    version.case_id, version.organization_id = uuid.uuid4(), uuid.uuid4()
+    case = Case(
+        id=version.case_id, organization_id=version.organization_id, cancer_type=CancerType.bladder,
+    )
+    readings = [
+        reading for field in entries_from_version(version)
+        for reading in (field.readings or (field,)) if reading.source_document_id
+    ]
+    session = AsyncMock(spec=AsyncSession)
+    session.scalars.return_value = [uuid.UUID(r.source_document_id) for r in readings]
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = [
+        DocumentChunk(id=uuid.UUID(r.source_chunk_id), document_id=uuid.UUID(r.source_document_id))
+        for r in readings if r.source_chunk_id
+    ]
+    return session, case
 
 
 @pytest.mark.parametrize("value", UNKNOWN)
@@ -157,13 +178,10 @@ async def test_old_snapshot_bundle_retrieval_and_missing_view_share_projection(o
         request=None, operator_question=None,
     )
     assert "muscle_invasion" in planned.provenance.unusable_keys
-    session = AsyncMock(spec=AsyncSession)
-    # No database needed: source page metadata is independent of fact semantics.
-    session.execute.return_value = MagicMock()
-    session.execute.return_value.scalars.return_value.all.return_value = []
+    session, case = legacy_bundle_context(version)
     built = await build_bundle(
         session,
-        case=Case(id=uuid.uuid4(), cancer_type=CancerType.bladder),
+        case=case,
         agent_role="urology_oncology", version=version,
     )
     assert not built.report.can_run_analysis
@@ -412,11 +430,9 @@ async def test_legacy_mixed_readings_keep_effective_answers_and_structured_confl
         assert projected.source_chunk_id == old.readings[1].source_chunk_id
         assert projected.fact_id == old.readings[1].fact_id
     assert ledger.project_entry(projected) == projected
-    session = AsyncMock(spec=AsyncSession)
-    session.execute.return_value = MagicMock()
-    session.execute.return_value.scalars.return_value.all.return_value = []
+    session, case = legacy_bundle_context(version)
     built = await build_bundle(
-        session, case=Case(id=uuid.uuid4(), cancer_type=CancerType.bladder),
+        session, case=case,
         agent_role="urology_oncology", version=version,
     )
     assert [c.values for c in built.bundle.inputs.conflicting_fields] == (
@@ -455,11 +471,9 @@ async def test_human_override_does_not_resurrect_superseded_readings(value, corr
     assert projected.status == ("confirmed" if value == "Non" else "missing")
     assert all(reading in projected.readings for reading in old.readings)
     assert ledger.project_entry(projected) == projected
-    session = AsyncMock(spec=AsyncSession)
-    session.execute.return_value = MagicMock()
-    session.execute.return_value.scalars.return_value.all.return_value = []
+    session, case = legacy_bundle_context(version)
     built = await build_bundle(
-        session, case=Case(id=uuid.uuid4(), cancer_type=CancerType.bladder),
+        session, case=case,
         agent_role="urology_oncology", version=version,
     )
     assert not built.bundle.inputs.conflicting_fields

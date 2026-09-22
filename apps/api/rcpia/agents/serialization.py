@@ -3,12 +3,13 @@
 import json
 
 from rcpia.agents.schemas import TaskBundle
+from rcpia.agents.transport import encode_synthesis
 
 
 def bundle_bytes(bundle: TaskBundle) -> bytes:
-    """Omit JSON formatting whitespace, never whitespace inside clinical strings."""
+    """Measure/send the same lossless transport; never change canonical model identities."""
     return json.dumps(
-        bundle.model_dump(mode="json", by_alias=True),
+        encode_synthesis(bundle.model_dump(mode="json", by_alias=True)),
         ensure_ascii=False,
         separators=(",", ":"),
         allow_nan=False,

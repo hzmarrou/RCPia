@@ -30,6 +30,7 @@ from urllib.parse import quote, urlencode
 
 import anyio.to_thread
 
+from rcpia.core.paths import filesystem_path
 from rcpia.storage.base import (
     BlobAlreadyExists,
     BlobInfo,
@@ -49,7 +50,7 @@ class LocalBlobStore:
     """Blob directories under `root`."""
 
     def __init__(self, root: str | Path, *, signing_secret: str) -> None:
-        self.root = Path(root).resolve()
+        self.root = filesystem_path(Path(root)).resolve()
         # Both directories are created now and their canonical paths cached. Resolving a
         # path that does not exist yet can yield a different form from resolving the same
         # path once it does — on Windows, a short 8.3 name versus its long name — which

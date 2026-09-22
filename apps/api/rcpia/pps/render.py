@@ -502,8 +502,11 @@ def _evidence_register(document: PpsDocument) -> list[str]:
 
     out += ["| Réf. | Extrait du dossier | Justifie |", "|---|---|---|"]
     for entry in document.evidence:
+        quote = entry.quote
+        if entry.patient_source_location:
+            quote = entry.patient_source_location + "\n" + quote
         out.append(
-            f"| `{_escape(entry.id)}` | {_escape(entry.quote)} | {_escape(entry.supports)} |"
+            f"| `{_escape(entry.id)}` | {_escape(quote)} | {_escape(entry.supports)} |"
         )
     return [*out, ""]
 

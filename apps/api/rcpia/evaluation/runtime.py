@@ -62,9 +62,13 @@ from rcpia.evidence.rerank import (
     build_reranker,
 )
 from rcpia.evidence.retrieval import CANDIDATE_LIMIT, RELEVANCE_FLOOR, RRF_K
-from rcpia.query.decision import FACT_PROJECTION_CONTRACT, RETRIEVAL_CONTRACT
+from rcpia.query.decision import (
+    FACT_PROJECTION_CONTRACT,
+    RETRIEVAL_CONTRACT,
+    SETTING_DERIVATION_CONTRACT,
+)
 
-SCHEMA_VERSION = "rcpia.runtime-evidence.v2"
+SCHEMA_VERSION = "rcpia.runtime-evidence.v3"
 BOUNDARY = (
     "Evidence selection and delivery only, through guideline_passages_for. "
     "No extraction, full TaskBundle size gate, Pi execution, generation, synthesis, "
@@ -97,6 +101,9 @@ QueryMode = Literal["baseline", "decision_targeted_v1"]
 def preflight_queries(inputs: RuntimeInput, query_mode: QueryMode) -> None:
     if query_mode not in {"baseline", "decision_targeted_v1"}:
         raise ValueError("Unknown retrieval query mode.")
+    inputs.validate_snapshot_consistency()
+    for snapshot in inputs.snapshots:
+        snapshot.validate_patient_context_binding()
     if query_mode == "decision_targeted_v1" and any(
         s.retrieval_query is None for s in inputs.snapshots
     ):
@@ -182,6 +189,7 @@ async def evaluate_snapshot(
     permit: ScoringPermit | None = None,
 ) -> dict[str, Any]:
     """The shared runner/test seam calls the exact function used by build_bundle."""
+    snapshot.validate_patient_context_binding()
     if query_mode not in {"baseline", "decision_targeted_v1"}:
         raise ValueError("Unknown retrieval query mode.")
     if query_mode == "decision_targeted_v1" and snapshot.retrieval_query is None:
@@ -202,6 +210,7 @@ async def evaluate_snapshot(
         reranker=reranking,
         trace=traced,
         retrieval_query=snapshot.retrieval_query if query_mode == "decision_targeted_v1" else None,
+        patient_context=snapshot.patient_context,
     )
     if not traced.complete or traced.primary is None or traced.supportive is None:
         raise ValueError("Missing/incomplete production evidence trace.")
@@ -243,6 +252,14 @@ async def evaluate_snapshot(
         "ledger_version": snapshot.ledger_version,
         "ledger_sha256": snapshot.ledger_sha256,
         "snapshot_sha256": snapshot.snapshot_sha256,
+        "patient_context_state": "provided" if snapshot.patient_context is not None else "absent",
+        "patient_context_contract": (
+            snapshot.patient_context.contract if snapshot.patient_context is not None else None
+        ),
+        "patient_context_sha256": snapshot.patient_context_sha256,
+        "patient_context_ledger_sha256": (
+            snapshot.patient_context.ledger_sha256 if snapshot.patient_context is not None else None
+        ),
         "cancer_type": snapshot.cancer_type,
         "agent_role": snapshot.agent_role,
         "operator_question": snapshot.operator_question,
@@ -258,6 +275,7 @@ async def evaluate_snapshot(
         "query_mode": query_mode,
         "retrieval_contract": RETRIEVAL_CONTRACT,
         "fact_projection_contract": FACT_PROJECTION_CONTRACT,
+        "setting_derivation_contract": SETTING_DERIVATION_CONTRACT,
         "scoring": (
             "approved_labels" if permit else "legacy_pilot_diagnostic"
         ) if label is not None else "unscored",
@@ -372,6 +390,8 @@ async def evaluate_run(
         "query_mode": query_mode,
         "retrieval_contract": RETRIEVAL_CONTRACT,
         "fact_projection_contract": FACT_PROJECTION_CONTRACT,
+        "setting_derivation_contract": SETTING_DERIVATION_CONTRACT,
+        "runtime_input_schema": inputs.schema_version,
         "scoring": (
             "approved_labels" if permit else "legacy_pilot_diagnostic"
         ) if labels else "unscored",
@@ -406,6 +426,10 @@ async def evaluate_run(
             "entry_point": "rcpia.agents.evidence.guideline_passages_for",
             "role_prompts": "source-file identities only; not loaded or executed",
             "pi": "not executed; no generation runtime/version claim",
+            "patient_context": (
+                "passed as supplied; case/version/ledger binding validated; absent context is "
+                "not reconstructed; source-unit authenticity and clinical approval not attested"
+            ),
         },
         "score_semantics": {
             "primary_budget": evidence.PASSAGE_LIMIT,
